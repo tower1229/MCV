@@ -1,0 +1,7 @@
+{
+  "name": "ai-engineering-template",
+  "private": true,
+  "scripts": {
+    "sync:skills": "bash scripts/sync-ide-skills.sh"
+  }
+}
