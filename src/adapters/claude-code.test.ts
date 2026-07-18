@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ClaudeCodeAdapter } from './claude-code';
+import { parse as parseYaml } from 'yaml';
 
 describe('ClaudeCodeAdapter', () => {
   let homeDir: string;
@@ -103,5 +104,76 @@ describe('ClaudeCodeAdapter', () => {
         pathExt: '.CMD',
       }),
     ).resolves.toMatchObject({ detected: false });
+  });
+
+  it('separates managed MCP data from native Claude Code settings during capture', async () => {
+    const claudeDir = path.join(homeDir, '.claude');
+    fs.mkdirSync(claudeDir);
+    fs.writeFileSync(
+      path.join(claudeDir, 'settings.json'),
+      JSON.stringify({
+        theme: 'dark',
+        mcpServers: {
+          local: {
+            command: path.join(homeDir, '工具', 'server.exe'),
+            env: { accessToken: 'real-token' },
+          },
+        },
+      }),
+    );
+
+    const adapter = new ClaudeCodeAdapter();
+    const context = { homeDir, platform: 'win32' as const };
+    const result = await adapter.capture(
+      await adapter.discoverFiles(context),
+      context,
+    );
+
+    const nativeSettings = result.files.find(
+      (file) => file.repositoryPath === 'ide/claude-code/native/settings.json',
+    );
+    const mcpRegistry = result.files.find(
+      (file) => file.repositoryPath === 'common/mcp.yaml',
+    );
+
+    expect(JSON.parse(nativeSettings?.content ?? '')).toEqual({ theme: 'dark' });
+    expect(parseYaml(mcpRegistry?.content ?? '')).toEqual({
+      servers: {
+        local: {
+          command: '${HOME}\\工具\\server.exe',
+          env: { accessToken: '${env:ACCESS_TOKEN}' },
+        },
+      },
+    });
+    expect(result.summary).toEqual({
+      fileCount: 2,
+      sensitiveFieldCount: 1,
+      parameterizedPathCount: 1,
+      excludedFileCount: 0,
+    });
+  });
+
+  it('preserves undeclared Claude state as native while excluding declared local fields', async () => {
+    fs.writeFileSync(
+      path.join(homeDir, '.claude.json'),
+      JSON.stringify({
+        customPreference: { compactMode: true },
+        projects: { [homeDir]: { hasTrustDialogAccepted: true } },
+      }),
+    );
+
+    const adapter = new ClaudeCodeAdapter();
+    const context = { homeDir };
+    const result = await adapter.capture(
+      await adapter.discoverFiles(context),
+      context,
+    );
+    const nativeState = result.files.find(
+      (file) => file.repositoryPath === 'ide/claude-code/native/.claude.json',
+    );
+
+    expect(JSON.parse(nativeState?.content ?? '')).toEqual({
+      customPreference: { compactMode: true },
+    });
   });
 });

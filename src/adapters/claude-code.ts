@@ -1,7 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ClaudeCodeNativeFileHandler } from './claude-code-native-file-handler';
+import { ClaudeCodeCanonicalTransformer } from './claude-code-canonical-transformer';
 import type {
+  CanonicalTransformer,
+  CaptureResult,
   DetectedConfigFile,
   DetectedIde,
   DeviceContext,
@@ -12,6 +15,7 @@ import type {
 export class ClaudeCodeAdapter implements IdeAdapter {
   constructor(
     private readonly nativeFileHandler: NativeFileHandler = new ClaudeCodeNativeFileHandler(),
+    private readonly canonicalTransformer: CanonicalTransformer = new ClaudeCodeCanonicalTransformer(),
   ) {}
 
   async detect(context: DeviceContext): Promise<DetectedIde> {
@@ -31,6 +35,14 @@ export class ClaudeCodeAdapter implements IdeAdapter {
 
   async discoverFiles(context: DeviceContext): Promise<DetectedConfigFile[]> {
     return this.nativeFileHandler.discoverFiles(context);
+  }
+
+  async capture(
+    files: DetectedConfigFile[],
+    context: DeviceContext,
+  ): Promise<CaptureResult> {
+    const nativeCapture = await this.nativeFileHandler.capture(files, context);
+    return this.canonicalTransformer.transform(nativeCapture, context);
   }
 
   private hasExecutable(context: DeviceContext): boolean {

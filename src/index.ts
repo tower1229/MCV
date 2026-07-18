@@ -4,10 +4,15 @@ import { Command } from 'commander';
 import * as os from 'os';
 import type { DeviceContext } from './adapters/types';
 import { discoverConfigurations } from './commands/discover';
+import {
+  captureConfigurations,
+  type CaptureDependencies,
+} from './commands/capture';
 import { initRepository } from './commands/init';
 
 export function createProgram(
   context: DeviceContext = { homeDir: os.homedir() },
+  captureDependencies: CaptureDependencies = {},
 ): Command {
   const program = new Command();
 
@@ -21,6 +26,13 @@ export function createProgram(
     .description('Initialize a new MCV repository in the current directory')
     .action(() => {
       initRepository();
+    });
+
+  program
+    .command('capture')
+    .description('Capture local AI IDE configuration into the MCV repository')
+    .action(async () => {
+      await captureConfigurations(context, captureDependencies);
     });
 
   program

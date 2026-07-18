@@ -37,10 +37,13 @@ exports.ClaudeCodeAdapter = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const claude_code_native_file_handler_1 = require("./claude-code-native-file-handler");
+const claude_code_canonical_transformer_1 = require("./claude-code-canonical-transformer");
 class ClaudeCodeAdapter {
     nativeFileHandler;
-    constructor(nativeFileHandler = new claude_code_native_file_handler_1.ClaudeCodeNativeFileHandler()) {
+    canonicalTransformer;
+    constructor(nativeFileHandler = new claude_code_native_file_handler_1.ClaudeCodeNativeFileHandler(), canonicalTransformer = new claude_code_canonical_transformer_1.ClaudeCodeCanonicalTransformer()) {
         this.nativeFileHandler = nativeFileHandler;
+        this.canonicalTransformer = canonicalTransformer;
     }
     async detect(context) {
         const configDirectories = this.nativeFileHandler.discoverDirectories(context);
@@ -56,6 +59,10 @@ class ClaudeCodeAdapter {
     }
     async discoverFiles(context) {
         return this.nativeFileHandler.discoverFiles(context);
+    }
+    async capture(files, context) {
+        const nativeCapture = await this.nativeFileHandler.capture(files, context);
+        return this.canonicalTransformer.transform(nativeCapture, context);
     }
     hasExecutable(context) {
         const platform = context.platform ?? process.platform;

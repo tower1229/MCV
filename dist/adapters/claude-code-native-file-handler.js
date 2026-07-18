@@ -36,6 +36,20 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ClaudeCodeNativeFileHandler = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const objects_1 = require("../utils/objects");
+const sanitize_1 = require("../utils/sanitize");
+const JSON_CAPTURE_POLICIES = {
+    'user-settings': {
+        repositoryPath: 'ide/claude-code/native/settings.json',
+        managedPaths: new Set(['$.mcpServers']),
+        localPaths: new Set(),
+    },
+    'user-state': {
+        repositoryPath: 'ide/claude-code/native/.claude.json',
+        managedPaths: new Set(['$.mcpServers']),
+        localPaths: new Set(['$.projects']),
+    },
+};
 class ClaudeCodeNativeFileHandler {
     discoverDirectories(context) {
         const configRoot = path.join(context.homeDir, '.claude');
@@ -66,6 +80,95 @@ class ClaudeCodeNativeFileHandler {
             ...candidate,
             exists: fs.existsSync(candidate.path),
         }));
+    }
+    async capture(files, context) {
+        const capturedFiles = [];
+        const managedFiles = [];
+        const managedFields = [];
+        const warnings = [];
+        let sensitiveFieldCount = 0;
+        let parameterizedPathCount = 0;
+        let excludedFileCount = 0;
+        for (const file of files.filter((candidate) => candidate.exists)) {
+            if ((0, sanitize_1.isSensitiveFile)(file.path)) {
+                excludedFileCount += 1;
+                continue;
+            }
+            if (file.id === 'user-instructions') {
+                const sanitized = (0, sanitize_1.sanitizeConfig)(fs.readFileSync(file.path, 'utf8'), context);
+                sensitiveFieldCount += sanitized.sensitiveFieldCount;
+                parameterizedPathCount += sanitized.parameterizedPathCount;
+                managedFiles.push({
+                    id: file.id,
+                    sourcePath: file.path,
+                    content: sanitized.value,
+                });
+                continue;
+            }
+            const policy = JSON_CAPTURE_POLICIES[file.id];
+            if (!policy)
+                continue;
+            const parsed = this.readJsonObject(file.path, warnings);
+            if (!parsed)
+                continue;
+            const nativeFields = {};
+            for (const [key, value] of Object.entries(parsed)) {
+                const objectPath = `$.${key}`;
+                if (policy.localPaths.has(objectPath))
+                    continue;
+                if (policy.managedPaths.has(objectPath)) {
+                    const sanitized = (0, sanitize_1.sanitizeConfig)({ [key]: value }, context);
+                    sensitiveFieldCount += sanitized.sensitiveFieldCount;
+                    parameterizedPathCount += sanitized.parameterizedPathCount;
+                    managedFields.push({
+                        sourcePath: file.path,
+                        path: objectPath,
+                        value: sanitized.value[key],
+                    });
+                }
+                else {
+                    nativeFields[key] = value;
+                }
+            }
+            if (Object.keys(nativeFields).length > 0) {
+                const sanitized = (0, sanitize_1.sanitizeConfig)(nativeFields, context);
+                sensitiveFieldCount += sanitized.sensitiveFieldCount;
+                parameterizedPathCount += sanitized.parameterizedPathCount;
+                capturedFiles.push({
+                    sourcePath: file.path,
+                    repositoryPath: policy.repositoryPath,
+                    content: `${JSON.stringify(sanitized.value, null, 2)}\n`,
+                    ownership: 'native',
+                });
+            }
+        }
+        return {
+            files: capturedFiles,
+            managedFiles,
+            managedFields,
+            summary: {
+                fileCount: capturedFiles.length,
+                sensitiveFieldCount,
+                parameterizedPathCount,
+                excludedFileCount,
+            },
+            warnings,
+        };
+    }
+    readJsonObject(filePath, warnings) {
+        try {
+            const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            if (!(0, objects_1.isRecord)(parsed)) {
+                warnings.push(`Skipped ${filePath}: expected a JSON object.`);
+                return undefined;
+            }
+            return parsed;
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            warnings.push(`Skipped ${filePath}: ${message}`);
+            return undefined;
+        }
     }
 }
 exports.ClaudeCodeNativeFileHandler = ClaudeCodeNativeFileHandler;
