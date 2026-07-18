@@ -1,0 +1,38 @@
+{
+  "name": "mcv",
+  "version": "1.0.0",
+  "description": "可复用的 **AI 工程基础设施** 项目模板：内置 IDE Agent skills、跨 IDE 同步脚本、Claude / AGENTS 双入口提示词，以及 issue → PRD → 实现 → review 工作流。",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tower1229/AI-Engineering-Template.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/tower1229/AI-Engineering-Template/issues"
+  },
+  "homepage": "https://github.com/tower1229/AI-Engineering-Template#readme",
+  "dependencies": {
+    "commander": "^15.0.0",
+    "uuid": "^14.0.1",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
