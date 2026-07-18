@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 "use strict";
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -34,31 +33,39 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createProgram = createProgram;
-const commander_1 = require("commander");
-const os = __importStar(require("os"));
-const discover_1 = require("./commands/discover");
-const init_1 = require("./commands/init");
-function createProgram(context = { homeDir: os.homedir() }) {
-    const program = new commander_1.Command();
-    program
-        .name('mcv')
-        .description('Mobile Configuration Vehicle - Personal AI IDE configuration manager')
-        .version('0.1.0');
-    program
-        .command('init')
-        .description('Initialize a new MCV repository in the current directory')
-        .action(() => {
-        (0, init_1.initRepository)();
-    });
-    program
-        .command('discover')
-        .description('Detect supported AI IDEs and report their configuration paths')
-        .action(async () => {
-        await (0, discover_1.discoverConfigurations)(context);
-    });
-    return program;
+exports.ClaudeCodeNativeFileHandler = void 0;
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
+class ClaudeCodeNativeFileHandler {
+    discoverDirectories(context) {
+        const configRoot = path.join(context.homeDir, '.claude');
+        return [
+            {
+                id: 'config-root',
+                path: configRoot,
+                exists: fs.existsSync(configRoot),
+            },
+        ];
+    }
+    async discoverFiles(context) {
+        const candidates = [
+            {
+                id: 'user-settings',
+                path: path.join(context.homeDir, '.claude', 'settings.json'),
+            },
+            {
+                id: 'user-instructions',
+                path: path.join(context.homeDir, '.claude', 'CLAUDE.md'),
+            },
+            {
+                id: 'user-state',
+                path: path.join(context.homeDir, '.claude.json'),
+            },
+        ];
+        return candidates.map((candidate) => ({
+            ...candidate,
+            exists: fs.existsSync(candidate.path),
+        }));
+    }
 }
-if (require.main === module) {
-    createProgram().parse();
-}
+exports.ClaudeCodeNativeFileHandler = ClaudeCodeNativeFileHandler;

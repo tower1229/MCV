@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+import * as os from 'os';
+import type { DeviceContext } from './adapters/types';
+import { discoverConfigurations } from './commands/discover';
 import { initRepository } from './commands/init';
 
-export function createProgram(): Command {
+export function createProgram(
+  context: DeviceContext = { homeDir: os.homedir() },
+): Command {
   const program = new Command();
 
   program
@@ -16,6 +21,13 @@ export function createProgram(): Command {
     .description('Initialize a new MCV repository in the current directory')
     .action(() => {
       initRepository();
+    });
+
+  program
+    .command('discover')
+    .description('Detect supported AI IDEs and report their configuration paths')
+    .action(async () => {
+      await discoverConfigurations(context);
     });
 
   return program;
