@@ -40,29 +40,49 @@ const uuid_1 = require("uuid");
 const yaml = __importStar(require("yaml"));
 const state_1 = require("../utils/state");
 function initRepository(targetDir = process.cwd()) {
-    const manifestPath = path.join(targetDir, 'mcv.yaml');
+    const repositoryPath = path.resolve(targetDir);
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
     if (fs.existsSync(manifestPath)) {
         console.log('An mcv.yaml manifest already exists in this directory.');
         console.log('You might want to run `mcv bind` instead to bind this existing repository to your device.');
         return;
     }
-    const repoId = (0, uuid_1.v4)();
+    const repositoryId = (0, uuid_1.v4)();
+    const initializedAt = new Date().toISOString();
     const manifest = {
         schemaVersion: 1,
-        repository: {
-            id: repoId,
-            initializedAt: new Date().toISOString()
-        }
+        repositoryId,
+        initializedAt,
+        targets: {
+            codex: { enabled: true },
+            claudeCode: { enabled: true },
+            gemini: { enabled: true },
+        },
+        variables: {},
+        security: {
+            scanSecrets: true,
+            allowPlaintextSecrets: false,
+        },
+        capture: {
+            preserveUnknownNativeFields: true,
+            includeRuntimeState: false,
+        },
+        deploy: {
+            backupBeforeWrite: true,
+            useSymlinks: false,
+        },
     };
     const yamlStr = yaml.stringify(manifest);
     fs.writeFileSync(manifestPath, yamlStr, 'utf-8');
-    console.log(`Initialized empty MCV repository in ${targetDir}`);
-    console.log(`Repository ID: ${repoId}`);
-    // Bind the repository to local state
+    console.log(`Initialized empty MCV repository in ${repositoryPath}`);
+    console.log(`Repository ID: ${repositoryId}`);
     const state = (0, state_1.readState)();
-    state.defaultRepository = {
-        id: repoId,
-        path: targetDir
+    state.deviceId ??= (0, uuid_1.v4)();
+    state.defaultRepositoryId = repositoryId;
+    state.repositoryPath = repositoryPath;
+    state.baselineSnapshot = {
+        recordedAt: initializedAt,
+        files: {},
     };
     (0, state_1.writeState)(state);
     console.log('Successfully bound current device to this MCV repository.');

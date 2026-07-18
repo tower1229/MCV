@@ -1,64 +1,85 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { initRepository } from './init';
-import * as stateUtils from '../utils/state';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parse as parseYaml } from 'yaml';
+import { createProgram } from '../index';
 
-// Mock fs and state modules
-vi.mock('fs');
-vi.mock('../utils/state');
-
-describe('initRepository', () => {
-  const targetDir = '/mock/dir';
+describe('mcv init', () => {
+  const originalCwd = process.cwd();
+  const originalEnv = { ...process.env };
+  let testRoot: string;
+  let repositoryPath: string;
+  let stateRoot: string;
 
   beforeEach(() => {
-    vi.resetAllMocks();
+    testRoot = fs.mkdtempSync(path.join(originalCwd, '.mcv-init-test-'));
+    repositoryPath = path.join(testRoot, 'repository');
+    stateRoot = path.join(testRoot, 'device');
+    fs.mkdirSync(repositoryPath);
+
+    process.chdir(repositoryPath);
+    process.env.APPDATA = stateRoot;
+    process.env.HOME = stateRoot;
+    process.env.USERPROFILE = stateRoot;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
-  it('should not initialize if mcv.yaml already exists', () => {
-    // Mock fs.existsSync to return true
-    vi.spyOn(fs, 'existsSync').mockReturnValue(true);
-    
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-
-    initRepository(targetDir);
-
-    expect(fs.existsSync).toHaveBeenCalledWith(path.join(targetDir, 'mcv.yaml'));
-    expect(fs.writeFileSync).not.toHaveBeenCalled();
-    expect(consoleSpy).toHaveBeenCalledWith('An mcv.yaml manifest already exists in this directory.');
-    
-    consoleSpy.mockRestore();
+  afterEach(() => {
+    process.chdir(originalCwd);
+    process.env = { ...originalEnv };
+    vi.restoreAllMocks();
+    fs.rmSync(testRoot, { recursive: true, force: true });
   });
 
-  it('should initialize repository, create mcv.yaml and update state', () => {
-    vi.spyOn(fs, 'existsSync').mockReturnValue(false);
-    
-    const mockState = {};
-    vi.spyOn(stateUtils, 'readState').mockReturnValue(mockState);
-    const writeStateSpy = vi.spyOn(stateUtils, 'writeState').mockImplementation(() => {});
-    
-    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  it('marks the current directory as an MCV repository and binds this device', async () => {
+    await createProgram().parseAsync(['node', 'mcv', 'init']);
 
-    initRepository(targetDir);
+    const manifest = parseYaml(
+      fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8'),
+    );
+    expect(manifest).toMatchObject({
+      schemaVersion: 1,
+      repositoryId: expect.any(String),
+      initializedAt: expect.any(String),
+      targets: {
+        codex: { enabled: true },
+        claudeCode: { enabled: true },
+        gemini: { enabled: true },
+      },
+      variables: {},
+      security: {
+        scanSecrets: true,
+        allowPlaintextSecrets: false,
+      },
+      capture: {
+        preserveUnknownNativeFields: true,
+        includeRuntimeState: false,
+      },
+      deploy: {
+        backupBeforeWrite: true,
+        useSymlinks: false,
+      },
+    });
 
-    // Verify fs.writeFileSync was called with the correct path and yaml content
-    expect(fs.writeFileSync).toHaveBeenCalledTimes(1);
-    const [writtenPath, writtenContent] = vi.mocked(fs.writeFileSync).mock.calls[0];
-    
-    expect(writtenPath).toBe(path.join(targetDir, 'mcv.yaml'));
-    expect(writtenContent).toContain('schemaVersion: 1');
-    expect(writtenContent).toContain('id: ');
-    expect(writtenContent).toContain('initializedAt: ');
+    const state = JSON.parse(
+      fs.readFileSync(path.join(stateRoot, 'mcv', 'config.json'), 'utf8'),
+    );
+    expect(state).toMatchObject({
+      deviceId: expect.any(String),
+      defaultRepositoryId: manifest.repositoryId,
+      repositoryPath,
+      baselineSnapshot: {
+        recordedAt: expect.any(String),
+        files: {},
+      },
+    });
+  });
 
-    // Verify state was updated and saved
-    expect(stateUtils.readState).toHaveBeenCalled();
-    expect(writeStateSpy).toHaveBeenCalledTimes(1);
-    const writtenState = writeStateSpy.mock.calls[0][0];
-    
-    expect(writtenState.defaultRepository).toBeDefined();
-    expect(writtenState.defaultRepository?.path).toBe(targetDir);
-    expect(writtenState.defaultRepository?.id).toBeTruthy();
+  it('is exposed as the mcv executable in the npm package', () => {
+    const packageJson = JSON.parse(
+      fs.readFileSync(path.join(originalCwd, 'package.json'), 'utf8'),
+    );
 
-    consoleSpy.mockRestore();
+    expect(packageJson.bin).toEqual({ mcv: 'dist/index.js' });
   });
 });

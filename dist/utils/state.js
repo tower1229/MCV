@@ -43,13 +43,10 @@ function getStateFilePath() {
     if (process.platform === 'win32') {
         return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'mcv', 'config.json');
     }
-    else if (process.platform === 'darwin') {
+    if (process.platform === 'darwin') {
         return path.join(os.homedir(), 'Library', 'Application Support', 'mcv', 'config.json');
     }
-    else {
-        // Fallback for linux/other
-        return path.join(os.homedir(), '.config', 'mcv', 'config.json');
-    }
+    return path.join(os.homedir(), '.config', 'mcv', 'config.json');
 }
 function readState() {
     const statePath = getStateFilePath();
@@ -58,7 +55,7 @@ function readState() {
             const content = fs.readFileSync(statePath, 'utf-8');
             return JSON.parse(content);
         }
-        catch (e) {
+        catch {
             return {};
         }
     }

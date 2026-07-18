@@ -2,24 +2,26 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-export interface RepositoryState {
-  id: string;
-  path: string;
+export interface BaselineSnapshot {
+  recordedAt: string;
+  files: Record<string, string>;
 }
 
 export interface McvState {
-  defaultRepository?: RepositoryState;
+  deviceId?: string;
+  defaultRepositoryId?: string;
+  repositoryPath?: string;
+  baselineSnapshot?: BaselineSnapshot;
 }
 
 export function getStateFilePath(): string {
   if (process.platform === 'win32') {
     return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'mcv', 'config.json');
-  } else if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', 'mcv', 'config.json');
-  } else {
-    // Fallback for linux/other
-    return path.join(os.homedir(), '.config', 'mcv', 'config.json');
   }
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', 'mcv', 'config.json');
+  }
+  return path.join(os.homedir(), '.config', 'mcv', 'config.json');
 }
 
 export function readState(): McvState {
@@ -28,7 +30,7 @@ export function readState(): McvState {
     try {
       const content = fs.readFileSync(statePath, 'utf-8');
       return JSON.parse(content) as McvState;
-    } catch (e) {
+    } catch {
       return {};
     }
   }

@@ -1,29 +1,32 @@
 {
   "name": "mcv",
-  "version": "1.0.0",
-  "description": "可复用的 **AI 工程基础设施** 项目模板：内置 IDE Agent skills、跨 IDE 同步脚本、Claude / AGENTS 双入口提示词，以及 issue → PRD → 实现 → review 工作流。",
-  "main": "index.js",
+  "version": "0.1.0",
+  "description": "Personal AI IDE configuration collection, management, and cross-device deployment CLI.",
+  "main": "dist/index.js",
+  "bin": {
+    "mcv": "dist/index.js"
+  },
   "directories": {
     "doc": "docs"
   },
   "scripts": {
-    "build": "tsc",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run src",
+    "test:watch": "vitest src",
     "typecheck": "tsc --noEmit"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tower1229/AI-Engineering-Template.git"
+    "url": "git+https://github.com/tower1229/MCV.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/tower1229/AI-Engineering-Template/issues"
+    "url": "https://github.com/tower1229/MCV/issues"
   },
-  "homepage": "https://github.com/tower1229/AI-Engineering-Template#readme",
+  "homepage": "https://github.com/tower1229/MCV#readme",
   "dependencies": {
     "commander": "^15.0.0",
     "uuid": "^14.0.1",
