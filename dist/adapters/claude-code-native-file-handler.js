@@ -37,7 +37,9 @@ exports.ClaudeCodeNativeFileHandler = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const objects_1 = require("../utils/objects");
+const files_1 = require("../utils/files");
 const sanitize_1 = require("../utils/sanitize");
+const variables_1 = require("../utils/variables");
 const JSON_CAPTURE_POLICIES = {
     'user-settings': {
         repositoryPath: 'ide/claude-code/native/settings.json',
@@ -153,6 +155,36 @@ class ClaudeCodeNativeFileHandler {
                 excludedFileCount,
             },
             warnings,
+        };
+    }
+    async deploy(repositoryPath, context) {
+        const nativeRoot = path.join(repositoryPath, 'ide', 'claude-code', 'native');
+        const mappings = [
+            {
+                sourcePath: path.join(nativeRoot, 'settings.json'),
+                targetPath: path.join(context.homeDir, '.claude', 'settings.json'),
+            },
+            {
+                sourcePath: path.join(nativeRoot, '.claude.json'),
+                targetPath: path.join(context.homeDir, '.claude.json'),
+            },
+        ];
+        const files = mappings.flatMap((mapping) => {
+            if (!fs.existsSync(mapping.sourcePath))
+                return [];
+            const parsed = JSON.parse(fs.readFileSync(mapping.sourcePath, 'utf8'));
+            if (!(0, objects_1.isRecord)(parsed)) {
+                throw new Error(`${mapping.sourcePath} must contain a JSON object.`);
+            }
+            const resolved = (0, variables_1.resolvePortableValue)(parsed, context.variables ?? {}, context.platform ?? process.platform);
+            return [{
+                    targetPath: mapping.targetPath,
+                    content: `${JSON.stringify(resolved, null, 2)}\n`,
+                }];
+        });
+        return {
+            files,
+            write: (file) => (0, files_1.atomicWriteTextFile)(file.targetPath, file.content),
         };
     }
     readJsonObject(filePath, warnings) {

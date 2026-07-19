@@ -5,6 +5,7 @@ import { ClaudeCodeCanonicalTransformer } from './claude-code-canonical-transfor
 import type {
   CanonicalTransformer,
   CaptureResult,
+  DeployOperation,
   DetectedConfigFile,
   DetectedIde,
   DeviceContext,
@@ -43,6 +44,13 @@ export class ClaudeCodeAdapter implements IdeAdapter {
   ): Promise<CaptureResult> {
     const nativeCapture = await this.nativeFileHandler.capture(files, context);
     return this.canonicalTransformer.transform(nativeCapture, context);
+  }
+
+  async deploy(
+    repositoryPath: string,
+    context: DeviceContext,
+  ): Promise<DeployOperation> {
+    return this.nativeFileHandler.deploy(repositoryPath, context);
   }
 
   private hasExecutable(context: DeviceContext): boolean {

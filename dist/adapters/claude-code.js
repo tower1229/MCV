@@ -64,6 +64,9 @@ class ClaudeCodeAdapter {
         const nativeCapture = await this.nativeFileHandler.capture(files, context);
         return this.canonicalTransformer.transform(nativeCapture, context);
     }
+    async deploy(repositoryPath, context) {
+        return this.nativeFileHandler.deploy(repositoryPath, context);
+    }
     hasExecutable(context) {
         const platform = context.platform ?? process.platform;
         const pathEnv = context.pathEnv ?? process.env.PATH ?? '';

@@ -40,7 +40,8 @@ const os = __importStar(require("os"));
 const discover_1 = require("./commands/discover");
 const capture_1 = require("./commands/capture");
 const init_1 = require("./commands/init");
-function createProgram(context = { homeDir: os.homedir() }, captureDependencies = {}) {
+const deploy_1 = require("./commands/deploy");
+function createProgram(context = { homeDir: os.homedir() }, captureDependencies = {}, deployDependencies = {}) {
     const program = new commander_1.Command();
     program
         .name('mcv')
@@ -57,6 +58,12 @@ function createProgram(context = { homeDir: os.homedir() }, captureDependencies 
         .description('Capture local AI IDE configuration into the MCV repository')
         .action(async () => {
         await (0, capture_1.captureConfigurations)(context, captureDependencies);
+    });
+    program
+        .command('deploy')
+        .description('Deploy repository configuration to this device')
+        .action(async () => {
+        await (0, deploy_1.deployConfigurations)(context, deployDependencies);
     });
     program
         .command('discover')

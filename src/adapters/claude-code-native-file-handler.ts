@@ -1,13 +1,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { isRecord } from '../utils/objects';
+import { atomicWriteTextFile } from '../utils/files';
 import { isSensitiveFile, sanitizeConfig } from '../utils/sanitize';
+import { resolvePortableValue } from '../utils/variables';
 import type {
   CaptureFile,
   CapturedManagedField,
   CapturedManagedFile,
   DetectedConfigDirectory,
   DetectedConfigFile,
+  DeployOperation,
   DeviceContext,
   NativeFileHandler,
   NativeCaptureResult,
@@ -147,6 +150,44 @@ export class ClaudeCodeNativeFileHandler implements NativeFileHandler {
     };
   }
 
+  async deploy(
+    repositoryPath: string,
+    context: DeviceContext,
+  ): Promise<DeployOperation> {
+    const nativeRoot = path.join(repositoryPath, 'ide', 'claude-code', 'native');
+    const mappings = [
+      {
+        sourcePath: path.join(nativeRoot, 'settings.json'),
+        targetPath: path.join(context.homeDir, '.claude', 'settings.json'),
+      },
+      {
+        sourcePath: path.join(nativeRoot, '.claude.json'),
+        targetPath: path.join(context.homeDir, '.claude.json'),
+      },
+    ];
+
+    const files = mappings.flatMap((mapping) => {
+      if (!fs.existsSync(mapping.sourcePath)) return [];
+      const parsed = JSON.parse(fs.readFileSync(mapping.sourcePath, 'utf8')) as unknown;
+      if (!isRecord(parsed)) {
+        throw new Error(`${mapping.sourcePath} must contain a JSON object.`);
+      }
+      const resolved = resolvePortableValue(
+        parsed,
+        context.variables ?? {},
+        context.platform ?? process.platform,
+      );
+      return [{
+        targetPath: mapping.targetPath,
+        content: `${JSON.stringify(resolved, null, 2)}\n`,
+      }];
+    });
+    return {
+      files,
+      write: (file) => atomicWriteTextFile(file.targetPath, file.content),
+    };
+  }
+
   private readJsonObject(
     filePath: string,
     warnings: string[],
@@ -164,4 +205,5 @@ export class ClaudeCodeNativeFileHandler implements NativeFileHandler {
       return undefined;
     }
   }
+
 }

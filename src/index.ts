@@ -9,10 +9,15 @@ import {
   type CaptureDependencies,
 } from './commands/capture';
 import { initRepository } from './commands/init';
+import {
+  deployConfigurations,
+  type DeployDependencies,
+} from './commands/deploy';
 
 export function createProgram(
   context: DeviceContext = { homeDir: os.homedir() },
   captureDependencies: CaptureDependencies = {},
+  deployDependencies: DeployDependencies = {},
 ): Command {
   const program = new Command();
 
@@ -33,6 +38,13 @@ export function createProgram(
     .description('Capture local AI IDE configuration into the MCV repository')
     .action(async () => {
       await captureConfigurations(context, captureDependencies);
+    });
+
+  program
+    .command('deploy')
+    .description('Deploy repository configuration to this device')
+    .action(async () => {
+      await deployConfigurations(context, deployDependencies);
     });
 
   program
