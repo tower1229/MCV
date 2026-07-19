@@ -15,7 +15,7 @@
 
 MCV 是一套面向个人开发者的 AI IDE 配置收集、管理与跨设备部署工具。
 
-它用于将散落在不同 AI IDE 和不同设备中的个人开发配置收归到一个由用户自行持有的私人 Git 仓库中，并支持在新设备上通过交互式 CLI 快速恢复和部署。
+它用于将散落在不同 AI IDE 和不同设备中的个人开发配置收归到一个由用户自行持有的本地数据仓库中，并支持在新设备上通过交互式 CLI 快速恢复和部署。Git 是可选且推荐的版本管理、备份和跨设备传输方式，但不是 MCV 数据仓库的前置条件。
 
 MCV 不只是传统 dotfiles 工具。它重点管理与 AI 协作相关的个人生产力数据，包括：
 
@@ -93,15 +93,15 @@ MCV v0.1 应实现：
 用户应能够完成以下完整流程：
 
 ```text
-创建或克隆一个私人仓库
+创建或选择一个本地目录
         ↓
 进入该目录执行 mcv init
         ↓
 收集当前设备已有配置
         ↓
-确认并提交到私人 Git 仓库
+确认写入 MCV 数据仓库
         ↓
-在另一台设备克隆仓库
+用用户选择的方式备份或传输到另一台设备
         ↓
 执行 mcv bind
         ↓
@@ -151,7 +151,7 @@ MCV v0.1 暂不处理以下内容：
 
 用户已经在电脑上使用 Codex、Claude Code 和 Gemini，拥有大量现有配置。
 
-用户创建私人 Git 仓库，在仓库目录中执行：
+用户选择一个本地目录作为 MCV 数据仓库，在该目录中执行：
 
 ```bash
 mcv init
@@ -282,7 +282,7 @@ CLI 可独立升级，不与用户私人数据仓库中的内容耦合。
 
 ### 7.2 私人 MCV 数据仓库
 
-由用户自行创建、克隆或从公开模板生成，并设为私人仓库。
+由用户在自选本地路径中创建或复制，其备份、版本管理和跨设备传输方式由用户决定。Git 只是文档推荐方式，非 Git worktree 同样是合法的 MCV 数据仓库，不产生警告。
 
 数据仓库只保存用户数据和声明，不保存 CLI 的完整实现代码。
 
@@ -680,7 +680,7 @@ MCV v0.1 必须处理：
 
 ## 14. 密钥与敏感数据
 
-Git 仓库中禁止保存明文密钥。
+MCV 数据仓库中禁止保存明文密钥，无论用户采用哪种备份或版本管理方式。
 
 需要识别和排除：
 
@@ -716,12 +716,14 @@ MCV 的最低安全保障为：
 
 `mcv init` 默认将当前执行目录作为新的 MCV 数据仓库目录。
 
-用户必须先自行：
+用户必须先自行创建或选择一个本地目录。该目录可以是：
 
 - 创建目录；
-- 创建 Git 仓库；
 - 克隆已有空仓库；
-- 或从模板创建仓库。
+- 从模板创建的目录；
+- 通过其他备份或同步方式获得的目录。
+
+不强制要求当前目录是 Git worktree，也不因非 Git 状态显示警告。Git 仅作为文档中的推荐方式。
 
 然后进入该目录执行：
 
@@ -736,22 +738,22 @@ MCV 不得自动移动仓库到统一目录。
 CLI 应明确提示：
 
 ```text
-MCV 将把当前目录初始化为个人数据仓库：
+MCV will initialize the current directory as your repository:
 
 /path/to/my-mcv
 
-该仓库将保存：
-- 通用规则
+It will store:
+- Canonical rules
 - Skills
 - MCP
-- 各 AI IDE 原生配置
-- 平台覆盖配置
+- Native AI IDE configuration
+- Platform overrides
 
-不会保存：
-- 明文密钥
-- 登录凭据
-- 会话记录
-- 缓存和日志
+It will not store:
+- Plaintext secrets
+- Login credentials
+- Session history
+- Caches or logs
 ```
 
 用户确认后：
@@ -879,14 +881,12 @@ mcv
 ```text
 MCV
 
-> 部署配置
-  收集当前配置
-  查看状态
-  恢复上次部署
-  管理数据仓库
-  管理 Skills
-  管理 MCP
-  高级设置
+> Overview
+  Capture
+  Deploy
+  Restore Latest Deployment
+  Repository
+  Help
 ```
 
 ### 16.2 一级命令
@@ -956,14 +956,12 @@ mcv unbind
 用户可逐类选择是否纳入：
 
 ```text
-通用规则
+Shared Rules
 Skills
 MCP
-Codex 原生配置
-Claude Code 原生配置
-Cursor 原生配置
-Gemini CLI 原生配置
-Antigravity 原生配置
+Codex Native Configuration
+Claude Code Native Configuration
+Gemini Native Configuration (Gemini CLI and Antigravity surfaces)
 ```
 
 ### 17.5 初始化结果
@@ -1047,7 +1045,7 @@ Capture 判断：
 应明确询问：
 
 ```text
-设备中已删除此配置，是否也从 MCV 仓库移除？
+This configuration was deleted from the device. Remove it from the MCV repository too?
 ```
 
 删除默认不选中。
@@ -1089,7 +1087,10 @@ Capture 判断：
 - 是否部署 Skills；
 - 是否部署 MCP；
 - 是否部署各 IDE 原生配置；
-- 是否覆盖本机已有配置。
+
+不提供全局“覆盖本机已有配置”开关。对同时包含 MCV 管理字段和 Native 字段的文件，Deploy 始终遵守 Overlay 的 `managedPaths` 白名单，未声明的 Native 字段必须保留，`localPaths` 不得部署。用户选择的是具体计划变更，而不是改变所有权边界。
+
+对由 MCV 完整拥有、确实会整文件替换的内容，预览和 Diff 必须明确标注“替换整个文件”。
 
 默认选中：
 
@@ -1101,13 +1102,13 @@ Capture 判断：
 写入前必须显示：
 
 ```text
-即将执行：
+Planned deployment:
 
-新增：4 个文件
-修改：3 个文件
-结构化合并：2 个文件
-跳过：2 个缺失密钥字段
-备份：5 个现有文件
+Add:              4 files
+Modify:           3 files
+Structured merge: 2 files
+Skip:             2 fields with missing environment variables
+Back up:          5 existing files
 ```
 
 用户确认后才执行。
@@ -1150,7 +1151,7 @@ Capture 判断：
 
 - 不重复写入；
 - 不生成无意义备份；
-- 明确显示“已同步”。
+- 明确显示“无待部署变化”。
 
 ### 19.7 部署验证
 
@@ -1170,22 +1171,27 @@ Capture 判断：
 状态输出应保持简洁：
 
 ```text
-MCV 仓库：/path/to/my-mcv
-绑定状态：正常
-Git 状态：存在 2 项未提交变化
+Repository: /path/to/my-mcv
+Binding: normal
+Git: 2 uncommitted changes (shown only when Git is detected)
 
-Codex         已同步
-Claude Code   存在 1 项本地变化
-Gemini        尚未部署
+Pending deployment:
+Codex         0 changes
+Claude Code   2 modifications
+Gemini        Not deployed
+
+Post-deploy local state:
+Codex         0 changes
+Claude Code   1 local managed change
 ```
 
 应显示：
 
 - 仓库绑定是否正常；
 - 仓库 ID 是否匹配；
-- 仓库是否存在未提交修改；
-- 各 IDE 是否已同步；
-- 是否存在未收集的本地变化；
+- 若检测到 Git，数据仓库是否存在未提交修改；非 Git 数据仓库不产生警告；
+- 当前数据仓库相对本机是否存在 Pending Deployment Change（待部署变化）；
+- 相对 Baseline Snapshot 是否存在 Drift 或缺失文件；
 - 是否缺少必要密钥；
 - 最近一次部署或 Capture 是否成功。
 
@@ -1204,13 +1210,17 @@ Gemini        尚未部署
 - 将恢复的文件数量；
 - 当前文件是否在部署后被再次修改。
 
-如果当前文件已经发生新变化，应额外确认。
+如果当前文件已经发生新变化，则形成 Restore Conflict（恢复冲突）。v0.1 必须阻断恢复，列出冲突文件并提示用户先备份或手动处理；不得通过二次确认强制覆盖。
 
 恢复操作本身也应避免直接删除用户新文件，可将当前状态临时备份后再恢复。
 
 ---
 
 ## 22. 交互式体验要求
+
+### 22.0 界面语言
+
+v0.1 的所有产品界面文案统一使用英文，包括 TUI、CLI help、提示、错误、确认、进度和结果摘要。命令名、参数名、JSON 字段名和 `error.code` 同样使用英文。README 保持中文。首期不建设 i18n 框架，不在界面中做中英双语混排。
 
 ### 22.1 默认全程交互
 
@@ -1227,15 +1237,15 @@ Gemini        尚未部署
 
 避免直接展示内部术语：
 
-| 内部术语           | 用户界面用语 |
-| ------------------ | ------------ |
-| Canonical          | 通用配置     |
-| Native             | IDE 专属配置 |
-| Adapter            | IDE 支持模块 |
-| Profile            | 不在首期暴露 |
-| Overlay            | 合并设置     |
-| Drift              | 本地变化     |
-| Repository Binding | 数据仓库位置 |
+| 内部术语           | 用户界面用语           |
+| ------------------ | -------------------------- |
+| Canonical          | Shared Configuration       |
+| Native             | IDE-specific Configuration |
+| Adapter            | IDE Support                |
+| Profile            | 不在首期暴露             |
+| Overlay            | Merge Behavior             |
+| Drift              | Local Managed Change       |
+| Repository Binding | Repository Location        |
 
 ### 22.3 安全默认值
 
@@ -1279,13 +1289,13 @@ enabled:
 下次部署时询问：
 
 ```text
-是否沿用此设备上次的选择？
+Use this device's previous selection?
 ```
 
 未来可以增加：
 
 ```text
-是否将本次选择保存为部署预设？
+Save this selection as a deployment preset?
 ```
 
 用户可以建立：
@@ -1571,15 +1581,15 @@ capabilities:
 如果绑定路径不存在：
 
 ```text
-未找到已绑定的 MCV 数据仓库。
+The bound MCV repository was not found.
 
-原位置：
+Previous location:
 /old/path/my-mcv
 
-请选择：
-- 在当前目录重新绑定
-- 指定仓库位置
-- 解除旧绑定
+Choose an action:
+- Bind the current directory
+- Enter a repository path
+- Remove the old binding
 ```
 
 ### 30.2 配置格式错误
