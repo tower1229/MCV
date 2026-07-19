@@ -36,7 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ClaudeCodeAdapter = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
-const objects_1 = require("../utils/objects");
+const structured_config_1 = require("../utils/structured-config");
 const claude_code_native_file_handler_1 = require("./claude-code-native-file-handler");
 const claude_code_canonical_transformer_1 = require("./claude-code-canonical-transformer");
 class ClaudeCodeAdapter {
@@ -71,41 +71,38 @@ class ClaudeCodeAdapter {
             this.nativeFileHandler.readCanonical(repositoryPath, context),
         ]);
         const canonicalFiles = await this.canonicalTransformer.deploy(canonicalSource, context);
-        const statePath = path.join(context.homeDir, '.claude.json');
         return {
-            files: this.mergeDeploymentFiles(nativeOperation.files, canonicalFiles, statePath, this.nativeFileHandler.readDeployTarget(statePath)),
+            files: this.mergeDeploymentFiles(nativeOperation.files, canonicalFiles, context),
             write: nativeOperation.write,
         };
     }
-    mergeDeploymentFiles(nativeFiles, canonicalFiles, statePath, existingState) {
-        const nativeState = nativeFiles.find((file) => file.targetPath === statePath);
-        const canonicalState = canonicalFiles.find((file) => file.targetPath === statePath);
-        const otherFiles = [...nativeFiles, ...canonicalFiles].filter((file) => file.targetPath !== statePath);
-        if (!canonicalState) {
-            return [...otherFiles, ...(nativeState ? [nativeState] : [])];
-        }
-        const existingValue = existingState
-            ? JSON.parse(existingState.content.toString())
-            : {};
-        const canonicalValue = JSON.parse(canonicalState.content.toString());
-        const nativeValue = nativeState
-            ? JSON.parse(nativeState.content.toString())
-            : {};
-        if (!(0, objects_1.isRecord)(existingValue)
-            || !(0, objects_1.isRecord)(nativeValue)
-            || !(0, objects_1.isRecord)(canonicalValue)) {
-            throw new Error('Claude Code state deployment inputs must be JSON objects.');
-        }
-        return [
-            ...otherFiles,
-            {
-                targetPath: statePath,
-                content: `${JSON.stringify({
-                    ...(0, objects_1.mergeRecords)(existingValue, nativeValue),
-                    ...canonicalValue,
-                }, null, 2)}\n`,
-            },
+    mergeDeploymentFiles(nativeFiles, canonicalFiles, context) {
+        const mergedPaths = [
+            path.join(context.homeDir, '.claude', 'settings.json'),
+            path.join(context.homeDir, '.claude.json'),
         ];
+        const otherFiles = [...nativeFiles, ...canonicalFiles].filter((file) => !mergedPaths.includes(file.targetPath));
+        const mergedFiles = mergedPaths.flatMap((targetPath) => {
+            const nativeFile = nativeFiles.find((file) => file.targetPath === targetPath);
+            const canonicalFile = canonicalFiles.find((file) => file.targetPath === targetPath);
+            if (!nativeFile && !canonicalFile)
+                return [];
+            const existingFile = this.nativeFileHandler.readDeployTarget(targetPath);
+            const existing = existingFile
+                ? (0, structured_config_1.parseStructuredObject)(existingFile.content.toString(), 'json', targetPath)
+                : {};
+            const native = nativeFile
+                ? (0, structured_config_1.parseStructuredObject)(nativeFile.content.toString(), 'json', targetPath)
+                : {};
+            const canonical = canonicalFile
+                ? (0, structured_config_1.parseStructuredObject)(canonicalFile.content.toString(), 'json', targetPath)
+                : undefined;
+            return [{
+                    targetPath,
+                    content: (0, structured_config_1.stringifyStructuredObject)((0, structured_config_1.mergeStructuredOverlay)(existing, native, canonical, ['$.mcpServers']), 'json'),
+                }];
+        });
+        return [...otherFiles, ...mergedFiles];
     }
     hasExecutable(context) {
         const platform = context.platform ?? process.platform;

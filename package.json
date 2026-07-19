@@ -29,6 +29,7 @@
   "homepage": "https://github.com/tower1229/MCV#readme",
   "dependencies": {
     "commander": "^15.0.0",
+    "smol-toml": "^1.7.0",
     "uuid": "^14.0.1",
     "yaml": "^2.9.0"
   },

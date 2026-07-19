@@ -197,10 +197,12 @@ describe('mcv deploy', () => {
     await runDeploy();
 
     expect(JSON.parse(fs.readFileSync(settingsPath, 'utf8'))).toEqual({
+      localOnly: true,
       theme: 'dark',
       command: path.join(homeDir, 'Tools', 'tool.exe'),
     });
     expect(JSON.parse(fs.readFileSync(statePath, 'utf8'))).toEqual({
+      projects: { local: { trusted: true } },
       customPreference: true,
     });
 
@@ -331,5 +333,81 @@ describe('mcv deploy', () => {
     ).toEqual({
       command: `${path.join(homeDir, 'Tools', 'tool')} --url https://host.example/api`,
     });
+  });
+
+  it('deploys Gemini merged settings without replacing unknown local fields', async () => {
+    fs.writeFileSync(
+      path.join(repositoryPath, 'mcv.yaml'),
+      'schemaVersion: 1\ntargets:\n  gemini:\n    enabled: true\n',
+    );
+    const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native');
+    fs.mkdirSync(nativeRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(nativeRoot, 'settings.json'),
+      `${JSON.stringify({ ui: { theme: 'dark' } }, null, 2)}\n`,
+    );
+    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repositoryPath, 'common', 'mcp.yaml'),
+      'servers:\n  shared:\n    command: shared-server\n',
+    );
+    const settingsPath = path.join(homeDir, '.gemini', 'settings.json');
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    fs.writeFileSync(
+      settingsPath,
+      `${JSON.stringify({
+        ui: { density: 'compact', theme: 'light' },
+        experimental: { nativeOnly: true },
+        mcpServers: { stale: { command: 'old-server' } },
+      }, null, 2)}\n`,
+    );
+
+    await createProgram(
+      { homeDir },
+      {},
+      { confirmDeploy: async () => true },
+    ).parseAsync(['node', 'mcv', 'deploy']);
+
+    expect(JSON.parse(fs.readFileSync(settingsPath, 'utf8'))).toEqual({
+      ui: { density: 'compact', theme: 'dark' },
+      experimental: { nativeOnly: true },
+      mcpServers: { shared: { command: 'shared-server' } },
+    });
+  });
+
+  it('deploys Codex canonical content and preserves unknown TOML fields', async () => {
+    fs.writeFileSync(
+      path.join(repositoryPath, 'mcv.yaml'),
+      'schemaVersion: 1\ntargets:\n  codex:\n    enabled: true\n',
+    );
+    const nativeRoot = path.join(repositoryPath, 'ide', 'codex', 'native');
+    fs.mkdirSync(nativeRoot, { recursive: true });
+    fs.writeFileSync(path.join(nativeRoot, 'config.toml'), 'model = "gpt-5"\n');
+    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Rules\n');
+    fs.writeFileSync(
+      path.join(repositoryPath, 'common', 'mcp.yaml'),
+      'servers:\n  shared:\n    command: shared-server\n',
+    );
+    const configPath = path.join(homeDir, '.codex', 'config.toml');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      'personality = "pragmatic"\n[mcp_servers.stale]\ncommand = "old-server"\n',
+    );
+
+    await createProgram(
+      { homeDir },
+      {},
+      { confirmDeploy: async () => true },
+    ).parseAsync(['node', 'mcv', 'deploy']);
+
+    const { parse } = await import('smol-toml');
+    expect(parse(fs.readFileSync(configPath, 'utf8'))).toEqual({
+      personality: 'pragmatic',
+      model: 'gpt-5',
+      mcp_servers: { shared: { command: 'shared-server' } },
+    });
+    expect(fs.readFileSync(path.join(homeDir, '.codex', 'AGENTS.md'), 'utf8')).toBe('# Rules\n');
   });
 });

@@ -2,9 +2,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createInterface } from 'readline/promises';
 import * as yaml from 'yaml';
-import { ClaudeCodeAdapter } from '../adapters/claude-code';
+import { createAdapterDefinitions, type TargetId } from '../adapters';
 import type { CaptureFile, DeviceContext } from '../adapters/types';
 import { isRecord, mergeRecords } from '../utils/objects';
+import {
+  parseStructuredObject,
+  stringifyStructuredObject,
+  type StructuredFormat,
+} from '../utils/structured-config';
 import { readState } from '../utils/state';
 
 export interface CaptureDependencies {
@@ -22,27 +27,33 @@ export async function captureConfigurations(
 ): Promise<void> {
   const repositoryPath = resolveRepositoryPath();
   const manifest = readManifest(repositoryPath);
-
-  if (manifest.targets?.claudeCode?.enabled === false) {
-    console.log('Claude Code capture is disabled in mcv.yaml.');
+  const definitions = createAdapterDefinitions().filter(
+    ({ targetId }) => manifest.targets?.[targetId]?.enabled === true,
+  );
+  if (definitions.length === 0) {
+    console.log('No IDE targets are enabled in mcv.yaml.');
     return;
   }
 
-  const adapter = new ClaudeCodeAdapter();
   const captureContext = {
     ...context,
     variables: resolveManifestVariables(manifest.variables, context),
   };
-  const files = await adapter.discoverFiles(captureContext);
-  const result = await adapter.capture(files, captureContext);
-  const plan = buildCapturePlan(repositoryPath, result.files);
+  const results = await Promise.all(definitions.map(async ({ adapter }) => {
+    const files = await adapter.discoverFiles(captureContext);
+    return adapter.capture(files, captureContext);
+  }));
+  const plan = buildCapturePlan(
+    repositoryPath,
+    results.flatMap((result) => result.files),
+  );
 
-  for (const warning of result.warnings) {
+  for (const warning of results.flatMap((result) => result.warnings)) {
     console.log(`Warning: ${warning}`);
   }
 
   if (plan.length === 0) {
-    console.log('No Claude Code configuration changes to capture.');
+    console.log('No configuration changes to capture.');
     return;
   }
 
@@ -51,8 +62,16 @@ export async function captureConfigurations(
     console.log(`[${file.change}][${file.ownership}] ${file.repositoryPath}`);
     console.log(file.content.trimEnd());
   }
+  const summary = results.reduce(
+    (total, result) => ({
+      sensitiveFieldCount: total.sensitiveFieldCount + result.summary.sensitiveFieldCount,
+      parameterizedPathCount: total.parameterizedPathCount + result.summary.parameterizedPathCount,
+      excludedFileCount: total.excludedFileCount + result.summary.excludedFileCount,
+    }),
+    { sensitiveFieldCount: 0, parameterizedPathCount: 0, excludedFileCount: 0 },
+  );
   console.log(
-    `Summary: ${plan.length} file(s), ${result.summary.sensitiveFieldCount} sensitive field(s) replaced, ${result.summary.parameterizedPathCount} path(s) parameterized, ${result.summary.excludedFileCount} sensitive file(s) excluded.`,
+    `Summary: ${plan.length} file(s), ${summary.sensitiveFieldCount} sensitive field(s) replaced, ${summary.parameterizedPathCount} path(s) parameterized, ${summary.excludedFileCount} sensitive file(s) excluded.`,
   );
 
   const confirmed = await (dependencies.confirmCapture ?? confirmInTerminal)();
@@ -83,7 +102,7 @@ function resolveRepositoryPath(): string {
 }
 
 interface CaptureManifest {
-  targets?: { claudeCode?: { enabled?: boolean } };
+  targets?: Partial<Record<TargetId, { enabled?: boolean }>>;
   variables?: Record<string, unknown>;
 }
 
@@ -100,24 +119,27 @@ function buildCapturePlan(
   repositoryPath: string,
   files: CaptureFile[],
 ): PlannedCaptureFile[] {
-  return files.flatMap((file) => {
+  const planned = new Map<string, PlannedCaptureFile>();
+  for (const file of files) {
     const destinationPath = path.join(
       repositoryPath,
       ...file.repositoryPath.split('/'),
     );
-    const existingContent = fs.existsSync(destinationPath)
-      ? fs.readFileSync(destinationPath, 'utf8')
-      : undefined;
+    const existingContent = planned.get(destinationPath)?.content
+      ?? (fs.existsSync(destinationPath)
+        ? fs.readFileSync(destinationPath, 'utf8')
+        : undefined);
     const content = mergeWithRepository(file, existingContent);
-    if (existingContent === content) return [];
+    if (existingContent === content) continue;
 
-    return [{
+    planned.set(destinationPath, {
       ...file,
       content,
-      change: existingContent === undefined ? 'add' : 'modify',
+      change: fs.existsSync(destinationPath) ? 'modify' : 'add',
       destinationPath,
-    }];
-  });
+    });
+  }
+  return [...planned.values()];
 }
 
 function mergeWithRepository(
@@ -126,13 +148,11 @@ function mergeWithRepository(
 ): string {
   if (existingContent === undefined) return file.content;
 
-  if (file.ownership === 'native' && file.repositoryPath.endsWith('.json')) {
-    const existing = JSON.parse(existingContent) as unknown;
-    const captured = JSON.parse(file.content) as unknown;
-    if (!isRecord(existing) || !isRecord(captured)) {
-      throw new Error(`${file.repositoryPath} must contain a JSON object.`);
-    }
-    return `${JSON.stringify(mergeRecords(existing, captured), null, 2)}\n`;
+  const format = getStructuredFormat(file.repositoryPath);
+  if (file.ownership === 'native' && format) {
+    const existing = parseStructuredObject(existingContent, format, file.repositoryPath);
+    const captured = parseStructuredObject(file.content, format, file.repositoryPath);
+    return stringifyStructuredObject(mergeRecords(existing, captured), format);
   }
 
   if (file.repositoryPath === 'common/mcp.yaml') {
@@ -145,6 +165,13 @@ function mergeWithRepository(
   }
 
   return file.content;
+}
+
+function getStructuredFormat(repositoryPath: string): StructuredFormat | undefined {
+  if (repositoryPath.endsWith('.json')) return 'json';
+  if (repositoryPath.endsWith('.yaml') || repositoryPath.endsWith('.yml')) return 'yaml';
+  if (repositoryPath.endsWith('.toml')) return 'toml';
+  return undefined;
 }
 
 function resolveManifestVariables(

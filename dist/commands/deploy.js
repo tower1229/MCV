@@ -38,7 +38,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const promises_1 = require("readline/promises");
 const yaml = __importStar(require("yaml"));
-const claude_code_1 = require("../adapters/claude-code");
+const adapters_1 = require("../adapters");
 const files_1 = require("../utils/files");
 const objects_1 = require("../utils/objects");
 const state_1 = require("../utils/state");
@@ -46,20 +46,27 @@ const variables_1 = require("../utils/variables");
 async function deployConfigurations(context, dependencies = {}) {
     const repositoryPath = resolveRepositoryPath();
     const manifest = readManifest(repositoryPath);
-    if (manifest.targets?.claudeCode?.enabled === false) {
-        console.log('Claude Code deploy is disabled in mcv.yaml.');
+    const definitions = (0, adapters_1.createAdapterDefinitions)().filter(({ targetId }) => manifest.targets?.[targetId]?.enabled === true);
+    if (definitions.length === 0) {
+        console.log('No IDE targets are enabled in mcv.yaml.');
         return;
     }
     const variables = resolveManifestVariables(manifest.variables, context, repositoryPath);
-    const adapter = new claude_code_1.ClaudeCodeAdapter();
-    const operation = await adapter.deploy(repositoryPath, {
-        ...context,
-        variables,
-    });
-    const plan = buildDeployPlan(operation.files);
+    const operations = await Promise.all(definitions.map(async (definition) => ({
+        definition,
+        operation: await definition.adapter.deploy(repositoryPath, {
+            ...context,
+            variables,
+        }),
+    })));
+    const deployFiles = operations.flatMap(({ operation }) => operation.files.map((file) => ({ ...file, write: operation.write })));
+    const plan = buildDeployPlan(deployFiles);
     if (plan.length === 0) {
-        recordDeploymentBaseline(operation.files);
-        console.log('Claude Code configuration is already in sync.');
+        recordDeploymentBaseline(deployFiles);
+        const subject = definitions.length === 1
+            ? `${definitions[0].name} configuration is`
+            : 'Configurations are';
+        console.log(`${subject} already in sync.`);
         return;
     }
     console.log('Deploy preview:');
@@ -73,9 +80,9 @@ async function deployConfigurations(context, dependencies = {}) {
     }
     backupModifiedFiles(plan);
     for (const file of plan) {
-        operation.write(file);
+        file.write(file);
     }
-    recordDeploymentBaseline(operation.files);
+    recordDeploymentBaseline(deployFiles);
     console.log(`Deployed ${plan.length} file(s) from ${repositoryPath}.`);
 }
 function recordDeploymentBaseline(files) {

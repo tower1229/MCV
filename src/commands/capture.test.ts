@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProgram } from '../index';
+import { parse as parseToml } from 'smol-toml';
 
 describe('mcv capture', () => {
   const originalCwd = process.cwd();
@@ -128,5 +129,76 @@ describe('mcv capture', () => {
     );
     expect(mcpRegistry).toContain('other-ide:');
     expect(mcpRegistry).toContain('claude:');
+  });
+
+  it('captures Gemini merged settings while preserving repository-only fields', async () => {
+    fs.writeFileSync(
+      path.join(repositoryPath, 'mcv.yaml'),
+      'schemaVersion: 1\ntargets:\n  gemini:\n    enabled: true\n',
+    );
+    const geminiRoot = path.join(homeDir, '.gemini');
+    fs.mkdirSync(geminiRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(geminiRoot, 'settings.json'),
+      JSON.stringify({
+        ui: { theme: 'dark' },
+        mcpServers: { gemini: { command: 'gemini-server' } },
+      }),
+    );
+    const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native');
+    fs.mkdirSync(nativeRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(nativeRoot, 'settings.json'),
+      `${JSON.stringify({ repositoryOnly: true, ui: { density: 'compact' } }, null, 2)}\n`,
+    );
+    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repositoryPath, 'common', 'mcp.yaml'),
+      'servers:\n  existing:\n    command: existing-server\n',
+    );
+
+    await createProgram(
+      { homeDir },
+      { confirmCapture: async () => true },
+    ).parseAsync(['node', 'mcv', 'capture']);
+
+    expect(
+      JSON.parse(fs.readFileSync(path.join(nativeRoot, 'settings.json'), 'utf8')),
+    ).toEqual({
+      repositoryOnly: true,
+      ui: { density: 'compact', theme: 'dark' },
+    });
+    const mcpRegistry = fs.readFileSync(
+      path.join(repositoryPath, 'common', 'mcp.yaml'),
+      'utf8',
+    );
+    expect(mcpRegistry).toContain('existing:');
+    expect(mcpRegistry).toContain('gemini:');
+  });
+
+  it('structurally merges captured Codex TOML with repository-native fields', async () => {
+    fs.writeFileSync(
+      path.join(repositoryPath, 'mcv.yaml'),
+      'schemaVersion: 1\ntargets:\n  codex:\n    enabled: true\n',
+    );
+    const codexRoot = path.join(homeDir, '.codex');
+    fs.mkdirSync(codexRoot, { recursive: true });
+    fs.writeFileSync(path.join(codexRoot, 'config.toml'), 'model = "gpt-5"\n');
+    const nativeRoot = path.join(repositoryPath, 'ide', 'codex', 'native');
+    fs.mkdirSync(nativeRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(nativeRoot, 'config.toml'),
+      'personality = "pragmatic"\nmodel = "gpt-4"\n',
+    );
+
+    await createProgram(
+      { homeDir },
+      { confirmCapture: async () => true },
+    ).parseAsync(['node', 'mcv', 'capture']);
+
+    expect(parseToml(fs.readFileSync(path.join(nativeRoot, 'config.toml'), 'utf8'))).toEqual({
+      personality: 'pragmatic',
+      model: 'gpt-5',
+    });
   });
 });

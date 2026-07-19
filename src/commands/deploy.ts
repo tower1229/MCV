@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createInterface } from 'readline/promises';
 import * as yaml from 'yaml';
-import { ClaudeCodeAdapter } from '../adapters/claude-code';
+import { createAdapterDefinitions, type TargetId } from '../adapters';
 import type { DeployFile, DeviceContext } from '../adapters/types';
 import { atomicWriteTextFile, hashFile } from '../utils/files';
 import { isRecord } from '../utils/objects';
@@ -14,7 +14,7 @@ export interface DeployDependencies {
 }
 
 interface DeployManifest {
-  targets?: { claudeCode?: { enabled?: boolean } };
+  targets?: Partial<Record<TargetId, { enabled?: boolean }>>;
   variables?: Record<string, unknown>;
 }
 
@@ -22,6 +22,7 @@ interface PlannedDeployFile {
   targetPath: string;
   content: string | Buffer;
   change: 'add' | 'modify';
+  write: (file: DeployFile) => void;
 }
 
 export async function deployConfigurations(
@@ -30,8 +31,11 @@ export async function deployConfigurations(
 ): Promise<void> {
   const repositoryPath = resolveRepositoryPath();
   const manifest = readManifest(repositoryPath);
-  if (manifest.targets?.claudeCode?.enabled === false) {
-    console.log('Claude Code deploy is disabled in mcv.yaml.');
+  const definitions = createAdapterDefinitions().filter(
+    ({ targetId }) => manifest.targets?.[targetId]?.enabled === true,
+  );
+  if (definitions.length === 0) {
+    console.log('No IDE targets are enabled in mcv.yaml.');
     return;
   }
 
@@ -40,15 +44,23 @@ export async function deployConfigurations(
     context,
     repositoryPath,
   );
-  const adapter = new ClaudeCodeAdapter();
-  const operation = await adapter.deploy(repositoryPath, {
-    ...context,
-    variables,
-  });
-  const plan = buildDeployPlan(operation.files);
+  const operations = await Promise.all(definitions.map(async (definition) => ({
+    definition,
+    operation: await definition.adapter.deploy(repositoryPath, {
+      ...context,
+      variables,
+    }),
+  })));
+  const deployFiles = operations.flatMap(({ operation }) =>
+    operation.files.map((file) => ({ ...file, write: operation.write })),
+  );
+  const plan = buildDeployPlan(deployFiles);
   if (plan.length === 0) {
-    recordDeploymentBaseline(operation.files);
-    console.log('Claude Code configuration is already in sync.');
+    recordDeploymentBaseline(deployFiles);
+    const subject = definitions.length === 1
+      ? `${definitions[0].name} configuration is`
+      : 'Configurations are';
+    console.log(`${subject} already in sync.`);
     return;
   }
 
@@ -65,9 +77,9 @@ export async function deployConfigurations(
 
   backupModifiedFiles(plan);
   for (const file of plan) {
-    operation.write(file);
+    file.write(file);
   }
-  recordDeploymentBaseline(operation.files);
+  recordDeploymentBaseline(deployFiles);
   console.log(`Deployed ${plan.length} file(s) from ${repositoryPath}.`);
 }
 
@@ -108,7 +120,9 @@ function backupModifiedFiles(plan: PlannedDeployFile[]): void {
   );
 }
 
-function buildDeployPlan(files: DeployFile[]): PlannedDeployFile[] {
+function buildDeployPlan(
+  files: Array<DeployFile & { write: (file: DeployFile) => void }>,
+): PlannedDeployFile[] {
   return files.flatMap((file) => {
     const existingContent = fs.existsSync(file.targetPath)
       ? fs.readFileSync(file.targetPath)

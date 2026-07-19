@@ -18,15 +18,23 @@ describe('mcv discover', () => {
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
-  it('reports Claude Code detection and the presence of each known config path', async () => {
-    await createProgram({ homeDir }).parseAsync(['node', 'mcv', 'discover']);
+  it('reports detection and known config paths for every supported IDE', async () => {
+    await createProgram({ homeDir, pathEnv: '' }).parseAsync(['node', 'mcv', 'discover']);
 
     expect(vi.mocked(console.log).mock.calls.map(([line]) => line)).toEqual([
+      'Codex: not detected',
+      `[missing] ${path.join(homeDir, '.codex')}`,
+      `[missing] ${path.join(homeDir, '.codex', 'config.toml')}`,
+      `[missing] ${path.join(homeDir, '.codex', 'AGENTS.md')}`,
       'Claude Code: detected',
       `[found] ${path.join(homeDir, '.claude')}`,
       `[found] ${path.join(homeDir, '.claude', 'settings.json')}`,
       `[missing] ${path.join(homeDir, '.claude', 'CLAUDE.md')}`,
       `[missing] ${path.join(homeDir, '.claude.json')}`,
+      'Gemini: not detected',
+      `[missing] ${path.join(homeDir, '.gemini')}`,
+      `[missing] ${path.join(homeDir, '.gemini', 'settings.json')}`,
+      `[missing] ${path.join(homeDir, '.gemini', 'GEMINI.md')}`,
     ]);
   });
 });

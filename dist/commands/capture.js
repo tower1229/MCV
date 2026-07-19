@@ -38,29 +38,32 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const promises_1 = require("readline/promises");
 const yaml = __importStar(require("yaml"));
-const claude_code_1 = require("../adapters/claude-code");
+const adapters_1 = require("../adapters");
 const objects_1 = require("../utils/objects");
+const structured_config_1 = require("../utils/structured-config");
 const state_1 = require("../utils/state");
 async function captureConfigurations(context, dependencies = {}) {
     const repositoryPath = resolveRepositoryPath();
     const manifest = readManifest(repositoryPath);
-    if (manifest.targets?.claudeCode?.enabled === false) {
-        console.log('Claude Code capture is disabled in mcv.yaml.');
+    const definitions = (0, adapters_1.createAdapterDefinitions)().filter(({ targetId }) => manifest.targets?.[targetId]?.enabled === true);
+    if (definitions.length === 0) {
+        console.log('No IDE targets are enabled in mcv.yaml.');
         return;
     }
-    const adapter = new claude_code_1.ClaudeCodeAdapter();
     const captureContext = {
         ...context,
         variables: resolveManifestVariables(manifest.variables, context),
     };
-    const files = await adapter.discoverFiles(captureContext);
-    const result = await adapter.capture(files, captureContext);
-    const plan = buildCapturePlan(repositoryPath, result.files);
-    for (const warning of result.warnings) {
+    const results = await Promise.all(definitions.map(async ({ adapter }) => {
+        const files = await adapter.discoverFiles(captureContext);
+        return adapter.capture(files, captureContext);
+    }));
+    const plan = buildCapturePlan(repositoryPath, results.flatMap((result) => result.files));
+    for (const warning of results.flatMap((result) => result.warnings)) {
         console.log(`Warning: ${warning}`);
     }
     if (plan.length === 0) {
-        console.log('No Claude Code configuration changes to capture.');
+        console.log('No configuration changes to capture.');
         return;
     }
     console.log('Capture preview (sanitized and parameterized):');
@@ -68,7 +71,12 @@ async function captureConfigurations(context, dependencies = {}) {
         console.log(`[${file.change}][${file.ownership}] ${file.repositoryPath}`);
         console.log(file.content.trimEnd());
     }
-    console.log(`Summary: ${plan.length} file(s), ${result.summary.sensitiveFieldCount} sensitive field(s) replaced, ${result.summary.parameterizedPathCount} path(s) parameterized, ${result.summary.excludedFileCount} sensitive file(s) excluded.`);
+    const summary = results.reduce((total, result) => ({
+        sensitiveFieldCount: total.sensitiveFieldCount + result.summary.sensitiveFieldCount,
+        parameterizedPathCount: total.parameterizedPathCount + result.summary.parameterizedPathCount,
+        excludedFileCount: total.excludedFileCount + result.summary.excludedFileCount,
+    }), { sensitiveFieldCount: 0, parameterizedPathCount: 0, excludedFileCount: 0 });
+    console.log(`Summary: ${plan.length} file(s), ${summary.sensitiveFieldCount} sensitive field(s) replaced, ${summary.parameterizedPathCount} path(s) parameterized, ${summary.excludedFileCount} sensitive file(s) excluded.`);
     const confirmed = await (dependencies.confirmCapture ?? confirmInTerminal)();
     if (!confirmed) {
         console.log('Capture cancelled; repository was not changed.');
@@ -100,32 +108,33 @@ function readManifest(repositoryPath) {
     return parsed;
 }
 function buildCapturePlan(repositoryPath, files) {
-    return files.flatMap((file) => {
+    const planned = new Map();
+    for (const file of files) {
         const destinationPath = path.join(repositoryPath, ...file.repositoryPath.split('/'));
-        const existingContent = fs.existsSync(destinationPath)
-            ? fs.readFileSync(destinationPath, 'utf8')
-            : undefined;
+        const existingContent = planned.get(destinationPath)?.content
+            ?? (fs.existsSync(destinationPath)
+                ? fs.readFileSync(destinationPath, 'utf8')
+                : undefined);
         const content = mergeWithRepository(file, existingContent);
         if (existingContent === content)
-            return [];
-        return [{
-                ...file,
-                content,
-                change: existingContent === undefined ? 'add' : 'modify',
-                destinationPath,
-            }];
-    });
+            continue;
+        planned.set(destinationPath, {
+            ...file,
+            content,
+            change: fs.existsSync(destinationPath) ? 'modify' : 'add',
+            destinationPath,
+        });
+    }
+    return [...planned.values()];
 }
 function mergeWithRepository(file, existingContent) {
     if (existingContent === undefined)
         return file.content;
-    if (file.ownership === 'native' && file.repositoryPath.endsWith('.json')) {
-        const existing = JSON.parse(existingContent);
-        const captured = JSON.parse(file.content);
-        if (!(0, objects_1.isRecord)(existing) || !(0, objects_1.isRecord)(captured)) {
-            throw new Error(`${file.repositoryPath} must contain a JSON object.`);
-        }
-        return `${JSON.stringify((0, objects_1.mergeRecords)(existing, captured), null, 2)}\n`;
+    const format = getStructuredFormat(file.repositoryPath);
+    if (file.ownership === 'native' && format) {
+        const existing = (0, structured_config_1.parseStructuredObject)(existingContent, format, file.repositoryPath);
+        const captured = (0, structured_config_1.parseStructuredObject)(file.content, format, file.repositoryPath);
+        return (0, structured_config_1.stringifyStructuredObject)((0, objects_1.mergeRecords)(existing, captured), format);
     }
     if (file.repositoryPath === 'common/mcp.yaml') {
         const existing = yaml.parse(existingContent);
@@ -136,6 +145,15 @@ function mergeWithRepository(file, existingContent) {
         return yaml.stringify((0, objects_1.mergeRecords)(existing, captured));
     }
     return file.content;
+}
+function getStructuredFormat(repositoryPath) {
+    if (repositoryPath.endsWith('.json'))
+        return 'json';
+    if (repositoryPath.endsWith('.yaml') || repositoryPath.endsWith('.yml'))
+        return 'yaml';
+    if (repositoryPath.endsWith('.toml'))
+        return 'toml';
+    return undefined;
 }
 function resolveManifestVariables(variables, context) {
     const platform = context.platform ?? process.platform;
