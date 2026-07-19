@@ -32,6 +32,11 @@ export interface NativeFileHandler {
     files: DetectedConfigFile[],
     context: DeviceContext,
   ): Promise<NativeCaptureResult>;
+  readCanonical(
+    repositoryPath: string,
+    context: DeviceContext,
+  ): Promise<CanonicalDeploySource>;
+  readDeployTarget(targetPath: string): DeployFile | undefined;
   deploy(repositoryPath: string, context: DeviceContext): Promise<DeployOperation>;
 }
 
@@ -40,6 +45,13 @@ export interface CanonicalTransformer {
     capture: NativeCaptureResult,
     context: DeviceContext,
   ): CaptureResult;
+  deploy(source: CanonicalDeploySource, context: DeviceContext): Promise<DeployFile[]>;
+}
+
+export interface CanonicalDeploySource {
+  rules?: string;
+  skills: Array<{ relativePath: string; content: Buffer }>;
+  mcp?: unknown;
 }
 
 export interface IdeAdapter {
@@ -54,7 +66,7 @@ export interface IdeAdapter {
 
 export interface DeployFile {
   targetPath: string;
-  content: string;
+  content: string | Buffer;
 }
 
 export interface DeployOperation {

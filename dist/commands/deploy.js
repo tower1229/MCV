@@ -96,9 +96,12 @@ function backupModifiedFiles(plan) {
 function buildDeployPlan(files) {
     return files.flatMap((file) => {
         const existingContent = fs.existsSync(file.targetPath)
-            ? fs.readFileSync(file.targetPath, 'utf8')
+            ? fs.readFileSync(file.targetPath)
             : undefined;
-        if (existingContent === file.content)
+        const desiredContent = Buffer.isBuffer(file.content)
+            ? file.content
+            : Buffer.from(file.content);
+        if (existingContent?.equals(desiredContent))
             return [];
         return [{
                 ...file,

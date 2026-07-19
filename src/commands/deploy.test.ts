@@ -73,6 +73,91 @@ describe('mcv deploy', () => {
     });
   });
 
+  it('deploys canonical rules as Claude Code instructions', async () => {
+    const rules = '# Personal rules\n\nAlways run tests.\n';
+    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), rules);
+
+    await createProgram(
+      { homeDir, platform: 'win32' },
+      {},
+      { confirmDeploy: async () => true },
+    ).parseAsync(['node', 'mcv', 'deploy']);
+
+    expect(
+      fs.readFileSync(path.join(homeDir, '.claude', 'CLAUDE.md'), 'utf8'),
+    ).toBe(rules);
+  });
+
+  it('copies canonical skill packages recursively to Claude Code', async () => {
+    const skillRoot = path.join(repositoryPath, 'common', 'skills', 'review');
+    const resource = Buffer.from([0, 1, 2, 255]);
+    fs.mkdirSync(path.join(skillRoot, 'resources'), { recursive: true });
+    fs.writeFileSync(path.join(skillRoot, 'SKILL.md'), '# Review\n');
+    fs.writeFileSync(path.join(skillRoot, 'resources', 'fixture.bin'), resource);
+
+    await createProgram(
+      { homeDir, platform: 'win32' },
+      {},
+      { confirmDeploy: async () => true },
+    ).parseAsync(['node', 'mcv', 'deploy']);
+
+    expect(
+      fs.readFileSync(path.join(homeDir, '.claude', 'skills', 'review', 'SKILL.md'), 'utf8'),
+    ).toBe('# Review\n');
+    expect(
+      fs.readFileSync(
+        path.join(homeDir, '.claude', 'skills', 'review', 'resources', 'fixture.bin'),
+      ),
+    ).toEqual(resource);
+  });
+
+  it('merges the canonical MCP registry into Claude Code native state', async () => {
+    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repositoryPath, 'common', 'mcp.yaml'),
+      [
+        'servers:',
+        '  local-tools:',
+        '    command: "${TOOLS_HOME}\\\\mcp.exe"',
+        '    args:',
+        '      - serve',
+        '',
+      ].join('\n'),
+    );
+    fs.writeFileSync(
+      path.join(repositoryPath, 'ide', 'claude-code', 'native', '.claude.json'),
+      `${JSON.stringify({ customPreference: { compactMode: true } }, null, 2)}\n`,
+    );
+    fs.mkdirSync(homeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(homeDir, '.claude.json'),
+      `${JSON.stringify({
+        localPreference: { theme: 'dark' },
+        mcpServers: { stale: { command: 'old.exe' } },
+      }, null, 2)}\n`,
+    );
+
+    await createProgram(
+      { homeDir, platform: 'win32' },
+      {},
+      { confirmDeploy: async () => true },
+    ).parseAsync(['node', 'mcv', 'deploy']);
+
+    expect(
+      JSON.parse(fs.readFileSync(path.join(homeDir, '.claude.json'), 'utf8')),
+    ).toEqual({
+      localPreference: { theme: 'dark' },
+      customPreference: { compactMode: true },
+      mcpServers: {
+        'local-tools': {
+          command: path.join(homeDir, 'Tools', 'mcp.exe'),
+          args: ['serve'],
+        },
+      },
+    });
+  });
+
   it('backs up modified native files and skips unchanged redeploys', async () => {
     const manifestPath = path.join(repositoryPath, 'mcv.yaml');
     fs.writeFileSync(

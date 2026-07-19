@@ -20,7 +20,7 @@ interface DeployManifest {
 
 interface PlannedDeployFile {
   targetPath: string;
-  content: string;
+  content: string | Buffer;
   change: 'add' | 'modify';
 }
 
@@ -93,9 +93,12 @@ function backupModifiedFiles(plan: PlannedDeployFile[]): void {
 function buildDeployPlan(files: DeployFile[]): PlannedDeployFile[] {
   return files.flatMap((file) => {
     const existingContent = fs.existsSync(file.targetPath)
-      ? fs.readFileSync(file.targetPath, 'utf8')
+      ? fs.readFileSync(file.targetPath)
       : undefined;
-    if (existingContent === file.content) return [];
+    const desiredContent = Buffer.isBuffer(file.content)
+      ? file.content
+      : Buffer.from(file.content);
+    if (existingContent?.equals(desiredContent)) return [];
     return [{
       ...file,
       change: existingContent === undefined ? 'add' : 'modify',

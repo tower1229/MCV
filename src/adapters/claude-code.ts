@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { isRecord, mergeRecords } from '../utils/objects';
 import { ClaudeCodeNativeFileHandler } from './claude-code-native-file-handler';
 import { ClaudeCodeCanonicalTransformer } from './claude-code-canonical-transformer';
 import type {
@@ -50,7 +51,69 @@ export class ClaudeCodeAdapter implements IdeAdapter {
     repositoryPath: string,
     context: DeviceContext,
   ): Promise<DeployOperation> {
-    return this.nativeFileHandler.deploy(repositoryPath, context);
+    const [nativeOperation, canonicalSource] = await Promise.all([
+      this.nativeFileHandler.deploy(repositoryPath, context),
+      this.nativeFileHandler.readCanonical(repositoryPath, context),
+    ]);
+    const canonicalFiles = await this.canonicalTransformer.deploy(
+      canonicalSource,
+      context,
+    );
+    const statePath = path.join(context.homeDir, '.claude.json');
+    return {
+      files: this.mergeDeploymentFiles(
+        nativeOperation.files,
+        canonicalFiles,
+        statePath,
+        this.nativeFileHandler.readDeployTarget(statePath),
+      ),
+      write: nativeOperation.write,
+    };
+  }
+
+  private mergeDeploymentFiles(
+    nativeFiles: DeployOperation['files'],
+    canonicalFiles: DeployOperation['files'],
+    statePath: string,
+    existingState: DeployOperation['files'][number] | undefined,
+  ): DeployOperation['files'] {
+    const nativeState = nativeFiles.find((file) => file.targetPath === statePath);
+    const canonicalState = canonicalFiles.find((file) => file.targetPath === statePath);
+    const otherFiles = [...nativeFiles, ...canonicalFiles].filter(
+      (file) => file.targetPath !== statePath,
+    );
+    if (!canonicalState) {
+      return [...otherFiles, ...(nativeState ? [nativeState] : [])];
+    }
+
+    const existingValue = existingState
+      ? JSON.parse(existingState.content.toString()) as unknown
+      : {};
+    const canonicalValue = JSON.parse(canonicalState.content.toString()) as unknown;
+    const nativeValue = nativeState
+      ? JSON.parse(nativeState.content.toString()) as unknown
+      : {};
+    if (
+      !isRecord(existingValue)
+      || !isRecord(nativeValue)
+      || !isRecord(canonicalValue)
+    ) {
+      throw new Error('Claude Code state deployment inputs must be JSON objects.');
+    }
+    return [
+      ...otherFiles,
+      {
+        targetPath: statePath,
+        content: `${JSON.stringify(
+          {
+            ...mergeRecords(existingValue, nativeValue),
+            ...canonicalValue,
+          },
+          null,
+          2,
+        )}\n`,
+      },
+    ];
   }
 
   private hasExecutable(context: DeviceContext): boolean {

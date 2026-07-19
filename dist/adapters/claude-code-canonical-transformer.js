@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ClaudeCodeCanonicalTransformer = void 0;
+const path = __importStar(require("path"));
 const yaml = __importStar(require("yaml"));
 const objects_1 = require("../utils/objects");
 class ClaudeCodeCanonicalTransformer {
@@ -69,6 +70,33 @@ class ClaudeCodeCanonicalTransformer {
             summary: { ...capture.summary, fileCount: files.length },
             warnings: capture.warnings,
         };
+    }
+    async deploy(source, context) {
+        const files = [];
+        if (source.rules !== undefined) {
+            files.push({
+                targetPath: path.join(context.homeDir, '.claude', 'CLAUDE.md'),
+                content: source.rules,
+            });
+        }
+        for (const skill of source.skills) {
+            files.push({
+                targetPath: path.join(context.homeDir, '.claude', 'skills', skill.relativePath),
+                content: skill.content,
+            });
+        }
+        if (source.mcp !== undefined) {
+            if (!(0, objects_1.isRecord)(source.mcp) || !(0, objects_1.isRecord)(source.mcp.servers)) {
+                throw new Error('common/mcp.yaml must contain a servers object.');
+            }
+            files.push({
+                targetPath: path.join(context.homeDir, '.claude.json'),
+                content: `${JSON.stringify({
+                    mcpServers: source.mcp.servers,
+                }, null, 2)}\n`,
+            });
+        }
+        return files;
     }
 }
 exports.ClaudeCodeCanonicalTransformer = ClaudeCodeCanonicalTransformer;

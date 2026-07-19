@@ -34,13 +34,17 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.atomicWriteTextFile = atomicWriteTextFile;
+exports.atomicWriteFile = atomicWriteFile;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 function atomicWriteTextFile(targetPath, content) {
+    atomicWriteFile(targetPath, content);
+}
+function atomicWriteFile(targetPath, content) {
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
     const temporaryPath = `${targetPath}.mcv-${process.pid}-${Date.now()}.tmp`;
     try {
-        fs.writeFileSync(temporaryPath, content, 'utf8');
+        fs.writeFileSync(temporaryPath, content);
         fs.renameSync(temporaryPath, targetPath);
     }
     finally {

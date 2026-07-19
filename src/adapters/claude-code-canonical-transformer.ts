@@ -1,9 +1,12 @@
+import * as path from 'path';
 import * as yaml from 'yaml';
 import { mergeRecords, isRecord } from '../utils/objects';
 import type {
+  CanonicalDeploySource,
   CanonicalTransformer,
   CaptureFile,
   CaptureResult,
+  DeployFile,
   DeviceContext,
   NativeCaptureResult,
 } from './types';
@@ -47,5 +50,43 @@ export class ClaudeCodeCanonicalTransformer implements CanonicalTransformer {
       summary: { ...capture.summary, fileCount: files.length },
       warnings: capture.warnings,
     };
+  }
+
+  async deploy(
+    source: CanonicalDeploySource,
+    context: DeviceContext,
+  ): Promise<DeployFile[]> {
+    const files: DeployFile[] = [];
+    if (source.rules !== undefined) {
+      files.push({
+        targetPath: path.join(context.homeDir, '.claude', 'CLAUDE.md'),
+        content: source.rules,
+      });
+    }
+
+    for (const skill of source.skills) {
+      files.push({
+        targetPath: path.join(
+          context.homeDir,
+          '.claude',
+          'skills',
+          skill.relativePath,
+        ),
+        content: skill.content,
+      });
+    }
+
+    if (source.mcp !== undefined) {
+      if (!isRecord(source.mcp) || !isRecord(source.mcp.servers)) {
+        throw new Error('common/mcp.yaml must contain a servers object.');
+      }
+      files.push({
+        targetPath: path.join(context.homeDir, '.claude.json'),
+        content: `${JSON.stringify({
+          mcpServers: source.mcp.servers,
+        }, null, 2)}\n`,
+      });
+    }
+    return files;
   }
 }

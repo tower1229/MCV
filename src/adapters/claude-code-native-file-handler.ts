@@ -1,15 +1,18 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as yaml from 'yaml';
 import { isRecord } from '../utils/objects';
-import { atomicWriteTextFile } from '../utils/files';
+import { atomicWriteFile } from '../utils/files';
 import { isSensitiveFile, sanitizeConfig } from '../utils/sanitize';
 import { resolvePortableValue } from '../utils/variables';
 import type {
   CaptureFile,
+  CanonicalDeploySource,
   CapturedManagedField,
   CapturedManagedFile,
   DetectedConfigDirectory,
   DetectedConfigFile,
+  DeployFile,
   DeployOperation,
   DeviceContext,
   NativeFileHandler,
@@ -184,8 +187,58 @@ export class ClaudeCodeNativeFileHandler implements NativeFileHandler {
     });
     return {
       files,
-      write: (file) => atomicWriteTextFile(file.targetPath, file.content),
+      write: (file) => atomicWriteFile(file.targetPath, file.content),
     };
+  }
+
+  async readCanonical(
+    repositoryPath: string,
+    context: DeviceContext,
+  ): Promise<CanonicalDeploySource> {
+    const commonRoot = path.join(repositoryPath, 'common');
+    const rulesPath = path.join(commonRoot, 'AGENTS.md');
+    const skillsRoot = path.join(commonRoot, 'skills');
+    const mcpPath = path.join(commonRoot, 'mcp.yaml');
+    const source: CanonicalDeploySource = {
+      skills: fs.existsSync(skillsRoot)
+        ? this.readCanonicalSkillFiles(skillsRoot, skillsRoot)
+        : [],
+    };
+
+    if (fs.existsSync(rulesPath)) {
+      source.rules = fs.readFileSync(rulesPath, 'utf8');
+    }
+    if (fs.existsSync(mcpPath)) {
+      const registry = yaml.parse(fs.readFileSync(mcpPath, 'utf8')) as unknown;
+      source.mcp = resolvePortableValue(
+        registry,
+        context.variables ?? {},
+        context.platform ?? process.platform,
+      );
+    }
+    return source;
+  }
+
+  readDeployTarget(targetPath: string): DeployFile | undefined {
+    if (!fs.existsSync(targetPath)) return undefined;
+    return { targetPath, content: fs.readFileSync(targetPath) };
+  }
+
+  private readCanonicalSkillFiles(
+    sourceRoot: string,
+    currentDirectory: string,
+  ): CanonicalDeploySource['skills'] {
+    return fs.readdirSync(currentDirectory, { withFileTypes: true }).flatMap((entry) => {
+      const sourcePath = path.join(currentDirectory, entry.name);
+      if (entry.isDirectory()) {
+        return this.readCanonicalSkillFiles(sourceRoot, sourcePath);
+      }
+      if (!entry.isFile()) return [];
+      return [{
+        relativePath: path.relative(sourceRoot, sourcePath),
+        content: fs.readFileSync(sourcePath),
+      }];
+    });
   }
 
   private readJsonObject(

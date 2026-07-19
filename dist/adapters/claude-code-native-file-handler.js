@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ClaudeCodeNativeFileHandler = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const yaml = __importStar(require("yaml"));
 const objects_1 = require("../utils/objects");
 const files_1 = require("../utils/files");
 const sanitize_1 = require("../utils/sanitize");
@@ -184,8 +185,46 @@ class ClaudeCodeNativeFileHandler {
         });
         return {
             files,
-            write: (file) => (0, files_1.atomicWriteTextFile)(file.targetPath, file.content),
+            write: (file) => (0, files_1.atomicWriteFile)(file.targetPath, file.content),
         };
+    }
+    async readCanonical(repositoryPath, context) {
+        const commonRoot = path.join(repositoryPath, 'common');
+        const rulesPath = path.join(commonRoot, 'AGENTS.md');
+        const skillsRoot = path.join(commonRoot, 'skills');
+        const mcpPath = path.join(commonRoot, 'mcp.yaml');
+        const source = {
+            skills: fs.existsSync(skillsRoot)
+                ? this.readCanonicalSkillFiles(skillsRoot, skillsRoot)
+                : [],
+        };
+        if (fs.existsSync(rulesPath)) {
+            source.rules = fs.readFileSync(rulesPath, 'utf8');
+        }
+        if (fs.existsSync(mcpPath)) {
+            const registry = yaml.parse(fs.readFileSync(mcpPath, 'utf8'));
+            source.mcp = (0, variables_1.resolvePortableValue)(registry, context.variables ?? {}, context.platform ?? process.platform);
+        }
+        return source;
+    }
+    readDeployTarget(targetPath) {
+        if (!fs.existsSync(targetPath))
+            return undefined;
+        return { targetPath, content: fs.readFileSync(targetPath) };
+    }
+    readCanonicalSkillFiles(sourceRoot, currentDirectory) {
+        return fs.readdirSync(currentDirectory, { withFileTypes: true }).flatMap((entry) => {
+            const sourcePath = path.join(currentDirectory, entry.name);
+            if (entry.isDirectory()) {
+                return this.readCanonicalSkillFiles(sourceRoot, sourcePath);
+            }
+            if (!entry.isFile())
+                return [];
+            return [{
+                    relativePath: path.relative(sourceRoot, sourcePath),
+                    content: fs.readFileSync(sourcePath),
+                }];
+        });
     }
     readJsonObject(filePath, warnings) {
         try {
