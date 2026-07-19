@@ -34,9 +34,12 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.parseStructuredObject = parseStructuredObject;
+exports.parseJsonc = parseJsonc;
+exports.parseJsoncObject = parseJsoncObject;
 exports.stringifyStructuredObject = stringifyStructuredObject;
 exports.splitOwnedFields = splitOwnedFields;
 exports.mergeStructuredOverlay = mergeStructuredOverlay;
+exports.deleteObjectPath = deleteObjectPath;
 const yaml = __importStar(require("yaml"));
 const smol_toml_1 = require("smol-toml");
 const objects_1 = require("./objects");
@@ -49,6 +52,60 @@ function parseStructuredObject(content, format, label) {
     if (!(0, objects_1.isRecord)(parsed)) {
         throw new Error(`${label} must contain a ${format.toUpperCase()} object.`);
     }
+    return parsed;
+}
+function parseJsonc(content) {
+    let output = '';
+    let inString = false;
+    let escaped = false;
+    let lineComment = false;
+    let blockComment = false;
+    for (let index = 0; index < content.length; index += 1) {
+        const char = content[index];
+        const next = content[index + 1];
+        if (lineComment) {
+            if (char === '\n') {
+                lineComment = false;
+                output += char;
+            }
+            continue;
+        }
+        if (blockComment) {
+            if (char === '*' && next === '/') {
+                blockComment = false;
+                index += 1;
+            }
+            continue;
+        }
+        if (!inString && char === '/' && next === '/') {
+            lineComment = true;
+            index += 1;
+            continue;
+        }
+        if (!inString && char === '/' && next === '*') {
+            blockComment = true;
+            index += 1;
+            continue;
+        }
+        output += char;
+        if (inString) {
+            if (escaped)
+                escaped = false;
+            else if (char === '\\')
+                escaped = true;
+            else if (char === '"')
+                inString = false;
+        }
+        else if (char === '"')
+            inString = true;
+    }
+    const withoutTrailingCommas = output.replace(/,(\s*[}\]])/g, '$1');
+    return JSON.parse(withoutTrailingCommas);
+}
+function parseJsoncObject(content, label) {
+    const parsed = parseJsonc(content);
+    if (!(0, objects_1.isRecord)(parsed))
+        throw new Error(`${label} must contain a JSON object.`);
     return parsed;
 }
 function stringifyStructuredObject(value, format) {
@@ -105,6 +162,11 @@ function setObjectPath(value, objectPath, fieldValue) {
     current[segments.at(-1)] = fieldValue;
 }
 function deleteObjectPath(value, objectPath) {
+    const exactKey = objectPath.slice(2);
+    if (exactKey in value) {
+        delete value[exactKey];
+        return;
+    }
     const segments = parseObjectPath(objectPath);
     const parents = [];
     let current = value;

@@ -53,8 +53,7 @@ class GeminiAdapter {
         return {
             id: 'gemini',
             name: 'Gemini',
-            detected: configDirectories.some((directory) => directory.exists)
-                || files.some((file) => file.exists)
+            detected: files.some((file) => file.exists)
                 || (0, adapter_utils_1.hasExecutable)('gemini', context),
             configDirectories,
         };
@@ -72,14 +71,16 @@ class GeminiAdapter {
         ]);
         const canonicalFiles = await this.canonicalTransformer.deploy(canonicalSource, context);
         const settingsPath = path.join(context.homeDir, '.gemini', 'settings.json');
+        const antigravityMcpPath = path.join(context.homeDir, '.gemini', 'config', 'mcp_config.json');
         return {
-            files: this.mergeSettings(nativeOperation.files, canonicalFiles, settingsPath),
+            files: this.mergeSettings(this.mergeSettings(nativeOperation.files, canonicalFiles, settingsPath), [], antigravityMcpPath),
             write: nativeOperation.write,
         };
     }
     mergeSettings(nativeFiles, canonicalFiles, settingsPath) {
         const native = nativeFiles.find((file) => file.targetPath === settingsPath);
-        const managed = canonicalFiles.find((file) => file.targetPath === settingsPath);
+        const managed = canonicalFiles.find((file) => file.targetPath === settingsPath)
+            ?? nativeFiles.slice().reverse().find((file) => file.targetPath === settingsPath);
         const other = [...nativeFiles, ...canonicalFiles].filter((file) => file.targetPath !== settingsPath);
         if (!native && !managed)
             return other;

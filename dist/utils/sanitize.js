@@ -35,8 +35,10 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isSensitiveFile = isSensitiveFile;
 exports.sanitizeConfig = sanitizeConfig;
+exports.scanTextForSecrets = scanTextForSecrets;
 const path = __importStar(require("path"));
-const SENSITIVE_FIELD_PATTERN = /(secret|token|key|password|credential)/i;
+const SENSITIVE_FIELD_PATTERN = /(secret|token|password|credential|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?key|\.key$)/i;
+const REFERENCE_FIELD_PATTERN = /(env_var|env_vars|variable|reference)$/i;
 const SENSITIVE_FILE_NAMES = new Set([
     '.env',
     'credentials.json',
@@ -61,7 +63,7 @@ function sanitizeConfig(input, context) {
         }
         if (value !== null && typeof value === 'object') {
             return Object.fromEntries(Object.entries(value).map(([key, child]) => {
-                if (SENSITIVE_FIELD_PATTERN.test(key)) {
+                if (SENSITIVE_FIELD_PATTERN.test(key) && !REFERENCE_FIELD_PATTERN.test(key)) {
                     sensitiveFieldCount += 1;
                     return [key, `\${env:${toEnvironmentName(key)}}`];
                 }
@@ -74,12 +76,7 @@ function sanitizeConfig(input, context) {
             if (path.posix.isAbsolute(parameterized.value)
                 || path.win32.isAbsolute(parameterized.value)) {
                 parameterizedPathCount += 1;
-                const readableName = toEnvironmentName(`MCV_${fieldPath.length > 0 ? fieldPath.join('_') : 'LOCAL'}_PATH`);
-                const encodedPath = (fieldPath.length > 0 ? fieldPath : ['LOCAL'])
-                    .map((segment) => Buffer.from(segment, 'utf8').toString('hex').toUpperCase())
-                    .join('_');
-                const variableName = `${readableName}_${encodedPath}`;
-                return `\${env:${variableName}}`;
+                return parameterized.value;
             }
             return parameterized.value;
         }
@@ -90,6 +87,20 @@ function sanitizeConfig(input, context) {
         sensitiveFieldCount,
         parameterizedPathCount,
     };
+}
+function scanTextForSecrets(content) {
+    const findings = [];
+    const patterns = [
+        ['private-key', /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/],
+        ['github-token', /\b(?:ghp|github_pat)_[A-Za-z0-9_]{20,}\b/],
+        ['openai-key', /\bsk-[A-Za-z0-9_-]{20,}\b/],
+        ['google-key', /\bAIza[A-Za-z0-9_-]{20,}\b/],
+        ['aws-key', /\bAKIA[0-9A-Z]{16}\b/],
+    ];
+    for (const [name, pattern] of patterns)
+        if (pattern.test(content))
+            findings.push(name);
+    return findings;
 }
 function toEnvironmentName(fieldName) {
     return fieldName

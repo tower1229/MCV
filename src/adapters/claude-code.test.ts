@@ -136,12 +136,13 @@ describe('ClaudeCodeAdapter', () => {
       (file) => file.repositoryPath === 'common/mcp.yaml',
     );
 
-    expect(JSON.parse(nativeSettings?.content ?? '')).toEqual({ theme: 'dark' });
-    expect(parseYaml(mcpRegistry?.content ?? '')).toEqual({
+    expect(JSON.parse(nativeSettings?.content.toString() ?? '')).toEqual({ theme: 'dark' });
+    expect(parseYaml(mcpRegistry?.content.toString() ?? '')).toEqual({
       servers: {
         local: {
           command: '${HOME}\\工具\\server.exe',
           env: { accessToken: '${env:ACCESS_TOKEN}' },
+          transport: 'stdio',
         },
       },
     });
@@ -172,7 +173,7 @@ describe('ClaudeCodeAdapter', () => {
       (file) => file.repositoryPath === 'ide/claude-code/native/.claude.json',
     );
 
-    expect(JSON.parse(nativeState?.content ?? '')).toEqual({
+    expect(JSON.parse(nativeState?.content.toString() ?? '')).toEqual({
       customPreference: { compactMode: true },
     });
   });

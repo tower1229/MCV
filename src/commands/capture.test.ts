@@ -6,30 +6,37 @@ import { parse as parseToml } from 'smol-toml';
 
 describe('mcv capture', () => {
   const originalCwd = process.cwd();
+  const originalEnv = { ...process.env };
   let testRoot: string;
   let repositoryPath: string;
   let homeDir: string;
+  let stateRoot: string;
 
   beforeEach(() => {
     testRoot = fs.mkdtempSync(path.join(originalCwd, '.mcv-capture-test-'));
     repositoryPath = path.join(testRoot, 'repository');
     homeDir = path.join(testRoot, 'home');
+    stateRoot = path.join(testRoot, 'device');
     fs.mkdirSync(repositoryPath);
     fs.mkdirSync(path.join(homeDir, '.claude'), { recursive: true });
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 1\ntargets:\n  claudeCode:\n    enabled: true\n',
+      'schemaVersion: 2\nrepositoryId: test\ninitializedAt: test\nsecurity: { scanSecrets: true, allowPlaintextSecrets: false }\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  claudeCode:\n    enabled: true\nvariables: {}\n',
     );
     fs.writeFileSync(
       path.join(homeDir, '.claude', 'settings.json'),
       JSON.stringify({ theme: 'dark', apiToken: 'must-not-leak' }),
     );
     process.chdir(repositoryPath);
+    process.env.APPDATA = stateRoot;
+    process.env.HOME = stateRoot;
+    process.env.USERPROFILE = stateRoot;
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
+    process.env = { ...originalEnv };
     vi.restoreAllMocks();
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
@@ -134,7 +141,7 @@ describe('mcv capture', () => {
   it('captures Gemini merged settings while preserving repository-only fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 1\ntargets:\n  gemini:\n    enabled: true\n',
+      'schemaVersion: 2\nrepositoryId: test\ninitializedAt: test\nsecurity: { scanSecrets: true, allowPlaintextSecrets: false }\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
     );
     const geminiRoot = path.join(homeDir, '.gemini');
     fs.mkdirSync(geminiRoot, { recursive: true });
@@ -145,7 +152,7 @@ describe('mcv capture', () => {
         mcpServers: { gemini: { command: 'gemini-server' } },
       }),
     );
-    const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native');
+    const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native', 'gemini-cli');
     fs.mkdirSync(nativeRoot, { recursive: true });
     fs.writeFileSync(
       path.join(nativeRoot, 'settings.json'),
@@ -179,7 +186,7 @@ describe('mcv capture', () => {
   it('structurally merges captured Codex TOML with repository-native fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 1\ntargets:\n  codex:\n    enabled: true\n',
+      'schemaVersion: 2\nrepositoryId: test\ninitializedAt: test\nsecurity: { scanSecrets: true, allowPlaintextSecrets: false }\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
     );
     const codexRoot = path.join(homeDir, '.codex');
     fs.mkdirSync(codexRoot, { recursive: true });
@@ -206,7 +213,12 @@ describe('mcv capture', () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 1',
+        'schemaVersion: 2',
+        'repositoryId: test',
+        'initializedAt: test',
+        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+        'capture: { preserveUnknownNativeFields: true }',
+        'deploy: { backupBeforeWrite: true, useSymlinks: false }',
         'targets:',
         '  codex:',
         '    enabled: true',
@@ -214,6 +226,7 @@ describe('mcv capture', () => {
         '    enabled: true',
         '  gemini:',
         '    enabled: true',
+        'variables: {}',
         '',
       ].join('\n'),
     );

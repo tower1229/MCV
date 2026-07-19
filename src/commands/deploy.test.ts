@@ -23,7 +23,11 @@ describe('mcv deploy', () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 1',
+        'schemaVersion: 2',
+        'repositoryId: test',
+        'initializedAt: test',
+        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+        'capture: { preserveUnknownNativeFields: true }',
         'targets:',
         '  claudeCode:',
         '    enabled: true',
@@ -32,6 +36,7 @@ describe('mcv deploy', () => {
         '    windows: "${HOME}\\\\Tools"',
         'deploy:',
         '  backupBeforeWrite: true',
+        '  useSymlinks: false',
         '',
       ].join('\n'),
     );
@@ -159,14 +164,6 @@ describe('mcv deploy', () => {
   });
 
   it('backs up modified native files and skips unchanged redeploys', async () => {
-    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
-    fs.writeFileSync(
-      manifestPath,
-      fs.readFileSync(manifestPath, 'utf8').replace(
-        'backupBeforeWrite: true',
-        'backupBeforeWrite: false',
-      ),
-    );
     fs.mkdirSync(path.join(homeDir, '.claude'), { recursive: true });
     const settingsPath = path.join(homeDir, '.claude', 'settings.json');
     const statePath = path.join(homeDir, '.claude.json');
@@ -257,11 +254,29 @@ describe('mcv deploy', () => {
     expect(vi.mocked(console.log)).toHaveBeenCalledWith(`[drifted] ${settingsPath}`);
   });
 
+  it('deletes only prior managed inventory when prune is explicitly confirmed', async () => {
+    const run = (...args: string[]) => createProgram(
+      { homeDir, platform: 'win32' }, {}, { confirmDeploy: async () => true },
+    ).parseAsync(['node', 'mcv', 'deploy', ...args]);
+    await run();
+    const targetPath = path.join(homeDir, '.claude', 'settings.json');
+    expect(fs.existsSync(targetPath)).toBe(true);
+    fs.rmSync(path.join(repositoryPath, 'ide', 'claude-code', 'native', 'settings.json'));
+    await run('--prune-managed');
+    expect(fs.existsSync(targetPath)).toBe(false);
+    await createProgram().parseAsync(['node', 'mcv', 'restore']);
+    expect(fs.existsSync(targetPath)).toBe(true);
+  });
+
   it('resolves chained portable variables independent of declaration order', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 1',
+        'schemaVersion: 2',
+        'repositoryId: test',
+        'initializedAt: test',
+        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+        'capture: { preserveUnknownNativeFields: true }',
         'targets:',
         '  claudeCode:',
         '    enabled: true',
@@ -270,6 +285,9 @@ describe('mcv deploy', () => {
         '    macos: "${PROJECTS_HOME}/工具"',
         '  PROJECTS_HOME:',
         '    macos: "/Volumes/工作 盘/Code"',
+        'deploy:',
+        '  backupBeforeWrite: true',
+        '  useSymlinks: false',
         '',
       ].join('\n'),
     );
@@ -338,7 +356,7 @@ describe('mcv deploy', () => {
   it('deploys Gemini merged settings without replacing unknown local fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 1\ntargets:\n  gemini:\n    enabled: true\n',
+      'schemaVersion: 2\nrepositoryId: test\ninitializedAt: test\nsecurity: { scanSecrets: true, allowPlaintextSecrets: false }\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
     );
     const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native');
     fs.mkdirSync(nativeRoot, { recursive: true });
@@ -378,7 +396,7 @@ describe('mcv deploy', () => {
   it('deploys Codex canonical content and preserves unknown TOML fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 1\ntargets:\n  codex:\n    enabled: true\n',
+      'schemaVersion: 2\nrepositoryId: test\ninitializedAt: test\nsecurity: { scanSecrets: true, allowPlaintextSecrets: false }\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
     );
     const nativeRoot = path.join(repositoryPath, 'ide', 'codex', 'native');
     fs.mkdirSync(nativeRoot, { recursive: true });

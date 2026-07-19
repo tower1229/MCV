@@ -38,6 +38,7 @@ const path = __importStar(require("path"));
 const yaml = __importStar(require("yaml"));
 const objects_1 = require("../utils/objects");
 const overlay_policies_1 = require("./overlay-policies");
+const mcp_1 = require("../core/mcp");
 class ClaudeCodeCanonicalTransformer {
     transform(capture, _context) {
         const files = [...capture.files];
@@ -51,13 +52,18 @@ class ClaudeCodeCanonicalTransformer {
             });
         }
         let mcpServers = {};
+        let mcpOverrides = {};
         const mcpSources = [];
         for (const field of capture.managedFields) {
             if (field.path !== overlay_policies_1.CLAUDE_CODE_MCP_PATH || !(0, objects_1.isRecord)(field.value))
                 continue;
-            mcpServers = (0, objects_1.mergeRecords)(mcpServers, field.value);
+            const normalized = (0, mcp_1.normalizeMcpServers)(field.value, 'claude-code');
+            mcpServers = (0, objects_1.mergeRecords)(mcpServers, normalized.servers);
+            mcpOverrides = (0, objects_1.mergeRecords)(mcpOverrides, normalized.overrides);
             mcpSources.push(field.sourcePath);
         }
+        if (Object.keys(mcpOverrides).length > 0)
+            files.push({ sourcePath: mcpSources.join(', '), repositoryPath: 'ide/claude-code/mcp-overrides.yaml', content: yaml.stringify(mcpOverrides), ownership: 'managed' });
         if (Object.keys(mcpServers).length > 0) {
             files.push({
                 sourcePath: mcpSources.join(', '),
@@ -76,13 +82,13 @@ class ClaudeCodeCanonicalTransformer {
         const files = [];
         if (source.rules !== undefined) {
             files.push({
-                targetPath: path.join(context.homeDir, '.claude', 'CLAUDE.md'),
+                targetPath: path.join((context.env ?? process.env).CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'CLAUDE.md'),
                 content: source.rules,
             });
         }
         for (const skill of source.skills) {
             files.push({
-                targetPath: path.join(context.homeDir, '.claude', 'skills', skill.relativePath),
+                targetPath: path.join((context.env ?? process.env).CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'skills', skill.relativePath),
                 content: skill.content,
             });
         }
@@ -93,7 +99,7 @@ class ClaudeCodeCanonicalTransformer {
             files.push({
                 targetPath: path.join(context.homeDir, '.claude.json'),
                 content: `${JSON.stringify({
-                    mcpServers: source.mcp.servers,
+                    mcpServers: (0, mcp_1.toNativeMcpServers)(source.mcp.servers, 'claude-code', source.mcpOverrides?.['claude-code']),
                 }, null, 2)}\n`,
             });
         }

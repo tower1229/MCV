@@ -8,7 +8,7 @@ import {
   stringifyStructuredObject,
 } from '../utils/structured-config';
 import { resolvePortableValue } from '../utils/variables';
-import { readCanonicalSource, readDeployTarget } from './adapter-utils';
+import { readCanonicalSource, readDeployTarget, repositoryFileForPlatform } from './adapter-utils';
 import { CODEX_MANAGED_PATHS } from './overlay-policies';
 import type {
   CanonicalDeploySource,
@@ -21,18 +21,25 @@ import type {
   NativeFileHandler,
 } from './types';
 
-const LOCAL_PATHS = ['$.projects'];
+const LOCAL_PATHS = [
+  '$.projects', '$.notify', '$.marketplaces',
+  '$.shell_environment_policy.set.NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S',
+  '$.shell_environment_policy.set.NODE_REPL_TRUSTED_CODE_PATHS',
+];
 
 export class CodexNativeFileHandler implements NativeFileHandler {
+  private root(context: DeviceContext): string {
+    return context.env?.CODEX_HOME || path.join(context.homeDir, '.codex');
+  }
   discoverDirectories(context: DeviceContext): DetectedConfigDirectory[] {
-    const configRoot = path.join(context.homeDir, '.codex');
+    const configRoot = this.root(context);
     return [{ id: 'config-root', path: configRoot, exists: fs.existsSync(configRoot) }];
   }
 
   async discoverFiles(context: DeviceContext): Promise<DetectedConfigFile[]> {
     return [
-      { id: 'user-settings', path: path.join(context.homeDir, '.codex', 'config.toml') },
-      { id: 'user-instructions', path: path.join(context.homeDir, '.codex', 'AGENTS.md') },
+      { id: 'user-settings', path: path.join(this.root(context), 'config.toml') },
+      { id: 'user-instructions', path: path.join(this.root(context), 'AGENTS.md') },
     ].map((file) => ({ ...file, exists: fs.existsSync(file.path) }));
   }
 
@@ -72,6 +79,7 @@ export class CodexNativeFileHandler implements NativeFileHandler {
           file.path,
         );
         const owned = splitOwnedFields(parsed, CODEX_MANAGED_PATHS, LOCAL_PATHS);
+        removeCodexRuntimeFields(owned.native);
         const native = sanitizeConfig(owned.native, context);
         result.summary.sensitiveFieldCount += native.sensitiveFieldCount;
         result.summary.parameterizedPathCount += native.parameterizedPathCount;
@@ -81,6 +89,7 @@ export class CodexNativeFileHandler implements NativeFileHandler {
             repositoryPath: 'ide/codex/native/config.toml',
             content: stringifyStructuredObject(native.value, 'toml'),
             ownership: 'native',
+            localPaths: LOCAL_PATHS,
           });
         }
         for (const field of owned.managed) {
@@ -106,8 +115,8 @@ export class CodexNativeFileHandler implements NativeFileHandler {
     repositoryPath: string,
     context: DeviceContext,
   ): Promise<DeployOperation> {
-    const sourcePath = path.join(repositoryPath, 'ide', 'codex', 'native', 'config.toml');
-    const targetPath = path.join(context.homeDir, '.codex', 'config.toml');
+    const sourcePath = repositoryFileForPlatform(repositoryPath, 'ide/codex/native/config.toml', context);
+    const targetPath = path.join(this.root(context), 'config.toml');
     const files: DeployFile[] = [];
     if (fs.existsSync(sourcePath)) {
       const parsed = parseStructuredObject(fs.readFileSync(sourcePath, 'utf8'), 'toml', sourcePath);
@@ -131,4 +140,15 @@ export class CodexNativeFileHandler implements NativeFileHandler {
   readDeployTarget(targetPath: string): DeployFile | undefined {
     return readDeployTarget(targetPath);
   }
+}
+
+function removeCodexRuntimeFields(value: Record<string, unknown>): void {
+  const policy = value.shell_environment_policy;
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy)) return;
+  const set = (policy as Record<string, unknown>).set;
+  if (!set || typeof set !== 'object' || Array.isArray(set)) return;
+  for (const key of Object.keys(set as Record<string, unknown>)) {
+    if (/^(NODE_REPL|CODEX_|OPENAI_CODEX_)/i.test(key)) delete (set as Record<string, unknown>)[key];
+  }
+  if (Object.keys(set as Record<string, unknown>).length === 0) delete (policy as Record<string, unknown>).set;
 }

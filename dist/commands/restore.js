@@ -40,54 +40,92 @@ const files_1 = require("../utils/files");
 const objects_1 = require("../utils/objects");
 const state_1 = require("../utils/state");
 function restoreLatestBackup() {
-    const backupRoot = path.join(path.dirname((0, state_1.getStateFilePath)()), 'backups');
-    const latest = findLatestBackup(backupRoot);
-    if (!latest) {
+    const stateDirectory = path.dirname((0, state_1.getStateFilePath)());
+    const latest = findLatestBackup(path.join(stateDirectory, 'backups'));
+    if (!latest)
         throw new Error('No deployment backup found.');
+    for (const file of latest.manifest.files) {
+        if (!file.afterHash)
+            continue;
+        if (!fs.existsSync(file.originalPath) || (0, files_1.hashFile)(file.originalPath) !== file.afterHash) {
+            throw new Error(`Refusing to restore because the deployed file changed afterwards: ${file.originalPath}`);
+        }
     }
-    const files = latest.manifest.files.map((file) => {
-        const sourcePath = path.resolve(latest.directory, file.backupPath);
-        const relativePath = path.relative(latest.directory, sourcePath);
-        if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-            throw new Error(`Backup file path escapes its backup directory: ${file.backupPath}`);
+    const restoreBackup = backupCurrentState(stateDirectory, latest.manifest.files);
+    const originals = new Map();
+    try {
+        for (const file of latest.manifest.files) {
+            originals.set(file.originalPath, fs.existsSync(file.originalPath) ? fs.readFileSync(file.originalPath) : undefined);
+            const action = file.action ?? 'modify';
+            if (action === 'add') {
+                fs.rmSync(file.originalPath, { force: true });
+                console.log(`[removed] ${file.originalPath}`);
+                continue;
+            }
+            if (!file.backupPath)
+                throw new Error(`Backup path is missing for ${file.originalPath}.`);
+            const sourcePath = resolveBackupPath(latest.directory, file.backupPath);
+            (0, files_1.atomicWriteFile)(file.originalPath, fs.readFileSync(sourcePath));
+            console.log(`[restored] ${file.originalPath}`);
         }
-        if (!fs.existsSync(sourcePath)) {
-            throw new Error(`Backup file is missing: ${sourcePath}`);
+    }
+    catch (error) {
+        for (const [targetPath, content] of originals) {
+            if (content === undefined)
+                fs.rmSync(targetPath, { force: true });
+            else
+                (0, files_1.atomicWriteFile)(targetPath, content);
         }
-        return { targetPath: file.originalPath, content: fs.readFileSync(sourcePath) };
+        throw error;
+    }
+    const state = (0, state_1.readState)();
+    delete state.baselineSnapshot;
+    delete state.managedInventory;
+    state.lastOperation = { kind: 'restore', time: new Date().toISOString(), success: true };
+    (0, state_1.writeState)(state);
+    console.log(`Current pre-restore state saved to ${restoreBackup}.`);
+    console.log(`Restored ${latest.manifest.files.length} file(s) from the latest backup.`);
+}
+function backupCurrentState(stateDirectory, files) {
+    const root = path.join(stateDirectory, 'restore-backups');
+    fs.mkdirSync(root, { recursive: true });
+    const directory = fs.mkdtempSync(path.join(root, 'before-restore-'));
+    const entries = files.flatMap((file, index) => {
+        if (!fs.existsSync(file.originalPath))
+            return [];
+        const backupPath = path.join('files', `${index}-${path.basename(file.originalPath)}`);
+        fs.mkdirSync(path.dirname(path.join(directory, backupPath)), { recursive: true });
+        fs.copyFileSync(file.originalPath, path.join(directory, backupPath));
+        return [{ originalPath: file.originalPath, backupPath, hash: (0, files_1.hashFile)(file.originalPath) }];
     });
-    for (const file of files) {
-        (0, files_1.atomicWriteFile)(file.targetPath, file.content);
-        console.log(`[restored] ${file.targetPath}`);
-    }
-    console.log(`Restored ${files.length} file(s) from the latest backup.`);
+    (0, files_1.atomicWriteTextFile)(path.join(directory, 'manifest.json'), `${JSON.stringify({ createdAt: new Date().toISOString(), files: entries }, null, 2)}\n`);
+    return directory;
+}
+function resolveBackupPath(directory, backupPath) {
+    const sourcePath = path.resolve(directory, backupPath);
+    const relativePath = path.relative(directory, sourcePath);
+    if (relativePath.startsWith('..') || path.isAbsolute(relativePath))
+        throw new Error(`Backup file path escapes its backup directory: ${backupPath}`);
+    if (!fs.existsSync(sourcePath))
+        throw new Error(`Backup file is missing: ${sourcePath}`);
+    return sourcePath;
 }
 function findLatestBackup(backupRoot) {
     if (!fs.existsSync(backupRoot))
         return undefined;
-    return fs.readdirSync(backupRoot, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
-        .flatMap((entry) => {
+    return fs.readdirSync(backupRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).flatMap((entry) => {
         const directory = path.join(backupRoot, entry.name);
         const manifest = readBackupManifest(path.join(directory, 'manifest.json'));
         return manifest ? [{ directory, manifest }] : [];
-    })
-        .sort((left, right) => Date.parse(right.manifest.createdAt) - Date.parse(left.manifest.createdAt))[0];
+    }).sort((left, right) => Date.parse(right.manifest.createdAt) - Date.parse(left.manifest.createdAt))[0];
 }
 function readBackupManifest(manifestPath) {
     if (!fs.existsSync(manifestPath))
         return undefined;
     try {
         const value = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-        if (!(0, objects_1.isRecord)(value)
-            || typeof value.createdAt !== 'string'
-            || Number.isNaN(Date.parse(value.createdAt))
-            || !Array.isArray(value.files)
-            || !value.files.every((file) => (0, objects_1.isRecord)(file)
-                && typeof file.originalPath === 'string'
-                && typeof file.backupPath === 'string')) {
+        if (!(0, objects_1.isRecord)(value) || typeof value.createdAt !== 'string' || !Array.isArray(value.files) || !value.files.every((file) => (0, objects_1.isRecord)(file) && typeof file.originalPath === 'string'))
             return undefined;
-        }
         return value;
     }
     catch {

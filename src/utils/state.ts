@@ -8,10 +8,13 @@ export interface BaselineSnapshot {
 }
 
 export interface McvState {
+  schemaVersion?: 2;
   deviceId?: string;
   defaultRepositoryId?: string;
   repositoryPath?: string;
   baselineSnapshot?: BaselineSnapshot;
+  managedInventory?: Record<string, { source: string; hash: string }>;
+  lastOperation?: { kind: 'capture' | 'deploy' | 'restore'; time: string; success: boolean };
 }
 
 export function getStateFilePath(): string {

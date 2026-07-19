@@ -1,6 +1,7 @@
 export interface DeviceContext {
   homeDir: string;
   platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
   pathEnv?: string;
   pathExt?: string;
   variables?: Record<string, string>;
@@ -52,6 +53,7 @@ export interface CanonicalDeploySource {
   rules?: string;
   skills: Array<{ relativePath: string; content: Buffer }>;
   mcp?: unknown;
+  mcpOverrides?: Record<string, Record<string, unknown>>;
 }
 
 export interface IdeAdapter {
@@ -77,8 +79,9 @@ export interface DeployOperation {
 export interface CaptureFile {
   sourcePath: string;
   repositoryPath: string;
-  content: string;
+  content: string | Buffer;
   ownership: 'managed' | 'native';
+  localPaths?: string[];
 }
 
 export interface CaptureSummary {
@@ -98,6 +101,34 @@ export interface CapturedManagedFile {
   id: string;
   sourcePath: string;
   content: string;
+}
+
+export type ConfigurationCapability = 'rules' | 'skills' | 'mcp' | 'native';
+export type ConfigurationOwnership = 'generated' | 'native' | 'merged' | 'local';
+export type ChangeKind = 'add' | 'modify' | 'delete' | 'conflict' | 'skip';
+
+export interface ConfigurationItem {
+  id: string;
+  ide: string;
+  surface: string;
+  capability: ConfigurationCapability;
+  ownership: ConfigurationOwnership;
+  sourcePath: string;
+  repositoryPath: string;
+  content: string | Buffer;
+  hash: string;
+  warnings: string[];
+}
+
+export interface PlannedChange extends ConfigurationItem {
+  change: ChangeKind;
+  defaultSelected: boolean;
+  reason?: string;
+}
+
+export interface ChangePlan {
+  changes: PlannedChange[];
+  warnings: string[];
 }
 
 export interface CapturedManagedField {

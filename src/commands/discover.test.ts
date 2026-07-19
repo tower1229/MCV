@@ -33,8 +33,14 @@ describe('mcv discover', () => {
       `[missing] ${path.join(homeDir, '.claude.json')}`,
       'Gemini: not detected',
       `[missing] ${path.join(homeDir, '.gemini')}`,
+      `[missing] ${path.join(homeDir, '.gemini', 'config')}`,
       `[missing] ${path.join(homeDir, '.gemini', 'settings.json')}`,
       `[missing] ${path.join(homeDir, '.gemini', 'GEMINI.md')}`,
+      `[missing] ${path.join(homeDir, '.gemini', 'config', 'config.json')}`,
+      `[missing] ${path.join(homeDir, '.gemini', 'config', 'mcp_config.json')}`,
+      `[missing] ${path.join(homeDir, '.gemini', 'antigravity-cli', 'settings.json')}`,
+      `[missing] ${path.join(homeDir, 'AppData', 'Roaming', 'Antigravity', 'User', 'settings.json')}`,
+      `[missing] ${path.join(homeDir, 'AppData', 'Roaming', 'Antigravity', 'User', 'keybindings.json')}`,
     ]);
   });
 });

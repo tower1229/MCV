@@ -7,6 +7,7 @@
 **项目属性：** 数字主权生态基础设施
 **目标平台：** macOS、Windows
 **首期目标 IDE：** Codex、Claude Code、Gemini (涵盖 Gemini CLI 和 Antigravity)
+**实现状态（2026-07-19）：** schema v2；Gemini 为单目标双 Surface；capture/deploy/status 共用 Adapter 扫描契约；支持 bind、迁移预览、事务部署与漂移保护恢复。
 
 ---
 
@@ -767,10 +768,9 @@ MCV 将把当前目录初始化为个人数据仓库：
 
 ```yaml
 # mcv.yaml
-schemaVersion: 1
-repository:
-  id: "稳定唯一标识"
-  initializedAt: "ISO 时间"
+schemaVersion: 2
+repositoryId: "稳定唯一标识"
+initializedAt: "ISO 时间"
 ```
 
 该配置与其他仓库配置一并存放在仓库根目录的 `mcv.yaml` 清单文件中，不再使用 `.mcv/repository.json`。
@@ -1348,10 +1348,9 @@ my-mcv/
 ## 25. `mcv.yaml` 建议结构
 
 ```yaml
-schemaVersion: 1
-
-repository:
-  id: repository-unique-id
+schemaVersion: 2
+repositoryId: repository-unique-id
+initializedAt: "ISO 时间"
 
 targets:
   codex:
@@ -1360,6 +1359,9 @@ targets:
     enabled: true
   gemini:
     enabled: true
+    surfaces:
+      geminiCli: auto
+      antigravity: auto
 
 variables:
   PROJECTS_HOME:
@@ -1372,7 +1374,6 @@ security:
 
 capture:
   preserveUnknownNativeFields: true
-  includeRuntimeState: false
 
 deploy:
   backupBeforeWrite: true

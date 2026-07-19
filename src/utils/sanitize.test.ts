@@ -36,6 +36,13 @@ describe('sanitizeConfig', () => {
     expect(isSensitiveFile('/home/user/settings.json')).toBe(false);
   });
 
+  it('does not treat a keyboard shortcut key as a secret field', () => {
+    expect(sanitizeConfig({ key: 'ctrl+enter', 'extension.apiKey': 'secret' }, { homeDir: '/home/user' }).value).toEqual({
+      key: 'ctrl+enter',
+      'extension.apiKey': '${env:EXTENSION_API_KEY}',
+    });
+  });
+
   it('parameterizes Unix home and configured absolute paths', () => {
     expect(
       sanitizeConfig(
@@ -55,10 +62,10 @@ describe('sanitizeConfig', () => {
       value: {
         homeSkill: '${HOME}/.claude/skills/example',
         project: '${PROJECTS_HOME}/example',
-        tool: '${env:MCV_TOOL_PATH_746F6F6C}',
+        tool: '/opt/local/bin/tool',
         tools: [
-          '${env:MCV_TOOLS_0_PATH_746F6F6C73_30}',
-          '${env:MCV_TOOLS_1_PATH_746F6F6C73_31}',
+          '/opt/a/tool',
+          '/opt/b/tool',
         ],
       },
       sensitiveFieldCount: 0,

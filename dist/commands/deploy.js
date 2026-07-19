@@ -37,15 +37,15 @@ exports.deployConfigurations = deployConfigurations;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const promises_1 = require("readline/promises");
-const yaml = __importStar(require("yaml"));
 const adapters_1 = require("../adapters");
 const files_1 = require("../utils/files");
 const objects_1 = require("../utils/objects");
 const state_1 = require("../utils/state");
 const variables_1 = require("../utils/variables");
-async function deployConfigurations(context, dependencies = {}) {
-    const repositoryPath = resolveRepositoryPath();
-    const manifest = readManifest(repositoryPath);
+const repository_1 = require("../utils/repository");
+async function deployConfigurations(context, dependencies = {}, options = {}) {
+    const repositoryPath = (0, repository_1.resolveBoundRepository)();
+    const manifest = (0, repository_1.readManifest)(repositoryPath);
     const definitions = (0, adapters_1.createAdapterDefinitions)().filter(({ targetId }) => manifest.targets?.[targetId]?.enabled === true);
     if (definitions.length === 0) {
         console.log('No IDE targets are enabled in mcv.yaml.');
@@ -60,7 +60,9 @@ async function deployConfigurations(context, dependencies = {}) {
         }),
     })));
     const deployFiles = operations.flatMap(({ operation }) => operation.files.map((file) => ({ ...file, write: operation.write })));
-    const plan = buildDeployPlan(deployFiles);
+    const plan = buildDeployPlan(deployFiles, options.pruneManaged === true ? (0, state_1.readState)().managedInventory : undefined);
+    if (options.yes && plan.some((file) => file.change === 'delete'))
+        throw new Error('--yes never applies deletions; review and confirm --prune-managed interactively.');
     if (plan.length === 0) {
         recordDeploymentBaseline(deployFiles);
         const subject = definitions.length === 1
@@ -69,23 +71,30 @@ async function deployConfigurations(context, dependencies = {}) {
         console.log(`${subject} already in sync.`);
         return;
     }
-    console.log('Deploy preview:');
-    for (const file of plan) {
-        console.log(`[${file.change}] ${file.targetPath}`);
+    if (options.json)
+        console.log(JSON.stringify({ repositoryPath, changes: plan.map(({ targetPath, change }) => ({ targetPath, change })) }, null, 2));
+    else {
+        console.log('Deploy preview:');
+        for (const file of plan)
+            console.log(`[${file.change}] ${file.targetPath}`);
     }
-    const confirmed = await (dependencies.confirmDeploy ?? confirmInTerminal)();
+    if (options.dryRun)
+        return;
+    if (!process.stdin.isTTY && !options.yes && !dependencies.confirmDeploy) {
+        throw new Error('Deploy requires an interactive terminal; use --yes only after reviewing --dry-run.');
+    }
+    const confirmed = options.yes || await (dependencies.confirmDeploy ?? confirmInTerminal)();
     if (!confirmed) {
         console.log('Deploy cancelled; local configuration was not changed.');
         return;
     }
-    backupModifiedFiles(plan);
-    for (const file of plan) {
-        file.write(file);
-    }
-    recordDeploymentBaseline(deployFiles);
+    const backupDirectory = createDeploymentBackup(plan);
+    applyDeployTransaction(plan, backupDirectory);
+    finalizeDeploymentBackup(backupDirectory, plan);
+    recordDeploymentBaseline(deployFiles, repositoryPath);
     console.log(`Deployed ${plan.length} file(s) from ${repositoryPath}.`);
 }
-function recordDeploymentBaseline(files) {
+function recordDeploymentBaseline(files, repositoryPath) {
     const state = (0, state_1.readState)();
     state.baselineSnapshot = {
         recordedAt: new Date().toISOString(),
@@ -96,27 +105,64 @@ function recordDeploymentBaseline(files) {
             (0, files_1.hashFile)(file.targetPath),
         ])),
     };
+    state.managedInventory = Object.fromEntries(files
+        .filter((file) => fs.existsSync(file.targetPath))
+        .map((file) => [file.targetPath, { source: repositoryPath ?? 'repository', hash: (0, files_1.hashFile)(file.targetPath) }]));
+    state.lastOperation = { kind: 'deploy', time: new Date().toISOString(), success: true };
     (0, state_1.writeState)(state);
 }
-function backupModifiedFiles(plan) {
-    const modifiedFiles = plan.filter((file) => file.change === 'modify');
-    if (modifiedFiles.length === 0)
-        return;
+function createDeploymentBackup(plan) {
     const backupRoot = path.join(path.dirname((0, state_1.getStateFilePath)()), 'backups');
     fs.mkdirSync(backupRoot, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupDirectory = fs.mkdtempSync(path.join(backupRoot, `${timestamp}-`));
     const filesDirectory = path.join(backupDirectory, 'files');
     fs.mkdirSync(filesDirectory);
-    const files = modifiedFiles.map((file, index) => {
+    const files = plan.map((file, index) => {
+        if (file.change === 'add')
+            return { action: 'add', originalPath: file.targetPath };
         const backupPath = path.join('files', `${index}-${path.basename(file.targetPath)}`);
         fs.copyFileSync(file.targetPath, path.join(backupDirectory, backupPath));
-        return { originalPath: file.targetPath, backupPath };
+        return { action: file.change, originalPath: file.targetPath, backupPath, beforeHash: (0, files_1.hashFile)(file.targetPath) };
     });
     (0, files_1.atomicWriteTextFile)(path.join(backupDirectory, 'manifest.json'), `${JSON.stringify({ createdAt: new Date().toISOString(), files }, null, 2)}\n`);
+    return backupDirectory;
 }
-function buildDeployPlan(files) {
-    return files.flatMap((file) => {
+function finalizeDeploymentBackup(backupDirectory, plan) {
+    const manifestPath = path.join(backupDirectory, 'manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    for (const entry of manifest.files) {
+        if (fs.existsSync(entry.originalPath))
+            entry.afterHash = (0, files_1.hashFile)(entry.originalPath);
+    }
+    (0, files_1.atomicWriteTextFile)(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+function applyDeployTransaction(plan, backupDirectory) {
+    const created = [];
+    try {
+        for (const file of plan) {
+            if (file.change === 'add')
+                created.push(file.targetPath);
+            if (file.change === 'delete')
+                fs.rmSync(file.targetPath, { force: true });
+            else
+                file.write(file);
+        }
+    }
+    catch (error) {
+        for (const targetPath of created)
+            fs.rmSync(targetPath, { force: true });
+        if (backupDirectory) {
+            const manifest = JSON.parse(fs.readFileSync(path.join(backupDirectory, 'manifest.json'), 'utf8'));
+            for (const file of manifest.files)
+                fs.copyFileSync(path.join(backupDirectory, file.backupPath), file.originalPath);
+        }
+        throw error;
+    }
+}
+function buildDeployPlan(files, managedInventory) {
+    const desiredPaths = new Set(files.map((file) => file.targetPath));
+    const changes = files.flatMap((file) => {
         const existingContent = fs.existsSync(file.targetPath)
             ? fs.readFileSync(file.targetPath)
             : undefined;
@@ -130,6 +176,8 @@ function buildDeployPlan(files) {
                 change: existingContent === undefined ? 'add' : 'modify',
             }];
     });
+    const deletions = Object.keys(managedInventory ?? {}).flatMap((targetPath) => desiredPaths.has(targetPath) || !fs.existsSync(targetPath) ? [] : [{ targetPath, content: Buffer.alloc(0), change: 'delete' }]);
+    return [...changes, ...deletions];
 }
 function resolveManifestVariables(declarations, context, repositoryPath) {
     const platform = context.platform ?? process.platform;
@@ -154,25 +202,6 @@ function resolveManifestVariables(declarations, context, repositoryPath) {
         HOME: context.homeDir,
         MCV_REPO: repositoryPath,
     }, platform);
-}
-function resolveRepositoryPath() {
-    const currentDirectory = process.cwd();
-    if (fs.existsSync(path.join(currentDirectory, 'mcv.yaml'))) {
-        return currentDirectory;
-    }
-    const repositoryPath = (0, state_1.readState)().repositoryPath;
-    if (repositoryPath && fs.existsSync(path.join(repositoryPath, 'mcv.yaml'))) {
-        return repositoryPath;
-    }
-    throw new Error('No bound MCV repository found. Run `mcv init` first.');
-}
-function readManifest(repositoryPath) {
-    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
-    const parsed = yaml.parse(fs.readFileSync(manifestPath, 'utf8'));
-    if (!(0, objects_1.isRecord)(parsed)) {
-        throw new Error(`${manifestPath} must contain a YAML object.`);
-    }
-    return parsed;
 }
 async function confirmInTerminal() {
     const prompt = (0, promises_1.createInterface)({ input: process.stdin, output: process.stdout });

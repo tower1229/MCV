@@ -43,29 +43,53 @@ const init_1 = require("./commands/init");
 const deploy_1 = require("./commands/deploy");
 const status_1 = require("./commands/status");
 const restore_1 = require("./commands/restore");
-function createProgram(context = { homeDir: os.homedir() }, captureDependencies = {}, deployDependencies = {}) {
+const binding_1 = require("./commands/binding");
+const promises_1 = require("readline/promises");
+// package.json is the single version source for both npm and the CLI.
+const packageVersion = require('../package.json').version;
+function createProgram(context = { homeDir: os.homedir(), env: process.env }, captureDependencies = {}, deployDependencies = {}) {
     const program = new commander_1.Command();
     program
         .name('mcv')
         .description('Mobile Configuration Vehicle - Personal AI IDE configuration manager')
-        .version('0.1.0');
+        .version(packageVersion);
     program
         .command('init')
         .description('Initialize a new MCV repository in the current directory')
-        .action(() => {
-        (0, init_1.initRepository)();
+        .action(async () => {
+        const initialized = (0, init_1.initRepository)();
+        if (!initialized || !process.stdin.isTTY)
+            return;
+        await (0, discover_1.discoverConfigurations)(context);
+        const prompt = (0, promises_1.createInterface)({ input: process.stdin, output: process.stdout });
+        try {
+            const answer = await prompt.question('Capture discovered configuration now? [Y/n] ');
+            if (!/^(n|no)$/i.test(answer.trim()))
+                await (0, capture_1.captureConfigurations)(context, captureDependencies);
+        }
+        finally {
+            prompt.close();
+        }
     });
     program
         .command('capture')
         .description('Capture local AI IDE configuration into the MCV repository')
-        .action(async () => {
-        await (0, capture_1.captureConfigurations)(context, captureDependencies);
+        .option('--dry-run', 'Show the capture plan without writing')
+        .option('--json', 'Print a machine-readable plan')
+        .option('--yes', 'Apply only safe non-conflicting changes without prompting')
+        .option('--verbose', 'Show processed file content in the preview')
+        .action(async (options) => {
+        await (0, capture_1.captureConfigurations)(context, captureDependencies, options);
     });
     program
         .command('deploy')
         .description('Deploy repository configuration to this device')
-        .action(async () => {
-        await (0, deploy_1.deployConfigurations)(context, deployDependencies);
+        .option('--dry-run', 'Show the deployment plan without writing')
+        .option('--json', 'Print a machine-readable plan')
+        .option('--yes', 'Deploy without prompting after a reviewed dry-run')
+        .option('--prune-managed', 'Delete files from the previous MCV inventory that are no longer in the repository')
+        .action(async (options) => {
+        await (0, deploy_1.deployConfigurations)(context, deployDependencies, options);
     });
     program
         .command('discover')
@@ -76,14 +100,41 @@ function createProgram(context = { homeDir: os.homedir() }, captureDependencies 
     program
         .command('status')
         .description('Compare local configuration with the last deployment')
-        .action(() => {
-        (0, status_1.showStatus)();
+        .action(async () => {
+        await (0, status_1.showStatus)(context);
     });
     program
         .command('restore')
         .description('Restore local configuration from the latest deployment backup')
         .action(() => {
         (0, restore_1.restoreLatestBackup)();
+    });
+    program.command('bind <path>').description('Bind this device to an existing MCV repository').action(binding_1.bind);
+    program.command('unbind').description('Remove the repository binding from this device').action(binding_1.unbind);
+    program.command('migrate [path]').description('Migrate a v1 repository to schema v2')
+        .option('--dry-run', 'Preview migration without writing')
+        .action((repositoryPath = process.cwd(), options) => (0, binding_1.migrate)(repositoryPath, options.dryRun === true));
+    program.action(async () => {
+        if (!process.stdin.isTTY) {
+            program.outputHelp();
+            return;
+        }
+        const prompt = (0, promises_1.createInterface)({ input: process.stdin, output: process.stdout });
+        try {
+            const answer = await prompt.question('MCV: 1) discover 2) capture 3) deploy 4) status 5) restore 6) bind  Select: ');
+            if (answer.trim() === '6') {
+                const repositoryPath = await prompt.question('Repository path (blank to cancel): ');
+                if (repositoryPath.trim())
+                    (0, binding_1.bind)(repositoryPath.trim());
+                return;
+            }
+            const command = { '1': 'discover', '2': 'capture', '3': 'deploy', '4': 'status', '5': 'restore' }[answer.trim()];
+            if (command)
+                await createProgram(context, captureDependencies, deployDependencies).parseAsync(['node', 'mcv', command]);
+        }
+        finally {
+            prompt.close();
+        }
     });
     return program;
 }

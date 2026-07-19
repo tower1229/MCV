@@ -65,7 +65,7 @@ The single root-level file that identifies a directory as an MCV Repository and 
 _Avoid_: "config file", "settings file"
 
 **Secret Scanning（密钥扫描）**:
-V0.1 uses two layers: (1) file-name blacklist — known sensitive files like `credentials.json`, `.env`, `id_rsa`, `*.pem` are excluded entirely; (2) field-name pattern matching — JSON/YAML keys containing `secret`, `token`, `key`, `password`, or `credential` have their values replaced with `${env:FIELD_NAME}` references. No value-content regex or external tool integration in v0.1. Capture summary shows "N sensitive fields excluded" count.
+V0.1 uses three layers: sensitive file/directory exclusion, structured sensitive-field replacement, and high-confidence plaintext-key detection in config and Skill text. Environment-variable reference fields are typed references rather than secret values. Unsafe candidates block capture instead of becoming warnings only.
 _Avoid_: "secret scanner", "credential vault"
 
 **Platform Override（平台覆盖）**:

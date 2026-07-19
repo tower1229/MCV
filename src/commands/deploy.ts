@@ -1,17 +1,19 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { createInterface } from 'readline/promises';
-import * as yaml from 'yaml';
 import { createAdapterDefinitions, type TargetId } from '../adapters';
 import type { DeployFile, DeviceContext } from '../adapters/types';
 import { atomicWriteTextFile, hashFile } from '../utils/files';
 import { isRecord } from '../utils/objects';
 import { getStateFilePath, readState, writeState } from '../utils/state';
 import { resolveVariableDefinitions } from '../utils/variables';
+import { readManifest, resolveBoundRepository } from '../utils/repository';
 
 export interface DeployDependencies {
   confirmDeploy?: () => Promise<boolean>;
 }
+
+export interface DeployOptions { dryRun?: boolean; json?: boolean; yes?: boolean; pruneManaged?: boolean; }
 
 interface DeployManifest {
   targets?: Partial<Record<TargetId, { enabled?: boolean }>>;
@@ -21,15 +23,24 @@ interface DeployManifest {
 interface PlannedDeployFile {
   targetPath: string;
   content: string | Buffer;
-  change: 'add' | 'modify';
-  write: (file: DeployFile) => void;
+  change: 'add' | 'modify' | 'delete';
+  write?: (file: DeployFile) => void;
+}
+
+interface DeploymentBackupEntry {
+  action: 'add' | 'modify' | 'delete';
+  originalPath: string;
+  backupPath?: string;
+  beforeHash?: string;
+  afterHash?: string;
 }
 
 export async function deployConfigurations(
   context: DeviceContext,
   dependencies: DeployDependencies = {},
+  options: DeployOptions = {},
 ): Promise<void> {
-  const repositoryPath = resolveRepositoryPath();
+  const repositoryPath = resolveBoundRepository();
   const manifest = readManifest(repositoryPath);
   const definitions = createAdapterDefinitions().filter(
     ({ targetId }) => manifest.targets?.[targetId]?.enabled === true,
@@ -54,7 +65,8 @@ export async function deployConfigurations(
   const deployFiles = operations.flatMap(({ operation }) =>
     operation.files.map((file) => ({ ...file, write: operation.write })),
   );
-  const plan = buildDeployPlan(deployFiles);
+  const plan = buildDeployPlan(deployFiles, options.pruneManaged === true ? readState().managedInventory : undefined);
+  if (options.yes && plan.some((file) => file.change === 'delete')) throw new Error('--yes never applies deletions; review and confirm --prune-managed interactively.');
   if (plan.length === 0) {
     recordDeploymentBaseline(deployFiles);
     const subject = definitions.length === 1
@@ -64,26 +76,30 @@ export async function deployConfigurations(
     return;
   }
 
-  console.log('Deploy preview:');
-  for (const file of plan) {
-    console.log(`[${file.change}] ${file.targetPath}`);
+  if (options.json) console.log(JSON.stringify({ repositoryPath, changes: plan.map(({ targetPath, change }) => ({ targetPath, change })) }, null, 2));
+  else {
+    console.log('Deploy preview:');
+    for (const file of plan) console.log(`[${file.change}] ${file.targetPath}`);
+  }
+  if (options.dryRun) return;
+  if (!process.stdin.isTTY && !options.yes && !dependencies.confirmDeploy) {
+    throw new Error('Deploy requires an interactive terminal; use --yes only after reviewing --dry-run.');
   }
 
-  const confirmed = await (dependencies.confirmDeploy ?? confirmInTerminal)();
+  const confirmed = options.yes || await (dependencies.confirmDeploy ?? confirmInTerminal)();
   if (!confirmed) {
     console.log('Deploy cancelled; local configuration was not changed.');
     return;
   }
 
-  backupModifiedFiles(plan);
-  for (const file of plan) {
-    file.write(file);
-  }
-  recordDeploymentBaseline(deployFiles);
+  const backupDirectory = createDeploymentBackup(plan);
+  applyDeployTransaction(plan, backupDirectory);
+  finalizeDeploymentBackup(backupDirectory, plan);
+  recordDeploymentBaseline(deployFiles, repositoryPath);
   console.log(`Deployed ${plan.length} file(s) from ${repositoryPath}.`);
 }
 
-function recordDeploymentBaseline(files: DeployFile[]): void {
+function recordDeploymentBaseline(files: DeployFile[], repositoryPath?: string): void {
   const state = readState();
   state.baselineSnapshot = {
     recordedAt: new Date().toISOString(),
@@ -96,34 +112,66 @@ function recordDeploymentBaseline(files: DeployFile[]): void {
         ]),
     ),
   };
+  state.managedInventory = Object.fromEntries(files
+    .filter((file) => fs.existsSync(file.targetPath))
+    .map((file) => [file.targetPath, { source: repositoryPath ?? 'repository', hash: hashFile(file.targetPath) }]));
+  state.lastOperation = { kind: 'deploy', time: new Date().toISOString(), success: true };
   writeState(state);
 }
 
-function backupModifiedFiles(plan: PlannedDeployFile[]): void {
-  const modifiedFiles = plan.filter((file) => file.change === 'modify');
-  if (modifiedFiles.length === 0) return;
-
+function createDeploymentBackup(plan: PlannedDeployFile[]): string {
   const backupRoot = path.join(path.dirname(getStateFilePath()), 'backups');
   fs.mkdirSync(backupRoot, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backupDirectory = fs.mkdtempSync(path.join(backupRoot, `${timestamp}-`));
   const filesDirectory = path.join(backupDirectory, 'files');
   fs.mkdirSync(filesDirectory);
-  const files = modifiedFiles.map((file, index) => {
+  const files: DeploymentBackupEntry[] = plan.map((file, index) => {
+    if (file.change === 'add') return { action: 'add', originalPath: file.targetPath };
     const backupPath = path.join('files', `${index}-${path.basename(file.targetPath)}`);
     fs.copyFileSync(file.targetPath, path.join(backupDirectory, backupPath));
-    return { originalPath: file.targetPath, backupPath };
+    return { action: file.change, originalPath: file.targetPath, backupPath, beforeHash: hashFile(file.targetPath) };
   });
   atomicWriteTextFile(
     path.join(backupDirectory, 'manifest.json'),
     `${JSON.stringify({ createdAt: new Date().toISOString(), files }, null, 2)}\n`,
   );
+  return backupDirectory;
+}
+
+function finalizeDeploymentBackup(backupDirectory: string, plan: PlannedDeployFile[]): void {
+  const manifestPath = path.join(backupDirectory, 'manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { createdAt: string; files: DeploymentBackupEntry[] };
+  for (const entry of manifest.files) {
+    if (fs.existsSync(entry.originalPath)) entry.afterHash = hashFile(entry.originalPath);
+  }
+  atomicWriteTextFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function applyDeployTransaction(plan: PlannedDeployFile[], backupDirectory?: string): void {
+  const created: string[] = [];
+  try {
+    for (const file of plan) {
+      if (file.change === 'add') created.push(file.targetPath);
+      if (file.change === 'delete') fs.rmSync(file.targetPath, { force: true });
+      else file.write!(file);
+    }
+  } catch (error) {
+    for (const targetPath of created) fs.rmSync(targetPath, { force: true });
+    if (backupDirectory) {
+      const manifest = JSON.parse(fs.readFileSync(path.join(backupDirectory, 'manifest.json'), 'utf8')) as { files: Array<{ originalPath: string; backupPath: string }> };
+      for (const file of manifest.files) fs.copyFileSync(path.join(backupDirectory, file.backupPath), file.originalPath);
+    }
+    throw error;
+  }
 }
 
 function buildDeployPlan(
   files: Array<DeployFile & { write: (file: DeployFile) => void }>,
+  managedInventory?: Record<string, { source: string; hash: string }>,
 ): PlannedDeployFile[] {
-  return files.flatMap((file) => {
+  const desiredPaths = new Set(files.map((file) => file.targetPath));
+  const changes: PlannedDeployFile[] = files.flatMap((file) => {
     const existingContent = fs.existsSync(file.targetPath)
       ? fs.readFileSync(file.targetPath)
       : undefined;
@@ -133,9 +181,12 @@ function buildDeployPlan(
     if (existingContent?.equals(desiredContent)) return [];
     return [{
       ...file,
-      change: existingContent === undefined ? 'add' : 'modify',
+      change: existingContent === undefined ? 'add' as const : 'modify' as const,
     }];
   });
+  const deletions: PlannedDeployFile[] = Object.keys(managedInventory ?? {}).flatMap((targetPath) =>
+    desiredPaths.has(targetPath) || !fs.existsSync(targetPath) ? [] : [{ targetPath, content: Buffer.alloc(0), change: 'delete' as const }]);
+  return [...changes, ...deletions];
 }
 
 function resolveManifestVariables(
@@ -170,27 +221,6 @@ function resolveManifestVariables(
     },
     platform,
   );
-}
-
-function resolveRepositoryPath(): string {
-  const currentDirectory = process.cwd();
-  if (fs.existsSync(path.join(currentDirectory, 'mcv.yaml'))) {
-    return currentDirectory;
-  }
-  const repositoryPath = readState().repositoryPath;
-  if (repositoryPath && fs.existsSync(path.join(repositoryPath, 'mcv.yaml'))) {
-    return repositoryPath;
-  }
-  throw new Error('No bound MCV repository found. Run `mcv init` first.');
-}
-
-function readManifest(repositoryPath: string): DeployManifest {
-  const manifestPath = path.join(repositoryPath, 'mcv.yaml');
-  const parsed = yaml.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown;
-  if (!isRecord(parsed)) {
-    throw new Error(`${manifestPath} must contain a YAML object.`);
-  }
-  return parsed as DeployManifest;
 }
 
 async function confirmInTerminal(): Promise<boolean> {

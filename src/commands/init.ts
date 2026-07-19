@@ -3,51 +3,31 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import * as yaml from 'yaml';
 import { readState, writeState } from '../utils/state';
+import type { McvManifest } from '../utils/repository';
 
-export interface McvManifest {
-  schemaVersion: number;
-  repositoryId: string;
-  initializedAt: string;
-  targets: {
-    codex: { enabled: boolean };
-    claudeCode: { enabled: boolean };
-    gemini: { enabled: boolean };
-  };
-  variables: Record<string, never>;
-  security: {
-    scanSecrets: boolean;
-    allowPlaintextSecrets: boolean;
-  };
-  capture: {
-    preserveUnknownNativeFields: boolean;
-    includeRuntimeState: boolean;
-  };
-  deploy: {
-    backupBeforeWrite: boolean;
-    useSymlinks: boolean;
-  };
-}
-
-export function initRepository(targetDir: string = process.cwd()): void {
+export function initRepository(targetDir: string = process.cwd()): boolean {
   const repositoryPath = path.resolve(targetDir);
   const manifestPath = path.join(repositoryPath, 'mcv.yaml');
 
   if (fs.existsSync(manifestPath)) {
     console.log('An mcv.yaml manifest already exists in this directory.');
     console.log('You might want to run `mcv bind` instead to bind this existing repository to your device.');
-    return;
+    return false;
   }
 
   const repositoryId = uuidv4();
   const initializedAt = new Date().toISOString();
   const manifest: McvManifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     repositoryId,
     initializedAt,
     targets: {
       codex: { enabled: true },
       claudeCode: { enabled: true },
-      gemini: { enabled: true },
+      gemini: {
+        enabled: true,
+        surfaces: { geminiCli: 'auto', antigravity: 'auto' },
+      },
     },
     variables: {},
     security: {
@@ -56,7 +36,6 @@ export function initRepository(targetDir: string = process.cwd()): void {
     },
     capture: {
       preserveUnknownNativeFields: true,
-      includeRuntimeState: false,
     },
     deploy: {
       backupBeforeWrite: true,
@@ -71,6 +50,7 @@ export function initRepository(targetDir: string = process.cwd()): void {
   console.log(`Repository ID: ${repositoryId}`);
 
   const state = readState();
+  state.schemaVersion = 2;
   state.deviceId ??= uuidv4();
   state.defaultRepositoryId = repositoryId;
   state.repositoryPath = repositoryPath;
@@ -81,4 +61,5 @@ export function initRepository(targetDir: string = process.cwd()): void {
   writeState(state);
 
   console.log('Successfully bound current device to this MCV repository.');
+  return true;
 }

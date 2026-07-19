@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MCV repository manifest",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schemaVersion", "repositoryId", "initializedAt", "targets", "variables", "security", "capture", "deploy"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "repositoryId": { "type": "string", "minLength": 1 },
+    "initializedAt": { "type": "string" },
+    "targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "codex": { "$ref": "#/$defs/target", "default": { "enabled": false } },
+        "claudeCode": { "$ref": "#/$defs/target", "default": { "enabled": false } },
+        "gemini": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": { "enabled": false, "surfaces": { "geminiCli": "auto", "antigravity": "auto" } },
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "surfaces": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["geminiCli", "antigravity"],
+              "default": { "geminiCli": "auto", "antigravity": "auto" },
+              "properties": {
+                "geminiCli": { "enum": ["auto", true, false] },
+                "antigravity": { "enum": ["auto", true, false] }
+              }
+            }
+          },
+          "required": ["enabled"]
+        }
+      }
+    },
+    "variables": { "type": "object" },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scanSecrets", "allowPlaintextSecrets"],
+      "properties": { "scanSecrets": { "const": true }, "allowPlaintextSecrets": { "const": false } }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["preserveUnknownNativeFields"],
+      "properties": { "preserveUnknownNativeFields": { "type": "boolean" } }
+    },
+    "deploy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backupBeforeWrite", "useSymlinks"],
+      "properties": { "backupBeforeWrite": { "const": true }, "useSymlinks": { "const": false } }
+    }
+  },
+  "$defs": {
+    "target": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["enabled"],
+      "properties": { "enabled": { "type": "boolean" } }
+    }
+  }
+}

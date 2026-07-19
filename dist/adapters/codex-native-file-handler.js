@@ -42,16 +42,23 @@ const structured_config_1 = require("../utils/structured-config");
 const variables_1 = require("../utils/variables");
 const adapter_utils_1 = require("./adapter-utils");
 const overlay_policies_1 = require("./overlay-policies");
-const LOCAL_PATHS = ['$.projects'];
+const LOCAL_PATHS = [
+    '$.projects', '$.notify', '$.marketplaces',
+    '$.shell_environment_policy.set.NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S',
+    '$.shell_environment_policy.set.NODE_REPL_TRUSTED_CODE_PATHS',
+];
 class CodexNativeFileHandler {
+    root(context) {
+        return context.env?.CODEX_HOME || path.join(context.homeDir, '.codex');
+    }
     discoverDirectories(context) {
-        const configRoot = path.join(context.homeDir, '.codex');
+        const configRoot = this.root(context);
         return [{ id: 'config-root', path: configRoot, exists: fs.existsSync(configRoot) }];
     }
     async discoverFiles(context) {
         return [
-            { id: 'user-settings', path: path.join(context.homeDir, '.codex', 'config.toml') },
-            { id: 'user-instructions', path: path.join(context.homeDir, '.codex', 'AGENTS.md') },
+            { id: 'user-settings', path: path.join(this.root(context), 'config.toml') },
+            { id: 'user-instructions', path: path.join(this.root(context), 'AGENTS.md') },
         ].map((file) => ({ ...file, exists: fs.existsSync(file.path) }));
     }
     async capture(files, context) {
@@ -84,6 +91,7 @@ class CodexNativeFileHandler {
             try {
                 const parsed = (0, structured_config_1.parseStructuredObject)(fs.readFileSync(file.path, 'utf8'), 'toml', file.path);
                 const owned = (0, structured_config_1.splitOwnedFields)(parsed, overlay_policies_1.CODEX_MANAGED_PATHS, LOCAL_PATHS);
+                removeCodexRuntimeFields(owned.native);
                 const native = (0, sanitize_1.sanitizeConfig)(owned.native, context);
                 result.summary.sensitiveFieldCount += native.sensitiveFieldCount;
                 result.summary.parameterizedPathCount += native.parameterizedPathCount;
@@ -93,6 +101,7 @@ class CodexNativeFileHandler {
                         repositoryPath: 'ide/codex/native/config.toml',
                         content: (0, structured_config_1.stringifyStructuredObject)(native.value, 'toml'),
                         ownership: 'native',
+                        localPaths: LOCAL_PATHS,
                     });
                 }
                 for (const field of owned.managed) {
@@ -113,8 +122,8 @@ class CodexNativeFileHandler {
         return result;
     }
     async deploy(repositoryPath, context) {
-        const sourcePath = path.join(repositoryPath, 'ide', 'codex', 'native', 'config.toml');
-        const targetPath = path.join(context.homeDir, '.codex', 'config.toml');
+        const sourcePath = (0, adapter_utils_1.repositoryFileForPlatform)(repositoryPath, 'ide/codex/native/config.toml', context);
+        const targetPath = path.join(this.root(context), 'config.toml');
         const files = [];
         if (fs.existsSync(sourcePath)) {
             const parsed = (0, structured_config_1.parseStructuredObject)(fs.readFileSync(sourcePath, 'utf8'), 'toml', sourcePath);
@@ -131,3 +140,17 @@ class CodexNativeFileHandler {
     }
 }
 exports.CodexNativeFileHandler = CodexNativeFileHandler;
+function removeCodexRuntimeFields(value) {
+    const policy = value.shell_environment_policy;
+    if (!policy || typeof policy !== 'object' || Array.isArray(policy))
+        return;
+    const set = policy.set;
+    if (!set || typeof set !== 'object' || Array.isArray(set))
+        return;
+    for (const key of Object.keys(set)) {
+        if (/^(NODE_REPL|CODEX_|OPENAI_CODEX_)/i.test(key))
+            delete set[key];
+    }
+    if (Object.keys(set).length === 0)
+        delete policy.set;
+}

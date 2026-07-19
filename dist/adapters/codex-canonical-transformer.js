@@ -39,6 +39,7 @@ const yaml = __importStar(require("yaml"));
 const objects_1 = require("../utils/objects");
 const structured_config_1 = require("../utils/structured-config");
 const overlay_policies_1 = require("./overlay-policies");
+const mcp_1 = require("../core/mcp");
 class CodexCanonicalTransformer {
     transform(capture, _context) {
         const files = [...capture.files];
@@ -53,12 +54,17 @@ class CodexCanonicalTransformer {
         }
         const mcp = capture.managedFields.find((field) => field.path === overlay_policies_1.CODEX_MCP_PATH);
         if (mcp && (0, objects_1.isRecord)(mcp.value)) {
+            const normalized = (0, mcp_1.normalizeMcpServers)(mcp.value, 'codex');
+            if (normalized.excluded.length > 0)
+                capture.warnings.push(`Excluded Codex runtime MCP: ${normalized.excluded.join(', ')}`);
             files.push({
                 sourcePath: mcp.sourcePath,
                 repositoryPath: 'common/mcp.yaml',
-                content: yaml.stringify({ servers: mcp.value }),
+                content: yaml.stringify({ servers: normalized.servers }),
                 ownership: 'managed',
             });
+            if (Object.keys(normalized.overrides).length > 0)
+                files.push({ sourcePath: mcp.sourcePath, repositoryPath: 'ide/codex/mcp-overrides.yaml', content: yaml.stringify(normalized.overrides), ownership: 'managed' });
         }
         return {
             files,
@@ -70,13 +76,13 @@ class CodexCanonicalTransformer {
         const files = [];
         if (source.rules !== undefined) {
             files.push({
-                targetPath: path.join(context.homeDir, '.codex', 'AGENTS.md'),
+                targetPath: path.join((context.env ?? process.env).CODEX_HOME || path.join(context.homeDir, '.codex'), 'AGENTS.md'),
                 content: source.rules,
             });
         }
         for (const skill of source.skills) {
             files.push({
-                targetPath: path.join(context.homeDir, '.codex', 'skills', skill.relativePath),
+                targetPath: path.join(context.homeDir, '.agents', 'skills', skill.relativePath),
                 content: skill.content,
             });
         }
@@ -86,7 +92,7 @@ class CodexCanonicalTransformer {
             }
             files.push({
                 targetPath: path.join(context.homeDir, '.codex', 'config.toml'),
-                content: (0, structured_config_1.stringifyStructuredObject)({ mcp_servers: source.mcp.servers }, 'toml'),
+                content: (0, structured_config_1.stringifyStructuredObject)({ mcp_servers: (0, mcp_1.toNativeMcpServers)(source.mcp.servers, 'codex', source.mcpOverrides?.codex) }, 'toml'),
             });
         }
         return files;

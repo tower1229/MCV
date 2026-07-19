@@ -80,7 +80,7 @@ export class ClaudeCodeAdapter implements IdeAdapter {
     context: DeviceContext,
   ): DeployOperation['files'] {
     const mergedPaths = [
-      path.join(context.homeDir, '.claude', 'settings.json'),
+      path.join((context.env ?? process.env).CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'settings.json'),
       path.join(context.homeDir, '.claude.json'),
     ];
     const otherFiles = [...nativeFiles, ...canonicalFiles].filter(

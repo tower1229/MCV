@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { isRecord } from '../utils/objects';
 import { GEMINI_MCP_PATH } from './overlay-policies';
+import { normalizeMcpServers, toNativeMcpServers } from '../core/mcp';
 import type {
   CanonicalDeploySource,
   CanonicalTransformer,
@@ -24,14 +25,18 @@ export class GeminiCanonicalTransformer implements CanonicalTransformer {
         ownership: 'managed',
       });
     }
-    const mcp = capture.managedFields.find((field) => field.path === GEMINI_MCP_PATH);
-    if (mcp && isRecord(mcp.value)) {
+    for (const mcp of capture.managedFields.filter((field) => field.path === GEMINI_MCP_PATH)) {
+      if (!isRecord(mcp.value)) continue;
+      const surface = mcp.sourcePath.includes(`${path.sep}config${path.sep}`) ? 'antigravity' : 'gemini-cli';
+      const normalized = normalizeMcpServers(mcp.value, surface);
       files.push({
         sourcePath: mcp.sourcePath,
         repositoryPath: 'common/mcp.yaml',
-        content: yaml.stringify({ servers: mcp.value }),
+        content: yaml.stringify({ servers: normalized.servers }),
         ownership: 'managed',
       });
+      if (Object.keys(normalized.overrides).length > 0) files.push({ sourcePath: mcp.sourcePath, repositoryPath: `ide/gemini/${surface}/mcp-overrides.yaml`, content: yaml.stringify(normalized.overrides), ownership: 'managed' });
+      capture.warnings.push(...normalized.excluded.map((name) => `Excluded runtime MCP ${name} from ${surface}.`));
     }
     return {
       files,
@@ -63,7 +68,11 @@ export class GeminiCanonicalTransformer implements CanonicalTransformer {
       }
       files.push({
         targetPath: path.join(context.homeDir, '.gemini', 'settings.json'),
-        content: `${JSON.stringify({ mcpServers: source.mcp.servers }, null, 2)}\n`,
+        content: `${JSON.stringify({ mcpServers: toNativeMcpServers(source.mcp.servers, 'gemini-cli', source.mcpOverrides?.['gemini-cli']) }, null, 2)}\n`,
+      });
+      files.push({
+        targetPath: path.join(context.homeDir, '.gemini', 'config', 'mcp_config.json'),
+        content: `${JSON.stringify({ mcpServers: toNativeMcpServers(source.mcp.servers, 'antigravity', source.mcpOverrides?.antigravity) }, null, 2)}\n`,
       });
     }
     return files;

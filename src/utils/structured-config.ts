@@ -20,6 +20,36 @@ export function parseStructuredObject(
   return parsed;
 }
 
+export function parseJsonc(content: string): unknown {
+  let output = '';
+  let inString = false;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+    const next = content[index + 1];
+    if (lineComment) { if (char === '\n') { lineComment = false; output += char; } continue; }
+    if (blockComment) { if (char === '*' && next === '/') { blockComment = false; index += 1; } continue; }
+    if (!inString && char === '/' && next === '/') { lineComment = true; index += 1; continue; }
+    if (!inString && char === '/' && next === '*') { blockComment = true; index += 1; continue; }
+    output += char;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+    } else if (char === '"') inString = true;
+  }
+  const withoutTrailingCommas = output.replace(/,(\s*[}\]])/g, '$1');
+  return JSON.parse(withoutTrailingCommas) as unknown;
+}
+
+export function parseJsoncObject(content: string, label: string): Record<string, unknown> {
+  const parsed = parseJsonc(content);
+  if (!isRecord(parsed)) throw new Error(`${label} must contain a JSON object.`);
+  return parsed;
+}
+
 export function stringifyStructuredObject(
   value: Record<string, unknown>,
   format: StructuredFormat,
@@ -95,10 +125,15 @@ function setObjectPath(
   current[segments.at(-1)!] = fieldValue;
 }
 
-function deleteObjectPath(
+export function deleteObjectPath(
   value: Record<string, unknown>,
   objectPath: string,
 ): void {
+  const exactKey = objectPath.slice(2);
+  if (exactKey in value) {
+    delete value[exactKey];
+    return;
+  }
   const segments = parseObjectPath(objectPath);
   const parents: Array<{ value: Record<string, unknown>; key: string }> = [];
   let current = value;

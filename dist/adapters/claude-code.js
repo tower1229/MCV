@@ -79,7 +79,7 @@ class ClaudeCodeAdapter {
     }
     mergeDeploymentFiles(nativeFiles, canonicalFiles, context) {
         const mergedPaths = [
-            path.join(context.homeDir, '.claude', 'settings.json'),
+            path.join((context.env ?? process.env).CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'settings.json'),
             path.join(context.homeDir, '.claude.json'),
         ];
         const otherFiles = [...nativeFiles, ...canonicalFiles].filter((file) => !mergedPaths.includes(file.targetPath));

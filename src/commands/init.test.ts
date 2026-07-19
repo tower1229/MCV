@@ -38,13 +38,13 @@ describe('mcv init', () => {
       fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8'),
     );
     expect(manifest).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       repositoryId: expect.any(String),
       initializedAt: expect.any(String),
       targets: {
         codex: { enabled: true },
         claudeCode: { enabled: true },
-        gemini: { enabled: true },
+        gemini: { enabled: true, surfaces: { geminiCli: 'auto', antigravity: 'auto' } },
       },
       variables: {},
       security: {
@@ -53,7 +53,6 @@ describe('mcv init', () => {
       },
       capture: {
         preserveUnknownNativeFields: true,
-        includeRuntimeState: false,
       },
       deploy: {
         backupBeforeWrite: true,

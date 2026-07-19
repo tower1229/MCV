@@ -11,6 +11,7 @@ import type {
   NativeCaptureResult,
 } from './types';
 import { CLAUDE_CODE_MCP_PATH } from './overlay-policies';
+import { normalizeMcpServers, toNativeMcpServers } from '../core/mcp';
 
 export class ClaudeCodeCanonicalTransformer implements CanonicalTransformer {
   transform(
@@ -31,12 +32,16 @@ export class ClaudeCodeCanonicalTransformer implements CanonicalTransformer {
     }
 
     let mcpServers: Record<string, unknown> = {};
+    let mcpOverrides: Record<string, unknown> = {};
     const mcpSources: string[] = [];
     for (const field of capture.managedFields) {
       if (field.path !== CLAUDE_CODE_MCP_PATH || !isRecord(field.value)) continue;
-      mcpServers = mergeRecords(mcpServers, field.value);
+      const normalized = normalizeMcpServers(field.value, 'claude-code');
+      mcpServers = mergeRecords(mcpServers, normalized.servers);
+      mcpOverrides = mergeRecords(mcpOverrides, normalized.overrides);
       mcpSources.push(field.sourcePath);
     }
+    if (Object.keys(mcpOverrides).length > 0) files.push({ sourcePath: mcpSources.join(', '), repositoryPath: 'ide/claude-code/mcp-overrides.yaml', content: yaml.stringify(mcpOverrides), ownership: 'managed' });
     if (Object.keys(mcpServers).length > 0) {
       files.push({
         sourcePath: mcpSources.join(', '),
@@ -60,7 +65,7 @@ export class ClaudeCodeCanonicalTransformer implements CanonicalTransformer {
     const files: DeployFile[] = [];
     if (source.rules !== undefined) {
       files.push({
-        targetPath: path.join(context.homeDir, '.claude', 'CLAUDE.md'),
+        targetPath: path.join((context.env ?? process.env).CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'CLAUDE.md'),
         content: source.rules,
       });
     }
@@ -68,8 +73,7 @@ export class ClaudeCodeCanonicalTransformer implements CanonicalTransformer {
     for (const skill of source.skills) {
       files.push({
         targetPath: path.join(
-          context.homeDir,
-          '.claude',
+          (context.env ?? process.env).CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'),
           'skills',
           skill.relativePath,
         ),
@@ -84,7 +88,7 @@ export class ClaudeCodeCanonicalTransformer implements CanonicalTransformer {
       files.push({
         targetPath: path.join(context.homeDir, '.claude.json'),
         content: `${JSON.stringify({
-          mcpServers: source.mcp.servers,
+          mcpServers: toNativeMcpServers(source.mcp.servers, 'claude-code', source.mcpOverrides?.['claude-code']),
         }, null, 2)}\n`,
       });
     }

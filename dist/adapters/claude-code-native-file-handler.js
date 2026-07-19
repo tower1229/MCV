@@ -36,12 +36,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ClaudeCodeNativeFileHandler = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
-const yaml = __importStar(require("yaml"));
 const objects_1 = require("../utils/objects");
 const files_1 = require("../utils/files");
 const sanitize_1 = require("../utils/sanitize");
 const variables_1 = require("../utils/variables");
 const overlay_policies_1 = require("./overlay-policies");
+const adapter_utils_1 = require("./adapter-utils");
 const JSON_CAPTURE_POLICIES = {
     'user-settings': {
         repositoryPath: 'ide/claude-code/native/settings.json',
@@ -51,12 +51,24 @@ const JSON_CAPTURE_POLICIES = {
     'user-state': {
         repositoryPath: 'ide/claude-code/native/.claude.json',
         managedPaths: new Set(overlay_policies_1.CLAUDE_CODE_MANAGED_PATHS),
-        localPaths: new Set(['$.projects']),
+        localPaths: new Set([
+            '$.projects', '$.clientDataCache', '$.firstStartTime', '$.githubRepoPaths',
+            '$.hasCompletedOnboarding', '$.hasIdeOnboardingBeenShown', '$.ideHintShownCount',
+            '$.lastOnboardingVersion', '$.lastReleaseNotesSeen', '$.changelogLastFetched',
+            '$.machineID', '$.userID', '$.metricsStatusCache', '$.migrationVersion',
+            '$.numStartups', '$.promptQueueUseCount', '$.seenNotifications', '$.skillUsage',
+            '$.tipsHistory', '$.installMethod', '$.officialMarketplaceAutoInstallAttempted',
+            '$.officialMarketplaceAutoInstalled', '$.opusProMigrationComplete',
+            '$.sonnet1m45MigrationComplete', '$.shiftEnterKeyBindingInstalled',
+        ]),
     },
 };
 class ClaudeCodeNativeFileHandler {
+    root(context) {
+        return context.env?.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude');
+    }
     discoverDirectories(context) {
-        const configRoot = path.join(context.homeDir, '.claude');
+        const configRoot = this.root(context);
         return [
             {
                 id: 'config-root',
@@ -69,11 +81,11 @@ class ClaudeCodeNativeFileHandler {
         const candidates = [
             {
                 id: 'user-settings',
-                path: path.join(context.homeDir, '.claude', 'settings.json'),
+                path: path.join(this.root(context), 'settings.json'),
             },
             {
                 id: 'user-instructions',
-                path: path.join(context.homeDir, '.claude', 'CLAUDE.md'),
+                path: path.join(this.root(context), 'CLAUDE.md'),
             },
             {
                 id: 'user-state',
@@ -143,6 +155,7 @@ class ClaudeCodeNativeFileHandler {
                     repositoryPath: policy.repositoryPath,
                     content: `${JSON.stringify(sanitized.value, null, 2)}\n`,
                     ownership: 'native',
+                    localPaths: [...policy.localPaths],
                 });
             }
         }
@@ -160,14 +173,13 @@ class ClaudeCodeNativeFileHandler {
         };
     }
     async deploy(repositoryPath, context) {
-        const nativeRoot = path.join(repositoryPath, 'ide', 'claude-code', 'native');
         const mappings = [
             {
-                sourcePath: path.join(nativeRoot, 'settings.json'),
-                targetPath: path.join(context.homeDir, '.claude', 'settings.json'),
+                sourcePath: (0, adapter_utils_1.repositoryFileForPlatform)(repositoryPath, 'ide/claude-code/native/settings.json', context),
+                targetPath: path.join(this.root(context), 'settings.json'),
             },
             {
-                sourcePath: path.join(nativeRoot, '.claude.json'),
+                sourcePath: (0, adapter_utils_1.repositoryFileForPlatform)(repositoryPath, 'ide/claude-code/native/.claude.json', context),
                 targetPath: path.join(context.homeDir, '.claude.json'),
             },
         ];
@@ -190,23 +202,7 @@ class ClaudeCodeNativeFileHandler {
         };
     }
     async readCanonical(repositoryPath, context) {
-        const commonRoot = path.join(repositoryPath, 'common');
-        const rulesPath = path.join(commonRoot, 'AGENTS.md');
-        const skillsRoot = path.join(commonRoot, 'skills');
-        const mcpPath = path.join(commonRoot, 'mcp.yaml');
-        const source = {
-            skills: fs.existsSync(skillsRoot)
-                ? this.readCanonicalSkillFiles(skillsRoot, skillsRoot)
-                : [],
-        };
-        if (fs.existsSync(rulesPath)) {
-            source.rules = fs.readFileSync(rulesPath, 'utf8');
-        }
-        if (fs.existsSync(mcpPath)) {
-            const registry = yaml.parse(fs.readFileSync(mcpPath, 'utf8'));
-            source.mcp = (0, variables_1.resolvePortableValue)(registry, context.variables ?? {}, context.platform ?? process.platform);
-        }
-        return source;
+        return (0, adapter_utils_1.readCanonicalSource)(repositoryPath, context);
     }
     readDeployTarget(targetPath) {
         if (!fs.existsSync(targetPath))

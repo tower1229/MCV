@@ -47,12 +47,13 @@ describe('CodexAdapter', () => {
     );
     const mcp = result.files.find((file) => file.repositoryPath === 'common/mcp.yaml');
 
-    expect(parseToml(native?.content ?? '')).toEqual({ model: 'gpt-5' });
-    expect(parseYaml(mcp?.content ?? '')).toEqual({
+    expect(parseToml(native?.content.toString() ?? '')).toEqual({ model: 'gpt-5' });
+    expect(parseYaml(mcp?.content.toString() ?? '')).toEqual({
       servers: {
         local: {
           command: '${HOME}\\bin\\server.exe',
           env: { API_TOKEN: '${env:API_TOKEN}' },
+          transport: 'stdio',
         },
       },
     });

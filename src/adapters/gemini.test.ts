@@ -32,13 +32,13 @@ describe('GeminiAdapter', () => {
     });
     const result = await adapter.capture(await adapter.discoverFiles(context), context);
     const native = result.files.find(
-      (file) => file.repositoryPath === 'ide/gemini/native/settings.json',
+      (file) => file.repositoryPath === 'ide/gemini/native/gemini-cli/settings.json',
     );
     const mcp = result.files.find((file) => file.repositoryPath === 'common/mcp.yaml');
 
-    expect(JSON.parse(native?.content ?? '')).toEqual({ ui: { theme: 'dark' } });
-    expect(parseYaml(mcp?.content ?? '')).toEqual({
-      servers: { local: { command: 'server' } },
+    expect(JSON.parse(native?.content.toString() ?? '')).toEqual({ ui: { theme: 'dark' } });
+    expect(parseYaml(mcp?.content.toString() ?? '')).toEqual({
+      servers: { local: { command: 'server', transport: 'stdio' } },
     });
   });
 });

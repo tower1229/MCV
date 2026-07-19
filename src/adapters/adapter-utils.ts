@@ -40,9 +40,15 @@ export function readCanonicalSource(
   context: DeviceContext,
 ): CanonicalDeploySource {
   const commonRoot = path.join(repositoryPath, 'common');
-  const rulesPath = path.join(commonRoot, 'AGENTS.md');
+  const platformDirectory = (context.platform ?? process.platform) === 'win32' ? 'windows' : 'macos';
+  const overrideRoot = path.join(repositoryPath, 'overrides', platformDirectory, 'common');
+  const selectOverride = (name: string): string => {
+    const override = path.join(overrideRoot, name);
+    return fs.existsSync(override) ? override : path.join(commonRoot, name);
+  };
+  const rulesPath = selectOverride('AGENTS.md');
   const skillsRoot = path.join(commonRoot, 'skills');
-  const mcpPath = path.join(commonRoot, 'mcp.yaml');
+  const mcpPath = selectOverride('mcp.yaml');
   const source: CanonicalDeploySource = {
     skills: fs.existsSync(skillsRoot)
       ? readFilesRecursively(skillsRoot, skillsRoot)
@@ -56,12 +62,37 @@ export function readCanonicalSource(
       context.platform ?? process.platform,
     );
   }
+  const overridePaths: Record<string, string> = {
+    codex: 'ide/codex/mcp-overrides.yaml',
+    'claude-code': 'ide/claude-code/mcp-overrides.yaml',
+    'gemini-cli': 'ide/gemini/gemini-cli/mcp-overrides.yaml',
+    antigravity: 'ide/gemini/antigravity/mcp-overrides.yaml',
+  };
+  for (const [surface, relativePath] of Object.entries(overridePaths)) {
+    const overridePath = repositoryFileForPlatform(repositoryPath, relativePath, context);
+    if (!fs.existsSync(overridePath)) continue;
+    const parsed = yaml.parse(fs.readFileSync(overridePath, 'utf8')) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      source.mcpOverrides ??= {};
+      source.mcpOverrides[surface] = parsed as Record<string, unknown>;
+    }
+  }
   return source;
 }
 
 export function readDeployTarget(targetPath: string): DeployFile | undefined {
   if (!fs.existsSync(targetPath)) return undefined;
   return { targetPath, content: fs.readFileSync(targetPath) };
+}
+
+export function repositoryFileForPlatform(
+  repositoryPath: string,
+  relativePath: string,
+  context: DeviceContext,
+): string {
+  const platformDirectory = (context.platform ?? process.platform) === 'win32' ? 'windows' : 'macos';
+  const override = path.join(repositoryPath, 'overrides', platformDirectory, ...relativePath.split('/'));
+  return fs.existsSync(override) ? override : path.join(repositoryPath, ...relativePath.split('/'));
 }
 
 function readFilesRecursively(
