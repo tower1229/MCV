@@ -1,32 +1,48 @@
 {
-  "name": "mcv",
+  "name": "@tower1229/mcv",
   "version": "0.1.0",
   "description": "Personal AI IDE configuration collection, management, and cross-device deployment CLI.",
   "main": "dist/index.js",
   "bin": {
     "mcv": "dist/index.js"
   },
-  "directories": {
-    "doc": "docs"
-  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run src",
     "test:watch": "vitest src",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run typecheck && npm test && npm run build"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tower1229/MCV.git"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "ai",
+    "cli",
+    "codex",
+    "claude-code",
+    "gemini-cli",
+    "configuration",
+    "mcp",
+    "agent-skills"
+  ],
+  "author": "tower1229",
   "license": "ISC",
   "type": "commonjs",
   "bugs": {
     "url": "https://github.com/tower1229/MCV/issues"
   },
   "homepage": "https://github.com/tower1229/MCV#readme",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "commander": "^15.0.0",
     "smol-toml": "^1.7.0",

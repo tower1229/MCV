@@ -1,110 +1,203 @@
-# AI Engineering Template
+# MCV
 
-可复用的 **AI 工程基础设施** 项目模板：内置 IDE Agent skills、跨 IDE 同步脚本、Claude / AGENTS 双入口提示词，以及 issue → PRD → 实现 → review 工作流。
+> 可以随处部署的个人生产力，帝国的第一座建筑。
 
-提炼自 [CangHai](https://github.com/tower1229/CangHai) 的生产实践。
+MCV（Mobile Configuration Vehicle）是一个本地运行的 CLI，用来把 Codex、Claude Code 和 Gemini 的个人配置收集到用户自己的私有 Git 仓库，并在另一台 macOS 或 Windows 设备上安全部署。
+
+MCV v0.1 已完成最小闭环：发现配置、收集、脱敏与路径参数化、部署、漂移检查和最近一次备份恢复。它不会同步凭据，不会安装 IDE，也不会在后台自动修改配置。
+
+> v0.1 仍是首个公开测试版本。请先使用私人测试仓库，并在 capture 预览中人工检查最终内容。
+
+## 安装
+
+要求 Node.js `>=22.12.0`。
+
+```bash
+npm install --global @tower1229/mcv
+mcv --help
+```
+
+也可以临时运行：
+
+```bash
+npx @tower1229/mcv --help
+```
+
+## 支持范围
+
+| IDE | 规则 | Skills | MCP / 原生配置 |
+| --- | --- | --- | --- |
+| Codex | `~/.codex/AGENTS.md` | `~/.codex/skills/` | `~/.codex/config.toml` |
+| Claude Code | `~/.claude/CLAUDE.md` | `~/.claude/skills/` | `~/.claude/settings.json`、`~/.claude.json` |
+| Gemini | `~/.gemini/GEMINI.md` | `~/.gemini/skills/` | `~/.gemini/settings.json` |
+
+Gemini Adapter 同时覆盖使用 `~/.gemini/` 的 Gemini CLI 与 Antigravity。Cursor 不属于 v0.1 支持范围。
+
+MCV 仓库中的配置分为：
+
+- `common/`：跨 IDE 的 Canonical Rules、Skills 和 MCP Registry。
+- `ide/<ide>/native/`：仅对特定 IDE 有意义的 Native 配置。
+- Local/Runtime：凭据、缓存、日志、会话和设备状态，不进入仓库。
 
 ## 快速开始
 
-### 1. 从模板创建项目
+### 1. 创建私人配置仓库
+
+创建一个空目录，并在其中初始化 MCV：
 
 ```bash
-# GitHub: Use this template → Create a new repository
-# 或本地复制
-cp -a AI-Engineering-Template/ my-new-project/
-cd my-new-project
+mkdir my-mcv-config
+cd my-mcv-config
+mcv init
 ```
 
-### 2. 定制项目入口
+该命令会创建 `mcv.yaml`，并在本机状态目录记录仓库路径。建议随后把这个目录初始化为私人 Git 仓库。
 
-编辑 `CLAUDE.md`：
-
-- 替换 `{Project Name}` 与项目定位
-- 按需调整「必读入口」路径
-
-`AGENTS.md` 保持一行 `CLAUDE.md` 即可（Codex 等工具读此文件）。
-
-### 3. 配置 Agent 契约
-
-首次使用建议运行 **`/setup-matt-pocock-skills`**，它会引导你配置：
-
-| 文件 | 作用 |
-|------|------|
-| `docs/agents/issue-tracker.md` | Issue/PR 操作约定 |
-| `docs/agents/triage-labels.md` | Triage 五态 label 映射 |
-| `docs/agents/domain.md` | 域文档消费规则 |
-
-也可直接编辑上述文件；默认假设 GitHub Issues + `gh` CLI。
-
-### 4. 同步 Skills 到 IDE
+### 2. 查看可发现的配置
 
 ```bash
-npm run sync:skills
+mcv discover
 ```
 
-| 路径 | 角色 |
-|------|------|
-| `.agents/skills/` | **唯一编辑源**（提交 Git） |
-| `.claude/skills/` | Claude Code 同步副本（gitignore） |
-| `.cursor/skills/` | Cursor 同步副本（gitignore） |
+命令会报告三个 Adapter 的检测结果，以及已找到或缺失的已知配置路径。
 
-Codex 直接读 `.agents/skills/`，无需同步。
+### 3. 收集当前设备配置
 
-## 目录结构
-
-```
-.
-├── CLAUDE.md                 # 主 Agent 提示词（Claude Code / Cursor rules）
-├── AGENTS.md                 # → CLAUDE.md（Codex 等）
-├── CONTEXT.md                # 域词汇表（lazy 充实）
-├── .agents/skills/           # IDE Agent skills 唯一源
-├── docs/
-│   ├── agents/               # Agent 契约三件套
-│   ├── adr/                  # 架构决策记录
-│   └── prd/                  # PRD 归档
-├── scripts/
-│   └── sync-ide-skills.sh    # 跨 IDE skills 同步
-└── package.json              # npm run sync:skills
+```bash
+mcv capture
 ```
 
-## 内置 Skills
+MCV 会先输出经过处理的预览，只有确认后才写入仓库。处理包括：
 
-| Skill | 用途 |
-|-------|------|
-| `setup-matt-pocock-skills` | 首次配置 issue tracker / labels / domain docs |
-| `writing-great-skills` | Skill 写作规范 |
-| `grilling` / `grill-with-docs` | 设计拷问 + 同步写 ADR/词汇表 |
-| `to-prd` | 对话 → PRD → 发到 issue tracker |
-| `to-issues` | 拆 issue |
-| `triage` | Issue 状态机 + agent-ready brief |
-| `implement` | 按 spec 实现 |
-| `code-review` | Standards + Spec 双轴 review |
-| `tdd` / `diagnosing-bugs` | 测试驱动与排障 |
-| `research` | 背景调研 → Markdown |
-| `domain-modeling` | 建/维护 CONTEXT |
-| `codebase-design` | 深模块 / 接口设计 |
-| `improve-codebase-architecture` | 架构改进 |
-| `prototype` | 抛away 原型 |
-| `handoff` | 会话交接 |
-| `resolving-merge-conflicts` | 合并冲突 |
+- 按文件名排除 `.env`、credential 文件、私钥等已知敏感文件；
+- 按字段名识别 `secret`、`token`、`key`、`password`、`credential`；
+- 把识别出的敏感字段值替换为 `${env:VARIABLE_NAME}` 引用；
+- 把 HOME 和已声明变量对应的绝对路径替换为便携变量；
+- 结构化合并 JSON、YAML 和 TOML，保留未识别的 Native 字段；
+- 多个 IDE 提供不同 Canonical Rules 时中止操作，避免静默覆盖。
 
-## 工作流示例
+确认预览安全后，再自行提交并推送私人仓库：
 
-```
-/grill-with-docs     → 敲定设计，写 ADR + CONTEXT
-/to-prd              → 生成 PRD，发到 GitHub Issue（ready-for-agent）
-/implement           → Agent 按 PRD 实现
-/code-review         → 对照标准与 spec 审查
+```bash
+git add .
+git commit -m "capture AI IDE configuration"
+git push
 ```
 
-## 可选扩展
+### 4. 在另一台设备部署
 
-本模板**不包含**以下垂直模块，可按需从 CangHai 单独引入：
+克隆私人配置仓库，进入包含 `mcv.yaml` 的目录后执行：
 
-- **OpenClaw Runtime Skills** — `60_Archives/PersonalAgent/skills/` 风格的运行时 Agent
-- **Cloudflare Public Ask Worker** — NLWeb / 公开问答 API 脚手架
-- **Obsidian 知识库布局** — 编号目录、`[[双向链接]]`、RAG 分区
+```bash
+mcv deploy
+```
+
+MCV 会显示写入计划并请求确认。修改已有文件前会创建本地备份；写入使用临时文件加原子重命名。再次部署相同内容不会创建新备份。
+
+当前 v0.1 没有 `mcv bind` 命令。新设备上直接在克隆后的仓库目录中执行 `mcv deploy` 即可。
+
+### 5. 检查漂移与恢复
+
+```bash
+mcv status
+mcv restore
+```
+
+- `status` 把当前文件哈希与最近一次部署基线比较，输出 `matching`、`missing` 或 `drifted`。
+- `restore` 恢复最近一次部署备份中的全部文件。
+
+## 命令
+
+```text
+mcv init       初始化 mcv.yaml，并把当前设备指向该仓库
+mcv discover   检测 Codex、Claude Code、Gemini 及已知配置路径
+mcv capture    预览并收集本机配置到 MCV 仓库
+mcv deploy     预览、备份并部署仓库配置到本机
+mcv status     检查相对最近部署基线的文件漂移
+mcv restore    恢复最近一次部署备份
+```
+
+命令不支持按参数临时选择 IDE。需要启用或禁用目标时，编辑 `mcv.yaml`：
+
+```yaml
+targets:
+  codex:
+    enabled: true
+  claudeCode:
+    enabled: true
+  gemini:
+    enabled: true
+```
+
+## 仓库结构
+
+```text
+my-mcv-config/
+├── mcv.yaml
+├── common/
+│   ├── AGENTS.md
+│   ├── skills/
+│   └── mcp.yaml
+└── ide/
+    ├── codex/native/config.toml
+    ├── claude-code/native/
+    │   ├── settings.json
+    │   └── .claude.json
+    └── gemini/native/settings.json
+```
+
+Canonical 内容在部署时转换为各 IDE 的原生位置。Native 文件使用 Overlay：MCV 只拥有显式声明的 managed 字段，其他未知字段默认归 Native 所有并被保留。已知 Local 字段会从 capture 中排除。
+
+## 路径变量
+
+`mcv.yaml` 可以声明跨平台路径：
+
+```yaml
+variables:
+  TOOLS_HOME:
+    windows: "${HOME}\\Tools"
+    macos: "${HOME}/Tools"
+```
+
+仓库配置可以引用 `${HOME}`、`${MCV_REPO}` 和自定义变量。deploy 会根据目标平台解析路径，并保留 URL 中的斜杠。
+
+## 安全边界
+
+MCV 的脱敏是防误提交保护，不是凭据保险库或完整的 secret scanner。
+
+- v0.1 只做已知敏感文件名和字段名匹配，不扫描任意字符串中的密钥格式。
+- 凭据、OAuth token、Cookie 和会话状态不在同步范围内。
+- Capture 之前仍应人工检查预览，并只使用私人仓库。
+- Deploy 会覆盖 managed 字段；未知 Native 和 Local 字段会按 Overlay 规则保留。
+- MCV 不自动执行 Git commit、push 或 pull。
+
+## 当前限制
+
+- 仅支持 Codex、Claude Code 和 Gemini。
+- 没有 `bind`、`doctor`、`plan`、`review`、Profile 或 GUI。
+- `restore` 只恢复最近一次有效备份。
+- Capture 默认不传播删除操作。
+- 不安装 IDE、Node.js、MCP Server 或其他系统依赖。
+- 不同步完整 dotfiles、凭据或 AI 会话历史。
+
+## 本地开发
+
+```bash
+npm install
+npm run typecheck
+npm test
+npm run build
+node dist/index.js --help
+```
+
+发布包之前，npm 会通过 `prepack` 自动运行 typecheck、完整测试和 build。
+
+只检查将进入 npm 的文件：
+
+```bash
+npm pack --dry-run
+```
 
 ## License
 
-Skills 源自 [mattpocock/skills](https://github.com/mattpocock/skills) 生态及 CangHai 本地扩展，使用时请遵循各 skill 上游许可。
+[ISC](LICENSE)
