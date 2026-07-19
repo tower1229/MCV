@@ -58,6 +58,7 @@ async function deployConfigurations(context, dependencies = {}) {
     });
     const plan = buildDeployPlan(operation.files);
     if (plan.length === 0) {
+        recordDeploymentBaseline(operation.files);
         console.log('Claude Code configuration is already in sync.');
         return;
     }
@@ -74,7 +75,21 @@ async function deployConfigurations(context, dependencies = {}) {
     for (const file of plan) {
         operation.write(file);
     }
+    recordDeploymentBaseline(operation.files);
     console.log(`Deployed ${plan.length} file(s) from ${repositoryPath}.`);
+}
+function recordDeploymentBaseline(files) {
+    const state = (0, state_1.readState)();
+    state.baselineSnapshot = {
+        recordedAt: new Date().toISOString(),
+        files: Object.fromEntries(files
+            .filter((file) => fs.existsSync(file.targetPath))
+            .map((file) => [
+            file.targetPath,
+            (0, files_1.hashFile)(file.targetPath),
+        ])),
+    };
+    (0, state_1.writeState)(state);
 }
 function backupModifiedFiles(plan) {
     const modifiedFiles = plan.filter((file) => file.change === 'modify');

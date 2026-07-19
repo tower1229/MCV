@@ -41,6 +41,8 @@ const discover_1 = require("./commands/discover");
 const capture_1 = require("./commands/capture");
 const init_1 = require("./commands/init");
 const deploy_1 = require("./commands/deploy");
+const status_1 = require("./commands/status");
+const restore_1 = require("./commands/restore");
 function createProgram(context = { homeDir: os.homedir() }, captureDependencies = {}, deployDependencies = {}) {
     const program = new commander_1.Command();
     program
@@ -70,6 +72,18 @@ function createProgram(context = { homeDir: os.homedir() }, captureDependencies 
         .description('Detect supported AI IDEs and report their configuration paths')
         .action(async () => {
         await (0, discover_1.discoverConfigurations)(context);
+    });
+    program
+        .command('status')
+        .description('Compare local configuration with the last deployment')
+        .action(() => {
+        (0, status_1.showStatus)();
+    });
+    program
+        .command('restore')
+        .description('Restore local configuration from the latest deployment backup')
+        .action(() => {
+        (0, restore_1.restoreLatestBackup)();
     });
     return program;
 }

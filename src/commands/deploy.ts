@@ -4,9 +4,9 @@ import { createInterface } from 'readline/promises';
 import * as yaml from 'yaml';
 import { ClaudeCodeAdapter } from '../adapters/claude-code';
 import type { DeployFile, DeviceContext } from '../adapters/types';
-import { atomicWriteTextFile } from '../utils/files';
+import { atomicWriteTextFile, hashFile } from '../utils/files';
 import { isRecord } from '../utils/objects';
-import { getStateFilePath, readState } from '../utils/state';
+import { getStateFilePath, readState, writeState } from '../utils/state';
 import { resolveVariableDefinitions } from '../utils/variables';
 
 export interface DeployDependencies {
@@ -47,6 +47,7 @@ export async function deployConfigurations(
   });
   const plan = buildDeployPlan(operation.files);
   if (plan.length === 0) {
+    recordDeploymentBaseline(operation.files);
     console.log('Claude Code configuration is already in sync.');
     return;
   }
@@ -66,7 +67,24 @@ export async function deployConfigurations(
   for (const file of plan) {
     operation.write(file);
   }
+  recordDeploymentBaseline(operation.files);
   console.log(`Deployed ${plan.length} file(s) from ${repositoryPath}.`);
+}
+
+function recordDeploymentBaseline(files: DeployFile[]): void {
+  const state = readState();
+  state.baselineSnapshot = {
+    recordedAt: new Date().toISOString(),
+    files: Object.fromEntries(
+      files
+        .filter((file) => fs.existsSync(file.targetPath))
+        .map((file) => [
+          file.targetPath,
+          hashFile(file.targetPath),
+        ]),
+    ),
+  };
+  writeState(state);
 }
 
 function backupModifiedFiles(plan: PlannedDeployFile[]): void {

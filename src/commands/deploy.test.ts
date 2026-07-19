@@ -231,6 +231,30 @@ describe('mcv deploy', () => {
     );
   });
 
+  it('records deployed file hashes as the status baseline', async () => {
+    const run = (command: 'deploy' | 'status') => createProgram(
+      { homeDir, platform: 'win32' },
+      {},
+      { confirmDeploy: async () => true },
+    ).parseAsync(['node', 'mcv', command]);
+
+    await run('deploy');
+    const settingsPath = path.join(homeDir, '.claude', 'settings.json');
+    const state = JSON.parse(
+      fs.readFileSync(path.join(stateRoot, 'mcv', 'config.json'), 'utf8'),
+    ) as { baselineSnapshot: { files: Record<string, string> } };
+    expect(state.baselineSnapshot.files[settingsPath]).toMatch(/^[a-f0-9]{64}$/);
+
+    vi.mocked(console.log).mockClear();
+    await run('status');
+    expect(vi.mocked(console.log)).toHaveBeenCalledWith(`[matching] ${settingsPath}`);
+
+    fs.appendFileSync(settingsPath, '\n');
+    vi.mocked(console.log).mockClear();
+    await run('status');
+    expect(vi.mocked(console.log)).toHaveBeenCalledWith(`[drifted] ${settingsPath}`);
+  });
+
   it('resolves chained portable variables independent of declaration order', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),

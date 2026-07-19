@@ -33,28 +33,22 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.hashFile = hashFile;
-exports.atomicWriteTextFile = atomicWriteTextFile;
-exports.atomicWriteFile = atomicWriteFile;
-const crypto_1 = require("crypto");
+exports.showStatus = showStatus;
 const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-function hashFile(filePath) {
-    return (0, crypto_1.createHash)('sha256').update(fs.readFileSync(filePath)).digest('hex');
-}
-function atomicWriteTextFile(targetPath, content) {
-    atomicWriteFile(targetPath, content);
-}
-function atomicWriteFile(targetPath, content) {
-    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-    const temporaryPath = `${targetPath}.mcv-${process.pid}-${Date.now()}.tmp`;
-    try {
-        fs.writeFileSync(temporaryPath, content);
-        fs.renameSync(temporaryPath, targetPath);
+const files_1 = require("../utils/files");
+const state_1 = require("../utils/state");
+function showStatus() {
+    const baseline = (0, state_1.readState)().baselineSnapshot;
+    if (!baseline || Object.keys(baseline.files).length === 0) {
+        console.log('No deployment baseline found. Run `mcv deploy` first.');
+        return;
     }
-    finally {
-        if (fs.existsSync(temporaryPath)) {
-            fs.rmSync(temporaryPath, { force: true });
+    for (const [filePath, expectedHash] of Object.entries(baseline.files)) {
+        if (!fs.existsSync(filePath)) {
+            console.log(`[missing] ${filePath}`);
+            continue;
         }
+        const currentHash = (0, files_1.hashFile)(filePath);
+        console.log(`[${currentHash === expectedHash ? 'matching' : 'drifted'}] ${filePath}`);
     }
 }

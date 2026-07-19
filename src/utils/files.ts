@@ -1,5 +1,10 @@
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+
+export function hashFile(filePath: string): string {
+  return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
 
 export function atomicWriteTextFile(targetPath: string, content: string): void {
   atomicWriteFile(targetPath, content);

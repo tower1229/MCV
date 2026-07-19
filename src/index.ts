@@ -13,6 +13,8 @@ import {
   deployConfigurations,
   type DeployDependencies,
 } from './commands/deploy';
+import { showStatus } from './commands/status';
+import { restoreLatestBackup } from './commands/restore';
 
 export function createProgram(
   context: DeviceContext = { homeDir: os.homedir() },
@@ -52,6 +54,20 @@ export function createProgram(
     .description('Detect supported AI IDEs and report their configuration paths')
     .action(async () => {
       await discoverConfigurations(context);
+    });
+
+  program
+    .command('status')
+    .description('Compare local configuration with the last deployment')
+    .action(() => {
+      showStatus();
+    });
+
+  program
+    .command('restore')
+    .description('Restore local configuration from the latest deployment backup')
+    .action(() => {
+      restoreLatestBackup();
     });
 
   return program;
