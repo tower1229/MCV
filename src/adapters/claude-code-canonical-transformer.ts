@@ -10,6 +10,7 @@ import type {
   DeviceContext,
   NativeCaptureResult,
 } from './types';
+import { CLAUDE_CODE_MCP_PATH } from './overlay-policies';
 
 export class ClaudeCodeCanonicalTransformer implements CanonicalTransformer {
   transform(
@@ -32,7 +33,7 @@ export class ClaudeCodeCanonicalTransformer implements CanonicalTransformer {
     let mcpServers: Record<string, unknown> = {};
     const mcpSources: string[] = [];
     for (const field of capture.managedFields) {
-      if (field.path !== '$.mcpServers' || !isRecord(field.value)) continue;
+      if (field.path !== CLAUDE_CODE_MCP_PATH || !isRecord(field.value)) continue;
       mcpServers = mergeRecords(mcpServers, field.value);
       mcpSources.push(field.sourcePath);
     }

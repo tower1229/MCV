@@ -9,6 +9,7 @@ import {
 } from '../utils/structured-config';
 import { resolvePortableValue } from '../utils/variables';
 import { readCanonicalSource, readDeployTarget } from './adapter-utils';
+import { GEMINI_MANAGED_PATHS } from './overlay-policies';
 import type {
   CanonicalDeploySource,
   DetectedConfigDirectory,
@@ -19,8 +20,6 @@ import type {
   NativeCaptureResult,
   NativeFileHandler,
 } from './types';
-
-const MANAGED_PATHS = ['$.mcpServers'];
 
 export class GeminiNativeFileHandler implements NativeFileHandler {
   discoverDirectories(context: DeviceContext): DetectedConfigDirectory[] {
@@ -70,7 +69,7 @@ export class GeminiNativeFileHandler implements NativeFileHandler {
           'json',
           file.path,
         );
-        const owned = splitOwnedFields(parsed, MANAGED_PATHS, []);
+        const owned = splitOwnedFields(parsed, GEMINI_MANAGED_PATHS, []);
         const native = sanitizeConfig(owned.native, context);
         result.summary.sensitiveFieldCount += native.sensitiveFieldCount;
         result.summary.parameterizedPathCount += native.parameterizedPathCount;

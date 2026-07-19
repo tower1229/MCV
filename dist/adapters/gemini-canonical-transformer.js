@@ -37,6 +37,7 @@ exports.GeminiCanonicalTransformer = void 0;
 const path = __importStar(require("path"));
 const yaml = __importStar(require("yaml"));
 const objects_1 = require("../utils/objects");
+const overlay_policies_1 = require("./overlay-policies");
 class GeminiCanonicalTransformer {
     transform(capture, _context) {
         const files = [...capture.files];
@@ -49,7 +50,7 @@ class GeminiCanonicalTransformer {
                 ownership: 'managed',
             });
         }
-        const mcp = capture.managedFields.find((field) => field.path === '$.mcpServers');
+        const mcp = capture.managedFields.find((field) => field.path === overlay_policies_1.GEMINI_MCP_PATH);
         if (mcp && (0, objects_1.isRecord)(mcp.value)) {
             files.push({
                 sourcePath: mcp.sourcePath,

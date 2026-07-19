@@ -111,7 +111,14 @@ function buildCapturePlan(repositoryPath, files) {
     const planned = new Map();
     for (const file of files) {
         const destinationPath = path.join(repositoryPath, ...file.repositoryPath.split('/'));
-        const existingContent = planned.get(destinationPath)?.content
+        const previous = planned.get(destinationPath);
+        if (previous?.ownership === 'managed'
+            && file.ownership === 'managed'
+            && file.repositoryPath !== 'common/mcp.yaml'
+            && previous.content !== file.content) {
+            throw new Error(`Conflicting managed captures for ${file.repositoryPath}: ${previous.sourcePath} and ${file.sourcePath}.`);
+        }
+        const existingContent = previous?.content
             ?? (fs.existsSync(destinationPath)
                 ? fs.readFileSync(destinationPath, 'utf8')
                 : undefined);

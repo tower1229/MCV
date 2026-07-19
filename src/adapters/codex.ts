@@ -3,6 +3,7 @@ import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObjec
 import { hasExecutable } from './adapter-utils';
 import { CodexCanonicalTransformer } from './codex-canonical-transformer';
 import { CodexNativeFileHandler } from './codex-native-file-handler';
+import { CODEX_MANAGED_PATHS } from './overlay-policies';
 import type {
   CanonicalTransformer,
   CaptureResult,
@@ -80,7 +81,7 @@ export class CodexAdapter implements IdeAdapter {
     return [...other, {
       targetPath: configPath,
       content: stringifyStructuredObject(
-        mergeStructuredOverlay(existing, nativeValue, managedValue, ['$.mcp_servers']),
+        mergeStructuredOverlay(existing, nativeValue, managedValue, CODEX_MANAGED_PATHS),
         'toml',
       ),
     }];

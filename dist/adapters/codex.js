@@ -39,6 +39,7 @@ const structured_config_1 = require("../utils/structured-config");
 const adapter_utils_1 = require("./adapter-utils");
 const codex_canonical_transformer_1 = require("./codex-canonical-transformer");
 const codex_native_file_handler_1 = require("./codex-native-file-handler");
+const overlay_policies_1 = require("./overlay-policies");
 class CodexAdapter {
     nativeFileHandler;
     canonicalTransformer;
@@ -94,7 +95,7 @@ class CodexAdapter {
             : undefined;
         return [...other, {
                 targetPath: configPath,
-                content: (0, structured_config_1.stringifyStructuredObject)((0, structured_config_1.mergeStructuredOverlay)(existing, nativeValue, managedValue, ['$.mcp_servers']), 'toml'),
+                content: (0, structured_config_1.stringifyStructuredObject)((0, structured_config_1.mergeStructuredOverlay)(existing, nativeValue, managedValue, overlay_policies_1.CODEX_MANAGED_PATHS), 'toml'),
             }];
     }
 }

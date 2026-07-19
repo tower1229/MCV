@@ -37,6 +37,7 @@ exports.ClaudeCodeCanonicalTransformer = void 0;
 const path = __importStar(require("path"));
 const yaml = __importStar(require("yaml"));
 const objects_1 = require("../utils/objects");
+const overlay_policies_1 = require("./overlay-policies");
 class ClaudeCodeCanonicalTransformer {
     transform(capture, _context) {
         const files = [...capture.files];
@@ -52,7 +53,7 @@ class ClaudeCodeCanonicalTransformer {
         let mcpServers = {};
         const mcpSources = [];
         for (const field of capture.managedFields) {
-            if (field.path !== '$.mcpServers' || !(0, objects_1.isRecord)(field.value))
+            if (field.path !== overlay_policies_1.CLAUDE_CODE_MCP_PATH || !(0, objects_1.isRecord)(field.value))
                 continue;
             mcpServers = (0, objects_1.mergeRecords)(mcpServers, field.value);
             mcpSources.push(field.sourcePath);

@@ -201,4 +201,32 @@ describe('mcv capture', () => {
       model: 'gpt-5',
     });
   });
+
+  it('rejects conflicting canonical rules from multiple enabled IDEs', async () => {
+    fs.writeFileSync(
+      path.join(repositoryPath, 'mcv.yaml'),
+      [
+        'schemaVersion: 1',
+        'targets:',
+        '  codex:',
+        '    enabled: true',
+        '  claudeCode:',
+        '    enabled: true',
+        '  gemini:',
+        '    enabled: true',
+        '',
+      ].join('\n'),
+    );
+    fs.mkdirSync(path.join(homeDir, '.codex'), { recursive: true });
+    fs.writeFileSync(path.join(homeDir, '.codex', 'AGENTS.md'), '# Codex rules\n');
+    fs.writeFileSync(path.join(homeDir, '.claude', 'CLAUDE.md'), '# Claude rules\n');
+
+    await expect(createProgram(
+      { homeDir, pathEnv: '' },
+      { confirmCapture: async () => true },
+    ).parseAsync(['node', 'mcv', 'capture'])).rejects.toThrow(
+      'Conflicting managed captures for common/AGENTS.md',
+    );
+    expect(fs.existsSync(path.join(repositoryPath, 'common', 'AGENTS.md'))).toBe(false);
+  });
 });

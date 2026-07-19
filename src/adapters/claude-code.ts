@@ -17,6 +17,7 @@ import type {
   IdeAdapter,
   NativeFileHandler,
 } from './types';
+import { CLAUDE_CODE_MANAGED_PATHS } from './overlay-policies';
 
 export class ClaudeCodeAdapter implements IdeAdapter {
   constructor(
@@ -102,7 +103,7 @@ export class ClaudeCodeAdapter implements IdeAdapter {
       return [{
         targetPath,
         content: stringifyStructuredObject(
-          mergeStructuredOverlay(existing, native, canonical, ['$.mcpServers']),
+          mergeStructuredOverlay(existing, native, canonical, CLAUDE_CODE_MANAGED_PATHS),
           'json',
         ),
       }];

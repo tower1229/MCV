@@ -3,6 +3,7 @@ import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObjec
 import { hasExecutable } from './adapter-utils';
 import { GeminiCanonicalTransformer } from './gemini-canonical-transformer';
 import { GeminiNativeFileHandler } from './gemini-native-file-handler';
+import { GEMINI_MANAGED_PATHS } from './overlay-policies';
 import type {
   CanonicalTransformer,
   CaptureResult,
@@ -80,7 +81,7 @@ export class GeminiAdapter implements IdeAdapter {
     return [...other, {
       targetPath: settingsPath,
       content: stringifyStructuredObject(
-        mergeStructuredOverlay(existing, nativeValue, managedValue, ['$.mcpServers']),
+        mergeStructuredOverlay(existing, nativeValue, managedValue, GEMINI_MANAGED_PATHS),
         'json',
       ),
     }];

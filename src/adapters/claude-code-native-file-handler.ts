@@ -18,6 +18,7 @@ import type {
   NativeFileHandler,
   NativeCaptureResult,
 } from './types';
+import { CLAUDE_CODE_MANAGED_PATHS } from './overlay-policies';
 
 interface JsonCapturePolicy {
   repositoryPath: string;
@@ -28,12 +29,12 @@ interface JsonCapturePolicy {
 const JSON_CAPTURE_POLICIES: Record<string, JsonCapturePolicy> = {
   'user-settings': {
     repositoryPath: 'ide/claude-code/native/settings.json',
-    managedPaths: new Set(['$.mcpServers']),
+    managedPaths: new Set(CLAUDE_CODE_MANAGED_PATHS),
     localPaths: new Set(),
   },
   'user-state': {
     repositoryPath: 'ide/claude-code/native/.claude.json',
-    managedPaths: new Set(['$.mcpServers']),
+    managedPaths: new Set(CLAUDE_CODE_MANAGED_PATHS),
     localPaths: new Set(['$.projects']),
   },
 };

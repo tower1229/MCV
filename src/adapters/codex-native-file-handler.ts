@@ -9,6 +9,7 @@ import {
 } from '../utils/structured-config';
 import { resolvePortableValue } from '../utils/variables';
 import { readCanonicalSource, readDeployTarget } from './adapter-utils';
+import { CODEX_MANAGED_PATHS } from './overlay-policies';
 import type {
   CanonicalDeploySource,
   DetectedConfigDirectory,
@@ -20,7 +21,6 @@ import type {
   NativeFileHandler,
 } from './types';
 
-const MANAGED_PATHS = ['$.mcp_servers'];
 const LOCAL_PATHS = ['$.projects'];
 
 export class CodexNativeFileHandler implements NativeFileHandler {
@@ -71,7 +71,7 @@ export class CodexNativeFileHandler implements NativeFileHandler {
           'toml',
           file.path,
         );
-        const owned = splitOwnedFields(parsed, MANAGED_PATHS, LOCAL_PATHS);
+        const owned = splitOwnedFields(parsed, CODEX_MANAGED_PATHS, LOCAL_PATHS);
         const native = sanitizeConfig(owned.native, context);
         result.summary.sensitiveFieldCount += native.sensitiveFieldCount;
         result.summary.parameterizedPathCount += native.parameterizedPathCount;

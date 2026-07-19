@@ -41,7 +41,7 @@ const sanitize_1 = require("../utils/sanitize");
 const structured_config_1 = require("../utils/structured-config");
 const variables_1 = require("../utils/variables");
 const adapter_utils_1 = require("./adapter-utils");
-const MANAGED_PATHS = ['$.mcp_servers'];
+const overlay_policies_1 = require("./overlay-policies");
 const LOCAL_PATHS = ['$.projects'];
 class CodexNativeFileHandler {
     discoverDirectories(context) {
@@ -83,7 +83,7 @@ class CodexNativeFileHandler {
                 continue;
             try {
                 const parsed = (0, structured_config_1.parseStructuredObject)(fs.readFileSync(file.path, 'utf8'), 'toml', file.path);
-                const owned = (0, structured_config_1.splitOwnedFields)(parsed, MANAGED_PATHS, LOCAL_PATHS);
+                const owned = (0, structured_config_1.splitOwnedFields)(parsed, overlay_policies_1.CODEX_MANAGED_PATHS, LOCAL_PATHS);
                 const native = (0, sanitize_1.sanitizeConfig)(owned.native, context);
                 result.summary.sensitiveFieldCount += native.sensitiveFieldCount;
                 result.summary.parameterizedPathCount += native.parameterizedPathCount;

@@ -41,15 +41,16 @@ const objects_1 = require("../utils/objects");
 const files_1 = require("../utils/files");
 const sanitize_1 = require("../utils/sanitize");
 const variables_1 = require("../utils/variables");
+const overlay_policies_1 = require("./overlay-policies");
 const JSON_CAPTURE_POLICIES = {
     'user-settings': {
         repositoryPath: 'ide/claude-code/native/settings.json',
-        managedPaths: new Set(['$.mcpServers']),
+        managedPaths: new Set(overlay_policies_1.CLAUDE_CODE_MANAGED_PATHS),
         localPaths: new Set(),
     },
     'user-state': {
         repositoryPath: 'ide/claude-code/native/.claude.json',
-        managedPaths: new Set(['$.mcpServers']),
+        managedPaths: new Set(overlay_policies_1.CLAUDE_CODE_MANAGED_PATHS),
         localPaths: new Set(['$.projects']),
     },
 };

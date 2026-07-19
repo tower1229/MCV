@@ -39,6 +39,7 @@ const path = __importStar(require("path"));
 const structured_config_1 = require("../utils/structured-config");
 const claude_code_native_file_handler_1 = require("./claude-code-native-file-handler");
 const claude_code_canonical_transformer_1 = require("./claude-code-canonical-transformer");
+const overlay_policies_1 = require("./overlay-policies");
 class ClaudeCodeAdapter {
     nativeFileHandler;
     canonicalTransformer;
@@ -99,7 +100,7 @@ class ClaudeCodeAdapter {
                 : undefined;
             return [{
                     targetPath,
-                    content: (0, structured_config_1.stringifyStructuredObject)((0, structured_config_1.mergeStructuredOverlay)(existing, native, canonical, ['$.mcpServers']), 'json'),
+                    content: (0, structured_config_1.stringifyStructuredObject)((0, structured_config_1.mergeStructuredOverlay)(existing, native, canonical, overlay_policies_1.CLAUDE_CODE_MANAGED_PATHS), 'json'),
                 }];
         });
         return [...otherFiles, ...mergedFiles];

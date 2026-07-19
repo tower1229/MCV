@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { isRecord } from '../utils/objects';
+import { GEMINI_MCP_PATH } from './overlay-policies';
 import type {
   CanonicalDeploySource,
   CanonicalTransformer,
@@ -23,7 +24,7 @@ export class GeminiCanonicalTransformer implements CanonicalTransformer {
         ownership: 'managed',
       });
     }
-    const mcp = capture.managedFields.find((field) => field.path === '$.mcpServers');
+    const mcp = capture.managedFields.find((field) => field.path === GEMINI_MCP_PATH);
     if (mcp && isRecord(mcp.value)) {
       files.push({
         sourcePath: mcp.sourcePath,
