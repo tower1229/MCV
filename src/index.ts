@@ -63,7 +63,7 @@ export function createProgram(
     .option('--dry-run', 'Show the deployment plan without writing')
     .option('--json', 'Print a machine-readable plan')
     .option('--yes', 'Deploy without prompting after a reviewed dry-run')
-    .option('--prune-managed', 'Delete files from the previous MCV inventory that are no longer in the repository')
+    .option('--prune-managed', 'Delete stale managed files and exact duplicate Skills from the legacy Codex directory')
     .action(async (options) => {
       await deployConfigurations(context, deployDependencies, options);
     });

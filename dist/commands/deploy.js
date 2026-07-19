@@ -70,15 +70,23 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
         skippedLinks.set(file.targetPath, link);
         return false;
     });
-    const plan = buildDeployPlan(safeDeployFiles, options.pruneManaged === true ? (0, state_1.readState)().managedInventory : undefined);
+    const legacySkillDuplicates = findLegacyCodexSkillDuplicates(context, safeDeployFiles, definitions.some(({ targetId }) => targetId === 'codex'));
+    const state = options.pruneManaged === true ? (0, state_1.readState)() : undefined;
+    const managedInventory = state?.managedInventory ?? {};
+    for (const targetPath of legacySkillDuplicates.files) {
+        managedInventory[targetPath] = { source: 'codex-legacy-duplicate', hash: (0, files_1.hashFile)(targetPath) };
+    }
+    const plan = buildDeployPlan(safeDeployFiles, options.pruneManaged === true ? managedInventory : undefined);
     if (options.yes && plan.some((file) => file.change === 'delete'))
         throw new Error('--yes never applies deletions; review and confirm --prune-managed interactively.');
     if (plan.length === 0) {
         recordDeploymentBaseline(safeDeployFiles);
         if (options.json)
-            console.log(JSON.stringify({ repositoryPath, changes: [], skipped: [...skippedLinks].map(([targetPath, linkPath]) => ({ targetPath, reason: 'symbolic-link-ancestor', linkPath })) }, null, 2));
-        else
+            console.log(JSON.stringify({ repositoryPath, changes: [], skipped: [...skippedLinks].map(([targetPath, linkPath]) => ({ targetPath, reason: 'symbolic-link-ancestor', linkPath })), legacySkillDuplicates: legacySkillDuplicates.names }, null, 2));
+        else {
             reportSkippedLinks(skippedLinks);
+            reportLegacySkillDuplicates(legacySkillDuplicates);
+        }
         const subject = definitions.length === 1
             ? `${definitions[0].name} configuration is`
             : 'Configurations are';
@@ -86,12 +94,14 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
         return;
     }
     if (options.json)
-        console.log(JSON.stringify({ repositoryPath, changes: plan.map(({ targetPath, change }) => ({ targetPath, change })), skipped: [...skippedLinks].map(([targetPath, linkPath]) => ({ targetPath, reason: 'symbolic-link-ancestor', linkPath })) }, null, 2));
+        console.log(JSON.stringify({ repositoryPath, changes: plan.map(({ targetPath, change }) => ({ targetPath, change })), skipped: [...skippedLinks].map(([targetPath, linkPath]) => ({ targetPath, reason: 'symbolic-link-ancestor', linkPath })), legacySkillDuplicates: options.pruneManaged ? [] : legacySkillDuplicates.names }, null, 2));
     else {
         console.log('Deploy preview:');
         for (const file of plan)
             console.log(`[${file.change}] ${file.targetPath}`);
         reportSkippedLinks(skippedLinks);
+        if (!options.pruneManaged)
+            reportLegacySkillDuplicates(legacySkillDuplicates);
     }
     if (options.dryRun)
         return;
@@ -124,6 +134,74 @@ function reportSkippedLinks(skippedLinks) {
         counts.set(linkPath, (counts.get(linkPath) ?? 0) + 1);
     for (const [linkPath, count] of counts)
         console.log(`[skip:symlink] ${count} file(s) under ${linkPath}`);
+}
+function reportLegacySkillDuplicates(duplicates) {
+    if (duplicates.names.length === 0)
+        return;
+    console.log(`[duplicate:codex-legacy] ${duplicates.names.join(', ')}; run deploy --prune-managed to remove the backed-up legacy copies.`);
+}
+function findLegacyCodexSkillDuplicates(context, deployFiles, codexEnabled) {
+    if (!codexEnabled)
+        return { names: [], files: [] };
+    const officialRoot = path.resolve(context.homeDir, '.agents', 'skills');
+    const codexHome = (context.env ?? process.env).CODEX_HOME || path.join(context.homeDir, '.codex');
+    const legacyRoot = path.resolve(codexHome, 'skills');
+    if (samePath(officialRoot, legacyRoot, context.platform) || findSymbolicLinkAncestor(legacyRoot)) {
+        return { names: [], files: [] };
+    }
+    const desiredBySkill = new Map();
+    for (const file of deployFiles) {
+        const relativePath = path.relative(officialRoot, path.resolve(file.targetPath));
+        if (!relativePath || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath))
+            continue;
+        const [skillName, ...rest] = relativePath.split(path.sep);
+        if (!skillName || rest.length === 0)
+            continue;
+        const skillFiles = desiredBySkill.get(skillName) ?? new Map();
+        skillFiles.set(rest.join('/'), Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content));
+        desiredBySkill.set(skillName, skillFiles);
+    }
+    const names = [];
+    const files = [];
+    for (const [skillName, desiredFiles] of desiredBySkill) {
+        const legacySkillRoot = path.join(legacyRoot, skillName);
+        const legacyFiles = collectRegularFiles(legacySkillRoot);
+        if (!legacyFiles || legacyFiles.size !== desiredFiles.size)
+            continue;
+        const exactDuplicate = [...desiredFiles].every(([relativePath, content]) => {
+            const legacyPath = legacyFiles.get(relativePath);
+            return legacyPath !== undefined && fs.readFileSync(legacyPath).equals(content);
+        });
+        if (!exactDuplicate)
+            continue;
+        names.push(skillName);
+        files.push(...legacyFiles.values());
+    }
+    return { names: names.sort(), files: files.sort() };
+}
+function collectRegularFiles(root) {
+    if (!fs.existsSync(root) || fs.lstatSync(root).isSymbolicLink())
+        return undefined;
+    const files = new Map();
+    const visit = (directory) => {
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+            if (entry.isSymbolicLink())
+                return false;
+            const current = path.join(directory, entry.name);
+            if (entry.isDirectory()) {
+                if (!visit(current))
+                    return false;
+            }
+            else if (entry.isFile()) {
+                files.set(path.relative(root, current).replace(/\\/g, '/'), current);
+            }
+        }
+        return true;
+    };
+    return visit(root) ? files : undefined;
+}
+function samePath(left, right, platform) {
+    return platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 function recordDeploymentBaseline(files, repositoryPath) {
     const state = (0, state_1.readState)();

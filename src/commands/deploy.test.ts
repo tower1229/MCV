@@ -145,6 +145,48 @@ describe('mcv deploy', () => {
     ).toEqual(resource);
   });
 
+  it('prunes only exact duplicate Codex skills from the legacy directory', async () => {
+    fs.writeFileSync(
+      path.join(repositoryPath, 'mcv.yaml'),
+      'schemaVersion: 2\nrepositoryId: test\ninitializedAt: test\nsecurity: { scanSecrets: true, allowPlaintextSecrets: false }\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
+    );
+    const canonicalSkill = path.join(repositoryPath, 'common', 'skills', 'grill-me');
+    fs.mkdirSync(path.join(canonicalSkill, 'references'), { recursive: true });
+    fs.writeFileSync(path.join(canonicalSkill, 'SKILL.md'), '# Grill Me\n');
+    fs.writeFileSync(path.join(canonicalSkill, 'references', 'questions.md'), '# Questions\n');
+
+    const duplicateLegacySkill = path.join(homeDir, '.codex', 'skills', 'grill-me');
+    fs.mkdirSync(path.join(duplicateLegacySkill, 'references'), { recursive: true });
+    fs.writeFileSync(path.join(duplicateLegacySkill, 'SKILL.md'), '# Grill Me\n');
+    fs.writeFileSync(path.join(duplicateLegacySkill, 'references', 'questions.md'), '# Questions\n');
+    const divergentLegacySkill = path.join(homeDir, '.codex', 'skills', 'tdd');
+    fs.mkdirSync(divergentLegacySkill, { recursive: true });
+    fs.writeFileSync(path.join(divergentLegacySkill, 'SKILL.md'), '# Legacy TDD\n');
+
+    await createProgram(
+      { homeDir, platform: 'win32' },
+    ).parseAsync(['node', 'mcv', 'deploy', '--dry-run']);
+    expect(fs.existsSync(path.join(duplicateLegacySkill, 'SKILL.md'))).toBe(true);
+    expect(vi.mocked(console.log)).toHaveBeenCalledWith(
+      expect.stringContaining('[duplicate:codex-legacy] grill-me'),
+    );
+
+    await createProgram(
+      { homeDir, platform: 'win32' },
+      {},
+      { confirmDeploy: async () => true },
+    ).parseAsync(['node', 'mcv', 'deploy', '--prune-managed']);
+
+    expect(fs.existsSync(path.join(duplicateLegacySkill, 'SKILL.md'))).toBe(false);
+    expect(fs.existsSync(path.join(duplicateLegacySkill, 'references', 'questions.md'))).toBe(false);
+    expect(fs.readFileSync(path.join(divergentLegacySkill, 'SKILL.md'), 'utf8')).toBe('# Legacy TDD\n');
+    expect(fs.readFileSync(path.join(homeDir, '.agents', 'skills', 'grill-me', 'SKILL.md'), 'utf8')).toBe('# Grill Me\n');
+
+    await createProgram().parseAsync(['node', 'mcv', 'restore']);
+    expect(fs.readFileSync(path.join(duplicateLegacySkill, 'SKILL.md'), 'utf8')).toBe('# Grill Me\n');
+    expect(fs.readFileSync(path.join(duplicateLegacySkill, 'references', 'questions.md'), 'utf8')).toBe('# Questions\n');
+  });
+
   it('merges the canonical MCP registry into Claude Code native state', async () => {
     fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
     fs.writeFileSync(

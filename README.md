@@ -125,7 +125,7 @@ mcv status     检查相对最近部署基线的文件漂移
 mcv restore    用最近一次部署前保存的本机旧版本回滚对应文件
 ```
 
-删除默认不执行。只有 `mcv deploy --prune-managed` 经交互确认后，才会删除本机 state 中已记录为 MCV managed、但仓库已不再生成的文件；`--yes` 永远拒绝删除。
+删除默认不执行。只有 `mcv deploy --prune-managed` 经交互确认后，才会删除本机 state 中已记录为 MCV managed、但仓库已不再生成的文件，以及与本次 Canonical 部署逐文件完全一致的旧 `$CODEX_HOME/skills` Skill 副本；`--yes` 永远拒绝删除。普通 deploy 检测到后一种重复时会提示，不会自动删除；内容不同或包含链接的 legacy Skill 会保留。
 
 Deploy 不会穿过已有 symlink/junction 写文件。计划会以 `skip:symlink` 明确列出这些目录；若多个 IDE 通过链接复用 `~/.agents/skills`，MCV 只写官方事实路径，避免重复写入和破坏链接。
 
