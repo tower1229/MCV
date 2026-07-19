@@ -51,7 +51,7 @@ cd my-mcv-config
 mcv init
 ```
 
-该命令会创建 `mcv.yaml`，并在本机状态目录记录仓库路径。建议随后把这个目录初始化为私人 Git 仓库。
+该命令只会创建 `mcv.yaml`，并在本机状态目录记录设备 ID、仓库 ID、仓库路径和空的部署基线。它不会发现、收集或部署 IDE 配置，也不会执行任何 Git 操作。建议随后把这个目录初始化为私人 Git 仓库。
 
 ### 2. 查看可发现的配置
 
@@ -92,7 +92,9 @@ git push
 mcv deploy
 ```
 
-MCV 会显示写入计划并请求确认。修改已有文件前会创建本地备份；写入使用临时文件加原子重命名。再次部署相同内容不会创建新备份。
+MCV 会显示写入计划并请求确认，然后把仓库中的配置展开到当前设备。仓库是经过用户确认的配置事实源，不是本机回滚备份。
+
+如果目标文件已经存在且将被修改，MCV 会先把部署前的本机旧版本保存到本机状态目录下的 `backups/`，再使用临时文件加原子重命名完成写入。再次部署相同内容不会创建新备份。
 
 当前 v0.1 没有 `mcv bind` 命令。新设备上直接在克隆后的仓库目录中执行 `mcv deploy` 即可。
 
@@ -104,17 +106,17 @@ mcv restore
 ```
 
 - `status` 把当前文件哈希与最近一次部署基线比较，输出 `matching`、`missing` 或 `drifted`。
-- `restore` 恢复最近一次部署备份中的全部文件。
+- `restore` 不读取仓库；它使用最近一次 deploy 覆盖前保存的本机旧版本，回滚对应文件。
 
 ## 命令
 
 ```text
-mcv init       初始化 mcv.yaml，并把当前设备指向该仓库
+mcv init       初始化仓库清单，并将当前设备绑定到该仓库
 mcv discover   检测 Codex、Claude Code、Gemini 及已知配置路径
 mcv capture    预览并收集本机配置到 MCV 仓库
-mcv deploy     预览、备份并部署仓库配置到本机
+mcv deploy     将仓库配置部署到本机；覆盖前保存本机旧版本
 mcv status     检查相对最近部署基线的文件漂移
-mcv restore    恢复最近一次部署备份
+mcv restore    用最近一次部署前保存的本机旧版本回滚对应文件
 ```
 
 命令不支持按参数临时选择 IDE。需要启用或禁用目标时，编辑 `mcv.yaml`：
@@ -175,7 +177,10 @@ MCV 的脱敏是防误提交保护，不是凭据保险库或完整的 secret sc
 
 - 仅支持 Codex、Claude Code 和 Gemini。
 - 没有 `bind`、`doctor`、`plan`、`review`、Profile 或 GUI。
-- `restore` 只恢复最近一次有效备份。
+- `restore` 只恢复最近一次有效的本机部署前备份，不读取仓库。
+- Deploy 新创建的文件不会进入备份，`restore` 也不会删除这些文件。
+- 没有修改已有文件的 deploy 不会生成新备份；此时 `restore` 可能使用更早的有效备份。
+- `restore` 不更新部署基线，执行后 `status` 可能显示 `drifted`。
 - Capture 默认不传播删除操作。
 - 不安装 IDE、Node.js、MCP Server 或其他系统依赖。
 - 不同步完整 dotfiles、凭据或 AI 会话历史。
