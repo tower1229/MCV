@@ -11,7 +11,7 @@ interface BackupFile {
   beforeHash?: string;
   afterHash?: string;
 }
-interface BackupManifest { createdAt: string; files: BackupFile[]; }
+interface BackupManifest { createdAt: string; status?: 'pending' | 'complete' | 'failed'; files: BackupFile[]; }
 interface BackupCandidate { directory: string; manifest: BackupManifest; }
 
 export function restoreLatestBackup(): void {
@@ -94,7 +94,7 @@ function readBackupManifest(manifestPath: string): BackupManifest | undefined {
   if (!fs.existsSync(manifestPath)) return undefined;
   try {
     const value = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown;
-    if (!isRecord(value) || typeof value.createdAt !== 'string' || !Array.isArray(value.files) || !value.files.every((file) => isRecord(file) && typeof file.originalPath === 'string')) return undefined;
+    if (!isRecord(value) || value.status === 'pending' || value.status === 'failed' || typeof value.createdAt !== 'string' || !Array.isArray(value.files) || !value.files.every((file) => isRecord(file) && typeof file.originalPath === 'string')) return undefined;
     return value as unknown as BackupManifest;
   } catch { return undefined; }
 }

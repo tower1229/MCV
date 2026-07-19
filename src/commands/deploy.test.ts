@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProgram } from '../index';
+import { applyDeployTransaction, findSymbolicLinkAncestor, type PlannedDeployFile } from './deploy';
 
 describe('mcv deploy', () => {
   const originalCwd = process.cwd();
@@ -76,6 +77,33 @@ describe('mcv deploy', () => {
       theme: 'dark',
       command: path.join(homeDir, 'Tools', 'tool.exe'),
     });
+  });
+
+  it('detects a symbolic-link ancestor before planning writes beneath it', () => {
+    const target = path.join(testRoot, 'link-target');
+    const link = path.join(testRoot, 'link');
+    fs.mkdirSync(target);
+    fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+    expect(findSymbolicLinkAncestor(path.join(link, 'nested', 'file.txt'))).toBe(link);
+  });
+
+  it('restores modified files even when cleanup of a created file fails', () => {
+    const createdPath = path.join(testRoot, 'created.txt');
+    const modifiedPath = path.join(testRoot, 'modified.txt');
+    const failedPath = path.join(testRoot, 'failed.txt');
+    fs.writeFileSync(modifiedPath, 'before');
+    const backupDirectory = path.join(testRoot, 'rollback-backup');
+    fs.mkdirSync(path.join(backupDirectory, 'files'), { recursive: true });
+    fs.writeFileSync(path.join(backupDirectory, 'files', 'modified.txt'), 'before');
+    fs.writeFileSync(path.join(backupDirectory, 'manifest.json'), JSON.stringify({ files: [{ originalPath: modifiedPath, backupPath: 'files/modified.txt' }] }));
+    const write = (content: string) => (file: { targetPath: string }) => fs.writeFileSync(file.targetPath, content);
+    const plan: PlannedDeployFile[] = [
+      { targetPath: createdPath, content: 'created', change: 'add', write: write('created') },
+      { targetPath: modifiedPath, content: 'after', change: 'modify', write: write('after') },
+      { targetPath: failedPath, content: 'failed', change: 'add', write: () => { throw new Error('primary write failure'); } },
+    ];
+    expect(() => applyDeployTransaction(plan, backupDirectory, { remove: () => { throw new Error('cleanup failure'); } })).toThrow(AggregateError);
+    expect(fs.readFileSync(modifiedPath, 'utf8')).toBe('before');
   });
 
   it('deploys canonical rules as Claude Code instructions', async () => {

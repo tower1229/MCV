@@ -124,7 +124,7 @@ function readBackupManifest(manifestPath) {
         return undefined;
     try {
         const value = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-        if (!(0, objects_1.isRecord)(value) || typeof value.createdAt !== 'string' || !Array.isArray(value.files) || !value.files.every((file) => (0, objects_1.isRecord)(file) && typeof file.originalPath === 'string'))
+        if (!(0, objects_1.isRecord)(value) || value.status === 'pending' || value.status === 'failed' || typeof value.createdAt !== 'string' || !Array.isArray(value.files) || !value.files.every((file) => (0, objects_1.isRecord)(file) && typeof file.originalPath === 'string'))
             return undefined;
         return value;
     }

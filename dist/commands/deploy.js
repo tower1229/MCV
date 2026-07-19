@@ -34,6 +34,8 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deployConfigurations = deployConfigurations;
+exports.applyDeployTransaction = applyDeployTransaction;
+exports.findSymbolicLinkAncestor = findSymbolicLinkAncestor;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const promises_1 = require("readline/promises");
@@ -60,11 +62,23 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
         }),
     })));
     const deployFiles = operations.flatMap(({ operation }) => operation.files.map((file) => ({ ...file, write: operation.write })));
-    const plan = buildDeployPlan(deployFiles, options.pruneManaged === true ? (0, state_1.readState)().managedInventory : undefined);
+    const skippedLinks = new Map();
+    const safeDeployFiles = deployFiles.filter((file) => {
+        const link = findSymbolicLinkAncestor(file.targetPath);
+        if (!link)
+            return true;
+        skippedLinks.set(file.targetPath, link);
+        return false;
+    });
+    const plan = buildDeployPlan(safeDeployFiles, options.pruneManaged === true ? (0, state_1.readState)().managedInventory : undefined);
     if (options.yes && plan.some((file) => file.change === 'delete'))
         throw new Error('--yes never applies deletions; review and confirm --prune-managed interactively.');
     if (plan.length === 0) {
-        recordDeploymentBaseline(deployFiles);
+        recordDeploymentBaseline(safeDeployFiles);
+        if (options.json)
+            console.log(JSON.stringify({ repositoryPath, changes: [], skipped: [...skippedLinks].map(([targetPath, linkPath]) => ({ targetPath, reason: 'symbolic-link-ancestor', linkPath })) }, null, 2));
+        else
+            reportSkippedLinks(skippedLinks);
         const subject = definitions.length === 1
             ? `${definitions[0].name} configuration is`
             : 'Configurations are';
@@ -72,11 +86,12 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
         return;
     }
     if (options.json)
-        console.log(JSON.stringify({ repositoryPath, changes: plan.map(({ targetPath, change }) => ({ targetPath, change })) }, null, 2));
+        console.log(JSON.stringify({ repositoryPath, changes: plan.map(({ targetPath, change }) => ({ targetPath, change })), skipped: [...skippedLinks].map(([targetPath, linkPath]) => ({ targetPath, reason: 'symbolic-link-ancestor', linkPath })) }, null, 2));
     else {
         console.log('Deploy preview:');
         for (const file of plan)
             console.log(`[${file.change}] ${file.targetPath}`);
+        reportSkippedLinks(skippedLinks);
     }
     if (options.dryRun)
         return;
@@ -89,10 +104,26 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
         return;
     }
     const backupDirectory = createDeploymentBackup(plan);
-    applyDeployTransaction(plan, backupDirectory);
+    try {
+        applyDeployTransaction(plan, backupDirectory);
+    }
+    catch (error) {
+        markDeploymentBackupFailed(backupDirectory, error);
+        const state = (0, state_1.readState)();
+        state.lastOperation = { kind: 'deploy', time: new Date().toISOString(), success: false };
+        (0, state_1.writeState)(state);
+        throw error;
+    }
     finalizeDeploymentBackup(backupDirectory, plan);
-    recordDeploymentBaseline(deployFiles, repositoryPath);
+    recordDeploymentBaseline(safeDeployFiles, repositoryPath);
     console.log(`Deployed ${plan.length} file(s) from ${repositoryPath}.`);
+}
+function reportSkippedLinks(skippedLinks) {
+    const counts = new Map();
+    for (const linkPath of skippedLinks.values())
+        counts.set(linkPath, (counts.get(linkPath) ?? 0) + 1);
+    for (const [linkPath, count] of counts)
+        console.log(`[skip:symlink] ${count} file(s) under ${linkPath}`);
 }
 function recordDeploymentBaseline(files, repositoryPath) {
     const state = (0, state_1.readState)();
@@ -125,7 +156,7 @@ function createDeploymentBackup(plan) {
         fs.copyFileSync(file.targetPath, path.join(backupDirectory, backupPath));
         return { action: file.change, originalPath: file.targetPath, backupPath, beforeHash: (0, files_1.hashFile)(file.targetPath) };
     });
-    (0, files_1.atomicWriteTextFile)(path.join(backupDirectory, 'manifest.json'), `${JSON.stringify({ createdAt: new Date().toISOString(), files }, null, 2)}\n`);
+    (0, files_1.atomicWriteTextFile)(path.join(backupDirectory, 'manifest.json'), `${JSON.stringify({ createdAt: new Date().toISOString(), status: 'pending', files }, null, 2)}\n`);
     return backupDirectory;
 }
 function finalizeDeploymentBackup(backupDirectory, plan) {
@@ -135,29 +166,74 @@ function finalizeDeploymentBackup(backupDirectory, plan) {
         if (fs.existsSync(entry.originalPath))
             entry.afterHash = (0, files_1.hashFile)(entry.originalPath);
     }
+    manifest.status = 'complete';
+    manifest.completedAt = new Date().toISOString();
     (0, files_1.atomicWriteTextFile)(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
-function applyDeployTransaction(plan, backupDirectory) {
+function markDeploymentBackupFailed(backupDirectory, error) {
+    const manifestPath = path.join(backupDirectory, 'manifest.json');
+    try {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        manifest.status = 'failed';
+        manifest.failedAt = new Date().toISOString();
+        manifest.error = error instanceof Error ? error.message : String(error);
+        (0, files_1.atomicWriteTextFile)(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    }
+    catch { /* Preserve the primary deployment error if failure recording itself fails. */ }
+}
+function applyDeployTransaction(plan, backupDirectory, io = { remove: (targetPath) => fs.rmSync(targetPath, { force: true }) }) {
     const created = [];
     try {
         for (const file of plan) {
-            if (file.change === 'add')
-                created.push(file.targetPath);
             if (file.change === 'delete')
-                fs.rmSync(file.targetPath, { force: true });
-            else
+                io.remove(file.targetPath);
+            else {
                 file.write(file);
+                if (file.change === 'add')
+                    created.push(file.targetPath);
+            }
         }
     }
     catch (error) {
-        for (const targetPath of created)
-            fs.rmSync(targetPath, { force: true });
+        const rollbackErrors = [];
+        for (const targetPath of created.reverse()) {
+            try {
+                io.remove(targetPath);
+            }
+            catch (rollbackError) {
+                rollbackErrors.push(rollbackError);
+            }
+        }
         if (backupDirectory) {
             const manifest = JSON.parse(fs.readFileSync(path.join(backupDirectory, 'manifest.json'), 'utf8'));
-            for (const file of manifest.files)
-                fs.copyFileSync(path.join(backupDirectory, file.backupPath), file.originalPath);
+            for (const file of manifest.files) {
+                if (!file.backupPath)
+                    continue;
+                try {
+                    fs.copyFileSync(path.join(backupDirectory, file.backupPath), file.originalPath);
+                }
+                catch (rollbackError) {
+                    rollbackErrors.push(rollbackError);
+                }
+            }
         }
+        if (rollbackErrors.length > 0)
+            throw new AggregateError([error, ...rollbackErrors], `Deployment failed and rollback encountered ${rollbackErrors.length} additional error(s).`, { cause: error });
         throw error;
+    }
+}
+function findSymbolicLinkAncestor(targetPath) {
+    let current = path.resolve(targetPath);
+    while (true) {
+        try {
+            if (fs.lstatSync(current).isSymbolicLink())
+                return current;
+        }
+        catch { /* Missing descendants are expected. */ }
+        const parent = path.dirname(current);
+        if (parent === current)
+            return undefined;
+        current = parent;
     }
 }
 function buildDeployPlan(files, managedInventory) {

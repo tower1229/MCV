@@ -55,4 +55,22 @@ describe('mcv restore', () => {
       );
     }
   });
+
+  it('ignores a newer failed deployment backup', async () => {
+    const targetPath = path.join(testRoot, 'home', 'settings.json');
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, 'deployed');
+    const backupRoot = path.join(stateRoot, 'mcv', 'backups');
+    for (const [name, createdAt, status, content] of [
+      ['complete', '2026-07-19T00:00:00.000Z', 'complete', 'safe backup'],
+      ['failed', '2026-07-20T00:00:00.000Z', 'failed', 'partial backup'],
+    ] as const) {
+      const directory = path.join(backupRoot, name, 'files');
+      fs.mkdirSync(directory, { recursive: true });
+      fs.writeFileSync(path.join(directory, 'settings.json'), content);
+      fs.writeFileSync(path.join(backupRoot, name, 'manifest.json'), JSON.stringify({ createdAt, status, files: [{ originalPath: targetPath, backupPath: 'files/settings.json' }] }));
+    }
+    await createProgram().parseAsync(['node', 'mcv', 'restore']);
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('safe backup');
+  });
 });

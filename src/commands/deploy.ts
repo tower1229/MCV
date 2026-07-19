@@ -20,12 +20,14 @@ interface DeployManifest {
   variables?: Record<string, unknown>;
 }
 
-interface PlannedDeployFile {
+export interface PlannedDeployFile {
   targetPath: string;
   content: string | Buffer;
   change: 'add' | 'modify' | 'delete';
   write?: (file: DeployFile) => void;
 }
+
+interface DeployTransactionIo { remove(targetPath: string): void; }
 
 interface DeploymentBackupEntry {
   action: 'add' | 'modify' | 'delete';
@@ -65,10 +67,19 @@ export async function deployConfigurations(
   const deployFiles = operations.flatMap(({ operation }) =>
     operation.files.map((file) => ({ ...file, write: operation.write })),
   );
-  const plan = buildDeployPlan(deployFiles, options.pruneManaged === true ? readState().managedInventory : undefined);
+  const skippedLinks = new Map<string, string>();
+  const safeDeployFiles = deployFiles.filter((file) => {
+    const link = findSymbolicLinkAncestor(file.targetPath);
+    if (!link) return true;
+    skippedLinks.set(file.targetPath, link);
+    return false;
+  });
+  const plan = buildDeployPlan(safeDeployFiles, options.pruneManaged === true ? readState().managedInventory : undefined);
   if (options.yes && plan.some((file) => file.change === 'delete')) throw new Error('--yes never applies deletions; review and confirm --prune-managed interactively.');
   if (plan.length === 0) {
-    recordDeploymentBaseline(deployFiles);
+    recordDeploymentBaseline(safeDeployFiles);
+    if (options.json) console.log(JSON.stringify({ repositoryPath, changes: [], skipped: [...skippedLinks].map(([targetPath, linkPath]) => ({ targetPath, reason: 'symbolic-link-ancestor', linkPath })) }, null, 2));
+    else reportSkippedLinks(skippedLinks);
     const subject = definitions.length === 1
       ? `${definitions[0].name} configuration is`
       : 'Configurations are';
@@ -76,10 +87,11 @@ export async function deployConfigurations(
     return;
   }
 
-  if (options.json) console.log(JSON.stringify({ repositoryPath, changes: plan.map(({ targetPath, change }) => ({ targetPath, change })) }, null, 2));
+  if (options.json) console.log(JSON.stringify({ repositoryPath, changes: plan.map(({ targetPath, change }) => ({ targetPath, change })), skipped: [...skippedLinks].map(([targetPath, linkPath]) => ({ targetPath, reason: 'symbolic-link-ancestor', linkPath })) }, null, 2));
   else {
     console.log('Deploy preview:');
     for (const file of plan) console.log(`[${file.change}] ${file.targetPath}`);
+    reportSkippedLinks(skippedLinks);
   }
   if (options.dryRun) return;
   if (!process.stdin.isTTY && !options.yes && !dependencies.confirmDeploy) {
@@ -93,10 +105,24 @@ export async function deployConfigurations(
   }
 
   const backupDirectory = createDeploymentBackup(plan);
-  applyDeployTransaction(plan, backupDirectory);
+  try {
+    applyDeployTransaction(plan, backupDirectory);
+  } catch (error) {
+    markDeploymentBackupFailed(backupDirectory, error);
+    const state = readState();
+    state.lastOperation = { kind: 'deploy', time: new Date().toISOString(), success: false };
+    writeState(state);
+    throw error;
+  }
   finalizeDeploymentBackup(backupDirectory, plan);
-  recordDeploymentBaseline(deployFiles, repositoryPath);
+  recordDeploymentBaseline(safeDeployFiles, repositoryPath);
   console.log(`Deployed ${plan.length} file(s) from ${repositoryPath}.`);
+}
+
+function reportSkippedLinks(skippedLinks: Map<string, string>): void {
+  const counts = new Map<string, number>();
+  for (const linkPath of skippedLinks.values()) counts.set(linkPath, (counts.get(linkPath) ?? 0) + 1);
+  for (const [linkPath, count] of counts) console.log(`[skip:symlink] ${count} file(s) under ${linkPath}`);
 }
 
 function recordDeploymentBaseline(files: DeployFile[], repositoryPath?: string): void {
@@ -134,35 +160,71 @@ function createDeploymentBackup(plan: PlannedDeployFile[]): string {
   });
   atomicWriteTextFile(
     path.join(backupDirectory, 'manifest.json'),
-    `${JSON.stringify({ createdAt: new Date().toISOString(), files }, null, 2)}\n`,
+    `${JSON.stringify({ createdAt: new Date().toISOString(), status: 'pending', files }, null, 2)}\n`,
   );
   return backupDirectory;
 }
 
 function finalizeDeploymentBackup(backupDirectory: string, plan: PlannedDeployFile[]): void {
   const manifestPath = path.join(backupDirectory, 'manifest.json');
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { createdAt: string; files: DeploymentBackupEntry[] };
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { createdAt: string; status?: string; completedAt?: string; files: DeploymentBackupEntry[] };
   for (const entry of manifest.files) {
     if (fs.existsSync(entry.originalPath)) entry.afterHash = hashFile(entry.originalPath);
   }
+  manifest.status = 'complete';
+  manifest.completedAt = new Date().toISOString();
   atomicWriteTextFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-function applyDeployTransaction(plan: PlannedDeployFile[], backupDirectory?: string): void {
+function markDeploymentBackupFailed(backupDirectory: string, error: unknown): void {
+  const manifestPath = path.join(backupDirectory, 'manifest.json');
+  try {
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+    manifest.status = 'failed';
+    manifest.failedAt = new Date().toISOString();
+    manifest.error = error instanceof Error ? error.message : String(error);
+    atomicWriteTextFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  } catch { /* Preserve the primary deployment error if failure recording itself fails. */ }
+}
+
+export function applyDeployTransaction(
+  plan: PlannedDeployFile[],
+  backupDirectory?: string,
+  io: DeployTransactionIo = { remove: (targetPath) => fs.rmSync(targetPath, { force: true }) },
+): void {
   const created: string[] = [];
   try {
     for (const file of plan) {
-      if (file.change === 'add') created.push(file.targetPath);
-      if (file.change === 'delete') fs.rmSync(file.targetPath, { force: true });
-      else file.write!(file);
+      if (file.change === 'delete') io.remove(file.targetPath);
+      else {
+        file.write!(file);
+        if (file.change === 'add') created.push(file.targetPath);
+      }
     }
   } catch (error) {
-    for (const targetPath of created) fs.rmSync(targetPath, { force: true });
+    const rollbackErrors: unknown[] = [];
+    for (const targetPath of created.reverse()) {
+      try { io.remove(targetPath); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+    }
     if (backupDirectory) {
       const manifest = JSON.parse(fs.readFileSync(path.join(backupDirectory, 'manifest.json'), 'utf8')) as { files: Array<{ originalPath: string; backupPath: string }> };
-      for (const file of manifest.files) fs.copyFileSync(path.join(backupDirectory, file.backupPath), file.originalPath);
+      for (const file of manifest.files) {
+        if (!file.backupPath) continue;
+        try { fs.copyFileSync(path.join(backupDirectory, file.backupPath), file.originalPath); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+      }
     }
+    if (rollbackErrors.length > 0) throw new AggregateError([error, ...rollbackErrors], `Deployment failed and rollback encountered ${rollbackErrors.length} additional error(s).`, { cause: error });
     throw error;
+  }
+}
+
+export function findSymbolicLinkAncestor(targetPath: string): string | undefined {
+  let current = path.resolve(targetPath);
+  while (true) {
+    try { if (fs.lstatSync(current).isSymbolicLink()) return current; } catch { /* Missing descendants are expected. */ }
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
   }
 }
 
