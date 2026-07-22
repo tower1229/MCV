@@ -40,6 +40,7 @@ const files_1 = require("../utils/files");
 const sanitize_1 = require("../utils/sanitize");
 const structured_config_1 = require("../utils/structured-config");
 const variables_1 = require("../utils/variables");
+const objects_1 = require("../utils/objects");
 const adapter_utils_1 = require("./adapter-utils");
 const overlay_policies_1 = require("./overlay-policies");
 const LOCAL_KEYS = new Set([
@@ -149,8 +150,16 @@ class GeminiNativeFileHandler {
                 return [{ targetPath, content: `${JSON.stringify(resolved, null, 2)}\n` }];
             }
             const parsed = (0, structured_config_1.parseStructuredObject)(content, 'json', source);
-            const resolved = (0, variables_1.resolvePortableValue)(parsed, context.variables ?? {}, context.platform);
-            return [{ targetPath, content: (0, structured_config_1.stringifyStructuredObject)(resolved, 'json') }];
+            const portable = relative === 'antigravity/ide-settings.json'
+                ? filterAntigravityIdeLocalFields(parsed)
+                : parsed;
+            for (const localPath of LOCAL_KEYS)
+                (0, structured_config_1.deleteObjectPath)(portable, localPath);
+            const resolved = (0, variables_1.resolvePortableValue)(portable, context.variables ?? {}, context.platform);
+            const existing = fs.existsSync(targetPath)
+                ? (0, structured_config_1.parseStructuredObject)(fs.readFileSync(targetPath, 'utf8'), 'json', targetPath)
+                : {};
+            return [{ targetPath, content: (0, structured_config_1.stringifyStructuredObject)((0, objects_1.mergeRecords)(existing, resolved), 'json') }];
         });
         return { files: deployed, write: (file) => (0, files_1.atomicWriteFile)(file.targetPath, file.content) };
     }

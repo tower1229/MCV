@@ -3,11 +3,15 @@ import * as path from 'path';
 import { createInterface } from 'readline/promises';
 import { createAdapterDefinitions, type TargetId } from '../adapters';
 import type { DeployFile, DeviceContext } from '../adapters/types';
-import { atomicWriteTextFile, hashFile } from '../utils/files';
+import { atomicWriteTextFile, findSymbolicLinkAncestor, hashFile } from '../utils/files';
 import { isRecord } from '../utils/objects';
 import { getStateFilePath, readState, writeState } from '../utils/state';
 import { resolveVariableDefinitions } from '../utils/variables';
 import { readManifest, resolveBoundRepository } from '../utils/repository';
+import { createDeployPlan } from '../operations/deploy';
+import { renderDeployPlanPlain } from '../renderers/deploy';
+import { renderJson } from '../renderers/json';
+import { findLegacyCodexSkillDuplicates, type LegacySkillDuplicates } from '../utils/deploy-skills';
 
 export interface DeployDependencies {
   confirmDeploy?: () => Promise<boolean>;
@@ -27,11 +31,6 @@ export interface PlannedDeployFile {
   write?: (file: DeployFile) => void;
 }
 
-interface LegacySkillDuplicates {
-  names: string[];
-  files: string[];
-}
-
 interface DeployTransactionIo { remove(targetPath: string): void; }
 
 interface DeploymentBackupEntry {
@@ -47,6 +46,13 @@ export async function deployConfigurations(
   dependencies: DeployDependencies = {},
   options: DeployOptions = {},
 ): Promise<void> {
+  if (options.dryRun) {
+    const reviewPlan = await createDeployPlan(context);
+    if (options.json) console.log(renderJson(reviewPlan));
+    else for (const line of renderDeployPlanPlain(reviewPlan)) console.log(line);
+    if (reviewPlan.status === 'failed') process.exitCode = 1;
+    return;
+  }
   const repositoryPath = resolveBoundRepository(context);
   const manifest = readManifest(repositoryPath);
   const definitions = createAdapterDefinitions().filter(
@@ -149,69 +155,6 @@ function reportLegacySkillDuplicates(duplicates: LegacySkillDuplicates): void {
   console.log(`[duplicate:codex-legacy] ${duplicates.names.join(', ')}; run deploy --prune-managed to remove the backed-up legacy copies.`);
 }
 
-function findLegacyCodexSkillDuplicates(
-  context: DeviceContext,
-  deployFiles: DeployFile[],
-  codexEnabled: boolean,
-): LegacySkillDuplicates {
-  if (!codexEnabled) return { names: [], files: [] };
-  const officialRoot = path.resolve(context.homeDir, '.agents', 'skills');
-  const codexHome = context.env.CODEX_HOME || path.join(context.homeDir, '.codex');
-  const legacyRoot = path.resolve(codexHome, 'skills');
-  if (samePath(officialRoot, legacyRoot, context.platform) || findSymbolicLinkAncestor(legacyRoot)) {
-    return { names: [], files: [] };
-  }
-
-  const desiredBySkill = new Map<string, Map<string, Buffer>>();
-  for (const file of deployFiles) {
-    const relativePath = path.relative(officialRoot, path.resolve(file.targetPath));
-    if (!relativePath || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) continue;
-    const [skillName, ...rest] = relativePath.split(path.sep);
-    if (!skillName || rest.length === 0) continue;
-    const skillFiles = desiredBySkill.get(skillName) ?? new Map<string, Buffer>();
-    skillFiles.set(rest.join('/'), Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content));
-    desiredBySkill.set(skillName, skillFiles);
-  }
-
-  const names: string[] = [];
-  const files: string[] = [];
-  for (const [skillName, desiredFiles] of desiredBySkill) {
-    const legacySkillRoot = path.join(legacyRoot, skillName);
-    const legacyFiles = collectRegularFiles(legacySkillRoot);
-    if (!legacyFiles || legacyFiles.size !== desiredFiles.size) continue;
-    const exactDuplicate = [...desiredFiles].every(([relativePath, content]) => {
-      const legacyPath = legacyFiles.get(relativePath);
-      return legacyPath !== undefined && fs.readFileSync(legacyPath).equals(content);
-    });
-    if (!exactDuplicate) continue;
-    names.push(skillName);
-    files.push(...legacyFiles.values());
-  }
-  return { names: names.sort(), files: files.sort() };
-}
-
-function collectRegularFiles(root: string): Map<string, string> | undefined {
-  if (!fs.existsSync(root) || fs.lstatSync(root).isSymbolicLink()) return undefined;
-  const files = new Map<string, string>();
-  const visit = (directory: string): boolean => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      if (entry.isSymbolicLink()) return false;
-      const current = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        if (!visit(current)) return false;
-      } else if (entry.isFile()) {
-        files.set(path.relative(root, current).replace(/\\/g, '/'), current);
-      }
-    }
-    return true;
-  };
-  return visit(root) ? files : undefined;
-}
-
-function samePath(left: string, right: string, platform: NodeJS.Platform | undefined): boolean {
-  return platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
-}
-
 function recordDeploymentBaseline(context: DeviceContext, files: DeployFile[], repositoryPath?: string): void {
   const state = readState(context);
   state.baselineSnapshot = {
@@ -305,15 +248,7 @@ export function applyDeployTransaction(
   }
 }
 
-export function findSymbolicLinkAncestor(targetPath: string): string | undefined {
-  let current = path.resolve(targetPath);
-  while (true) {
-    try { if (fs.lstatSync(current).isSymbolicLink()) return current; } catch { /* Missing descendants are expected. */ }
-    const parent = path.dirname(current);
-    if (parent === current) return undefined;
-    current = parent;
-  }
-}
+export { findSymbolicLinkAncestor } from '../utils/files';
 
 function buildDeployPlan(
   files: Array<DeployFile & { write: (file: DeployFile) => void }>,

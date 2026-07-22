@@ -39,6 +39,7 @@ const path = __importStar(require("path"));
 const objects_1 = require("../utils/objects");
 const files_1 = require("../utils/files");
 const sanitize_1 = require("../utils/sanitize");
+const structured_config_1 = require("../utils/structured-config");
 const variables_1 = require("../utils/variables");
 const overlay_policies_1 = require("./overlay-policies");
 const adapter_utils_1 = require("./adapter-utils");
@@ -177,10 +178,12 @@ class ClaudeCodeNativeFileHandler {
             {
                 sourcePath: (0, adapter_utils_1.repositoryFileForPlatform)(repositoryPath, 'ide/claude-code/native/settings.json', context),
                 targetPath: path.join(this.root(context), 'settings.json'),
+                localPaths: JSON_CAPTURE_POLICIES['user-settings'].localPaths,
             },
             {
                 sourcePath: (0, adapter_utils_1.repositoryFileForPlatform)(repositoryPath, 'ide/claude-code/native/.claude.json', context),
                 targetPath: path.join(context.homeDir, '.claude.json'),
+                localPaths: JSON_CAPTURE_POLICIES['user-state'].localPaths,
             },
         ];
         const files = mappings.flatMap((mapping) => {
@@ -191,6 +194,8 @@ class ClaudeCodeNativeFileHandler {
                 throw new Error(`${mapping.sourcePath} must contain a JSON object.`);
             }
             const resolved = (0, variables_1.resolvePortableValue)(parsed, context.variables ?? {}, context.platform);
+            for (const localPath of mapping.localPaths)
+                (0, structured_config_1.deleteObjectPath)(resolved, localPath);
             return [{
                     targetPath: mapping.targetPath,
                     content: `${JSON.stringify(resolved, null, 2)}\n`,

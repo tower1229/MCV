@@ -96,7 +96,7 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         validateWriteOutputOptions(captureCommand, options);
         await (0, capture_1.captureConfigurations)(context, captureDependencies, options);
     });
-    program
+    const deployCommand = program
         .command('deploy')
         .description('Deploy repository configuration to this device')
         .option('--dry-run', 'Show the deployment plan without writing')
@@ -104,6 +104,7 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         .option('--yes', 'Deploy without prompting after a reviewed dry-run')
         .option('--prune-managed', 'Delete stale managed files and exact duplicate Skills from the legacy Codex directory')
         .action(async (options) => {
+        validateWriteOutputOptions(deployCommand, options);
         await (0, deploy_1.deployConfigurations)(context, deployDependencies, options);
     });
     const discoverCommand = program

@@ -6,6 +6,18 @@ export function hashFile(filePath: string): string {
   return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
+export function findSymbolicLinkAncestor(targetPath: string): string | undefined {
+  let current = path.resolve(targetPath);
+  while (true) {
+    try {
+      if (fs.lstatSync(current).isSymbolicLink()) return current;
+    } catch { /* Missing descendants are expected. */ }
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
 export function atomicWriteTextFile(targetPath: string, content: string): void {
   atomicWriteFile(targetPath, content);
 }

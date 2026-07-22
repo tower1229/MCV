@@ -33,9 +33,9 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.findSymbolicLinkAncestor = void 0;
 exports.deployConfigurations = deployConfigurations;
 exports.applyDeployTransaction = applyDeployTransaction;
-exports.findSymbolicLinkAncestor = findSymbolicLinkAncestor;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const promises_1 = require("readline/promises");
@@ -45,7 +45,22 @@ const objects_1 = require("../utils/objects");
 const state_1 = require("../utils/state");
 const variables_1 = require("../utils/variables");
 const repository_1 = require("../utils/repository");
+const deploy_1 = require("../operations/deploy");
+const deploy_2 = require("../renderers/deploy");
+const json_1 = require("../renderers/json");
+const deploy_skills_1 = require("../utils/deploy-skills");
 async function deployConfigurations(context, dependencies = {}, options = {}) {
+    if (options.dryRun) {
+        const reviewPlan = await (0, deploy_1.createDeployPlan)(context);
+        if (options.json)
+            console.log((0, json_1.renderJson)(reviewPlan));
+        else
+            for (const line of (0, deploy_2.renderDeployPlanPlain)(reviewPlan))
+                console.log(line);
+        if (reviewPlan.status === 'failed')
+            process.exitCode = 1;
+        return;
+    }
     const repositoryPath = (0, repository_1.resolveBoundRepository)(context);
     const manifest = (0, repository_1.readManifest)(repositoryPath);
     const definitions = (0, adapters_1.createAdapterDefinitions)().filter(({ targetId }) => manifest.targets?.[targetId]?.enabled === true);
@@ -64,13 +79,13 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
     const deployFiles = operations.flatMap(({ operation }) => operation.files.map((file) => ({ ...file, write: operation.write })));
     const skippedLinks = new Map();
     const safeDeployFiles = deployFiles.filter((file) => {
-        const link = findSymbolicLinkAncestor(file.targetPath);
+        const link = (0, files_1.findSymbolicLinkAncestor)(file.targetPath);
         if (!link)
             return true;
         skippedLinks.set(file.targetPath, link);
         return false;
     });
-    const legacySkillDuplicates = findLegacyCodexSkillDuplicates(context, safeDeployFiles, definitions.some(({ targetId }) => targetId === 'codex'));
+    const legacySkillDuplicates = (0, deploy_skills_1.findLegacyCodexSkillDuplicates)(context, safeDeployFiles, definitions.some(({ targetId }) => targetId === 'codex'));
     const state = options.pruneManaged === true ? (0, state_1.readState)(context) : undefined;
     const managedInventory = state?.managedInventory ?? {};
     for (const targetPath of legacySkillDuplicates.files) {
@@ -139,69 +154,6 @@ function reportLegacySkillDuplicates(duplicates) {
     if (duplicates.names.length === 0)
         return;
     console.log(`[duplicate:codex-legacy] ${duplicates.names.join(', ')}; run deploy --prune-managed to remove the backed-up legacy copies.`);
-}
-function findLegacyCodexSkillDuplicates(context, deployFiles, codexEnabled) {
-    if (!codexEnabled)
-        return { names: [], files: [] };
-    const officialRoot = path.resolve(context.homeDir, '.agents', 'skills');
-    const codexHome = context.env.CODEX_HOME || path.join(context.homeDir, '.codex');
-    const legacyRoot = path.resolve(codexHome, 'skills');
-    if (samePath(officialRoot, legacyRoot, context.platform) || findSymbolicLinkAncestor(legacyRoot)) {
-        return { names: [], files: [] };
-    }
-    const desiredBySkill = new Map();
-    for (const file of deployFiles) {
-        const relativePath = path.relative(officialRoot, path.resolve(file.targetPath));
-        if (!relativePath || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath))
-            continue;
-        const [skillName, ...rest] = relativePath.split(path.sep);
-        if (!skillName || rest.length === 0)
-            continue;
-        const skillFiles = desiredBySkill.get(skillName) ?? new Map();
-        skillFiles.set(rest.join('/'), Buffer.isBuffer(file.content) ? file.content : Buffer.from(file.content));
-        desiredBySkill.set(skillName, skillFiles);
-    }
-    const names = [];
-    const files = [];
-    for (const [skillName, desiredFiles] of desiredBySkill) {
-        const legacySkillRoot = path.join(legacyRoot, skillName);
-        const legacyFiles = collectRegularFiles(legacySkillRoot);
-        if (!legacyFiles || legacyFiles.size !== desiredFiles.size)
-            continue;
-        const exactDuplicate = [...desiredFiles].every(([relativePath, content]) => {
-            const legacyPath = legacyFiles.get(relativePath);
-            return legacyPath !== undefined && fs.readFileSync(legacyPath).equals(content);
-        });
-        if (!exactDuplicate)
-            continue;
-        names.push(skillName);
-        files.push(...legacyFiles.values());
-    }
-    return { names: names.sort(), files: files.sort() };
-}
-function collectRegularFiles(root) {
-    if (!fs.existsSync(root) || fs.lstatSync(root).isSymbolicLink())
-        return undefined;
-    const files = new Map();
-    const visit = (directory) => {
-        for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-            if (entry.isSymbolicLink())
-                return false;
-            const current = path.join(directory, entry.name);
-            if (entry.isDirectory()) {
-                if (!visit(current))
-                    return false;
-            }
-            else if (entry.isFile()) {
-                files.set(path.relative(root, current).replace(/\\/g, '/'), current);
-            }
-        }
-        return true;
-    };
-    return visit(root) ? files : undefined;
-}
-function samePath(left, right, platform) {
-    return platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 function recordDeploymentBaseline(context, files, repositoryPath) {
     const state = (0, state_1.readState)(context);
@@ -300,20 +252,8 @@ function applyDeployTransaction(plan, backupDirectory, io = { remove: (targetPat
         throw error;
     }
 }
-function findSymbolicLinkAncestor(targetPath) {
-    let current = path.resolve(targetPath);
-    while (true) {
-        try {
-            if (fs.lstatSync(current).isSymbolicLink())
-                return current;
-        }
-        catch { /* Missing descendants are expected. */ }
-        const parent = path.dirname(current);
-        if (parent === current)
-            return undefined;
-        current = parent;
-    }
-}
+var files_2 = require("../utils/files");
+Object.defineProperty(exports, "findSymbolicLinkAncestor", { enumerable: true, get: function () { return files_2.findSymbolicLinkAncestor; } });
 function buildDeployPlan(files, managedInventory) {
     const desiredPaths = new Set(files.map((file) => file.targetPath));
     const changes = files.flatMap((file) => {

@@ -72,7 +72,7 @@ export function createProgram(
       await captureConfigurations(context, captureDependencies, options);
     });
 
-  program
+  const deployCommand = program
     .command('deploy')
     .description('Deploy repository configuration to this device')
     .option('--dry-run', 'Show the deployment plan without writing')
@@ -80,6 +80,7 @@ export function createProgram(
     .option('--yes', 'Deploy without prompting after a reviewed dry-run')
     .option('--prune-managed', 'Delete stale managed files and exact duplicate Skills from the legacy Codex directory')
     .action(async (options) => {
+      validateWriteOutputOptions(deployCommand, options);
       await deployConfigurations(context, deployDependencies, options);
     });
 

@@ -82,6 +82,33 @@ describe('mcv deploy', () => {
     });
   });
 
+  it('prints the same grouped read-only Deploy Plan as English text or one JSON document', async () => {
+    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Rules\n');
+
+    await createProgram(deviceContext('win32')).parseAsync(['node', 'mcv', 'deploy', '--dry-run']);
+    const plain = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
+    expect(plain).toContain('Deploy Plan:');
+    expect(plain).toContain('Claude Code / Shared Rules');
+    expect(plain).toContain('[replace entire file]');
+
+    vi.mocked(console.log).mockClear();
+    await createProgram(deviceContext('win32')).parseAsync(['node', 'mcv', 'deploy', '--dry-run', '--json']);
+    expect(vi.mocked(console.log)).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0][0]))).toEqual(
+      expect.objectContaining({
+        schemaVersion: 1,
+        operation: 'deploy',
+        status: 'planned',
+        repositoryPath,
+        changes: expect.arrayContaining([
+          expect.objectContaining({ capability: 'rules', strategy: 'replace-entire-file' }),
+        ]),
+      }),
+    );
+    expect(fs.existsSync(path.join(homeDir, '.claude', 'CLAUDE.md'))).toBe(false);
+  });
+
   it('detects a symbolic-link ancestor before planning writes beneath it', () => {
     const target = path.join(testRoot, 'link-target');
     const link = path.join(testRoot, 'link');
@@ -255,7 +282,10 @@ describe('mcv deploy', () => {
         'native',
         '.claude.json',
       ),
-      `${JSON.stringify({ customPreference: true }, null, 2)}\n`,
+      `${JSON.stringify({
+        customPreference: true,
+        projects: { repositoryMustNotDeploy: true },
+      }, null, 2)}\n`,
     );
 
     const runDeploy = () => createProgram(
@@ -434,7 +464,7 @@ describe('mcv deploy', () => {
     fs.mkdirSync(nativeRoot, { recursive: true });
     fs.writeFileSync(
       path.join(nativeRoot, 'settings.json'),
-      `${JSON.stringify({ ui: { theme: 'dark' } }, null, 2)}\n`,
+      `${JSON.stringify({ ui: { theme: 'dark' }, installationId: 'repository-must-not-deploy' }, null, 2)}\n`,
     );
     fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
     fs.writeFileSync(
@@ -448,6 +478,7 @@ describe('mcv deploy', () => {
       `${JSON.stringify({
         ui: { density: 'compact', theme: 'light' },
         experimental: { nativeOnly: true },
+        installationId: 'device-installation',
         mcpServers: { stale: { command: 'old-server' } },
       }, null, 2)}\n`,
     );
@@ -461,6 +492,7 @@ describe('mcv deploy', () => {
     expect(JSON.parse(fs.readFileSync(settingsPath, 'utf8'))).toEqual({
       ui: { density: 'compact', theme: 'dark' },
       experimental: { nativeOnly: true },
+      installationId: 'device-installation',
       mcpServers: { shared: { command: 'shared-server' } },
     });
   });

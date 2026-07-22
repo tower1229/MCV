@@ -125,7 +125,7 @@ mcv unbind     只移除本机绑定；支持 --json
 mcv migrate    通过 --dry-run 预览 Migration Plan，使用 --yes 备份并迁移；支持 --json
 mcv discover   检测 Codex、Claude Code、Gemini 及已知配置路径；支持 --plain/--json
 mcv capture    预览并收集本机配置到 MCV 仓库
-mcv deploy     将仓库配置部署到本机；覆盖前保存本机旧版本
+mcv deploy     通过 --dry-run 按 IDE/capability 审阅 Deploy Plan；支持 --json，执行时覆盖前保存本机旧版本
 mcv status     检查相对最近部署基线的文件漂移
 mcv restore    用最近一次部署前保存的本机旧版本回滚对应文件
 ```

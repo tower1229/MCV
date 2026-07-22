@@ -2,8 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { atomicWriteFile } from '../utils/files';
 import { sanitizeConfig } from '../utils/sanitize';
-import { parseJsonc, parseStructuredObject, splitOwnedFields, stringifyStructuredObject } from '../utils/structured-config';
+import { deleteObjectPath, parseJsonc, parseStructuredObject, splitOwnedFields, stringifyStructuredObject } from '../utils/structured-config';
 import { resolvePortableValue } from '../utils/variables';
+import { mergeRecords } from '../utils/objects';
 import { readCanonicalSource, readDeployTarget, repositoryFileForPlatform } from './adapter-utils';
 import { GEMINI_MANAGED_PATHS } from './overlay-policies';
 import type { CanonicalDeploySource, DetectedConfigDirectory, DetectedConfigFile, DeployFile, DeployOperation, DeviceContext, NativeCaptureResult, NativeFileHandler } from './types';
@@ -116,8 +117,15 @@ export class GeminiNativeFileHandler implements NativeFileHandler {
         return [{ targetPath, content: `${JSON.stringify(resolved, null, 2)}\n` }];
       }
       const parsed = parseStructuredObject(content, 'json', source);
-      const resolved = resolvePortableValue(parsed, context.variables ?? {}, context.platform) as Record<string, unknown>;
-      return [{ targetPath, content: stringifyStructuredObject(resolved, 'json') }];
+      const portable = relative === 'antigravity/ide-settings.json'
+        ? filterAntigravityIdeLocalFields(parsed)
+        : parsed;
+      for (const localPath of LOCAL_KEYS) deleteObjectPath(portable, localPath);
+      const resolved = resolvePortableValue(portable, context.variables ?? {}, context.platform) as Record<string, unknown>;
+      const existing = fs.existsSync(targetPath)
+        ? parseStructuredObject(fs.readFileSync(targetPath, 'utf8'), 'json', targetPath)
+        : {};
+      return [{ targetPath, content: stringifyStructuredObject(mergeRecords(existing, resolved), 'json') }];
     });
     return { files: deployed, write: (file) => atomicWriteFile(file.targetPath, file.content) };
   }

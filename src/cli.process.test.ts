@@ -235,6 +235,55 @@ describe('packaged mcv CLI', () => {
     }
   });
 
+  it('prints exactly one read-only Deploy Plan JSON document', () => {
+    const isolatedRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-deploy-')));
+    const repositoryPath = path.join(isolatedRoot, 'repository');
+    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 2',
+      'repositoryId: process-deploy-id',
+      'initializedAt: 2026-07-22T00:00:00.000Z',
+      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets:',
+      '  claudeCode:',
+      '    enabled: true',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Process rules\n');
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [cliPath, 'deploy', '--dry-run', '--json'],
+        {
+          cwd: repositoryPath,
+          encoding: 'utf8',
+          env: { ...process.env, HOME: isolatedRoot, APPDATA: isolatedRoot },
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
+        schemaVersion: 1,
+        operation: 'deploy',
+        status: 'planned',
+        repositoryPath,
+        changes: [expect.objectContaining({
+          id: expect.stringMatching(/^deploy-[a-f0-9]{16}$/),
+          ide: 'claude-code',
+          capability: 'rules',
+          strategy: 'replace-entire-file',
+        })],
+      }));
+      expect(fs.existsSync(path.join(isolatedRoot, '.claude', 'CLAUDE.md'))).toBe(false);
+    } finally {
+      fs.rmSync(isolatedRoot, { recursive: true, force: true });
+    }
+  });
+
   it('does not echo invalid source content in Capture failure output', () => {
     const isolatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-capture-failure-'));
     const repositoryPath = path.join(isolatedRoot, 'repository');

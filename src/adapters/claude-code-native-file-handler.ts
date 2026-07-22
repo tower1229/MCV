@@ -3,6 +3,7 @@ import * as path from 'path';
 import { isRecord } from '../utils/objects';
 import { atomicWriteFile } from '../utils/files';
 import { isSensitiveFile, sanitizeConfig } from '../utils/sanitize';
+import { deleteObjectPath } from '../utils/structured-config';
 import { resolvePortableValue } from '../utils/variables';
 import type {
   CaptureFile,
@@ -175,10 +176,12 @@ export class ClaudeCodeNativeFileHandler implements NativeFileHandler {
       {
         sourcePath: repositoryFileForPlatform(repositoryPath, 'ide/claude-code/native/settings.json', context),
         targetPath: path.join(this.root(context), 'settings.json'),
+        localPaths: JSON_CAPTURE_POLICIES['user-settings'].localPaths,
       },
       {
         sourcePath: repositoryFileForPlatform(repositoryPath, 'ide/claude-code/native/.claude.json', context),
         targetPath: path.join(context.homeDir, '.claude.json'),
+        localPaths: JSON_CAPTURE_POLICIES['user-state'].localPaths,
       },
     ];
 
@@ -192,7 +195,8 @@ export class ClaudeCodeNativeFileHandler implements NativeFileHandler {
         parsed,
         context.variables ?? {},
         context.platform,
-      );
+      ) as Record<string, unknown>;
+      for (const localPath of mapping.localPaths) deleteObjectPath(resolved, localPath);
       return [{
         targetPath: mapping.targetPath,
         content: `${JSON.stringify(resolved, null, 2)}\n`,

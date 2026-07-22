@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.hashFile = hashFile;
+exports.findSymbolicLinkAncestor = findSymbolicLinkAncestor;
 exports.atomicWriteTextFile = atomicWriteTextFile;
 exports.atomicWriteFile = atomicWriteFile;
 const crypto_1 = require("crypto");
@@ -41,6 +42,20 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 function hashFile(filePath) {
     return (0, crypto_1.createHash)('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+function findSymbolicLinkAncestor(targetPath) {
+    let current = path.resolve(targetPath);
+    while (true) {
+        try {
+            if (fs.lstatSync(current).isSymbolicLink())
+                return current;
+        }
+        catch { /* Missing descendants are expected. */ }
+        const parent = path.dirname(current);
+        if (parent === current)
+            return undefined;
+        current = parent;
+    }
 }
 function atomicWriteTextFile(targetPath, content) {
     atomicWriteFile(targetPath, content);

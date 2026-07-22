@@ -3,6 +3,7 @@ import * as path from 'path';
 import { atomicWriteFile } from '../utils/files';
 import { sanitizeConfig } from '../utils/sanitize';
 import {
+  deleteObjectPath,
   parseStructuredObject,
   splitOwnedFields,
   stringifyStructuredObject,
@@ -125,6 +126,8 @@ export class CodexNativeFileHandler implements NativeFileHandler {
         context.variables ?? {},
         context.platform,
       ) as Record<string, unknown>;
+      for (const localPath of LOCAL_PATHS) deleteObjectPath(resolved, localPath);
+      removeCodexRuntimeFields(resolved);
       files.push({ targetPath, content: stringifyStructuredObject(resolved, 'toml') });
     }
     return { files, write: (file) => atomicWriteFile(file.targetPath, file.content) };
