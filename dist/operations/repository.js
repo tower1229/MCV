@@ -56,9 +56,9 @@ const state_1 = require("../utils/state");
 const contracts_1 = require("./contracts");
 const activeRepositoryPlans = new WeakMap();
 const activeLifecyclePlans = new WeakMap();
-function inspectRepository(context) {
+function inspectRepository(context, explicitPath) {
     const state = (0, state_1.readState)(context);
-    const repositoryPath = state.repositoryPath ?? null;
+    const repositoryPath = explicitPath ?? state.repositoryPath ?? null;
     if (!repositoryPath) {
         return {
             schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
@@ -187,7 +187,9 @@ function inspectGitRepository(repositoryPath) {
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'ignore'],
         });
-        return { git: { branch, clean: status.trim().length === 0 } };
+        const trimmedStatus = status.trim();
+        const uncommittedChanges = trimmedStatus === '' ? 0 : trimmedStatus.split(/\r?\n/).length;
+        return { git: { branch, clean: uncommittedChanges === 0, uncommittedChanges } };
     }
     catch {
         return {};

@@ -99,11 +99,19 @@ export function createProgram(
       await discoverConfigurations(context, options);
     });
 
-  program
+  const statusCommand = program
     .command('status')
     .description('Compare local configuration with the last deployment')
-    .action(async () => {
-      await showStatus(context);
+    .addOption(new Option('--plain', 'Print a one-shot English text report'))
+    .addOption(new Option('--json', 'Print one machine-readable report'))
+    .action(async (options) => {
+      if (options.plain && options.json) {
+        statusCommand.error(
+          "options '--plain' and '--json' cannot be used together",
+          { exitCode: 2, code: 'mcv.conflictingOutputModes' },
+        );
+      }
+      await showStatus(context, options);
     });
 
   const restoreCommand = program

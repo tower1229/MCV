@@ -64,6 +64,7 @@ describe('mcv discover', () => {
         expect.objectContaining({ id: 'claude-code', detected: true }),
         expect.objectContaining({ id: 'gemini', detected: false }),
       ],
+      missingVariables: [],
       issues: [],
       nextActions: [],
     });

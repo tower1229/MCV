@@ -334,12 +334,16 @@ describe('mcv deploy', () => {
 
     vi.mocked(console.log).mockClear();
     await run('status');
-    expect(vi.mocked(console.log)).toHaveBeenCalledWith(`[matching] ${settingsPath}`);
+    expect(vi.mocked(console.log)).toHaveBeenCalledWith(
+      'Post-deploy local state: 1 unchanged, 0 Drift, 0 missing',
+    );
 
     fs.appendFileSync(settingsPath, '\n');
     vi.mocked(console.log).mockClear();
     await run('status');
-    expect(vi.mocked(console.log)).toHaveBeenCalledWith(`[drifted] ${settingsPath}`);
+    expect(vi.mocked(console.log)).toHaveBeenCalledWith(
+      'Post-deploy local state: 0 unchanged, 1 Drift, 0 missing',
+    );
   });
 
   it('deletes only prior managed inventory when prune is explicitly confirmed', async () => {

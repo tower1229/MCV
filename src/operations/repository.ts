@@ -32,6 +32,7 @@ import {
 export interface GitRepositoryStatus {
   branch: string | null;
   clean: boolean;
+  uncommittedChanges: number;
 }
 
 export type RepositoryReport = Report<never> & {
@@ -130,9 +131,12 @@ export type MigrationResult = Result<MigrationData, never> & {
 const activeRepositoryPlans = new WeakMap<object, string>();
 const activeLifecyclePlans = new WeakMap<object, string>();
 
-export function inspectRepository(context: DeviceContext): RepositoryReport {
+export function inspectRepository(
+  context: DeviceContext,
+  explicitPath?: string,
+): RepositoryReport {
   const state = readState(context);
-  const repositoryPath = state.repositoryPath ?? null;
+  const repositoryPath = explicitPath ?? state.repositoryPath ?? null;
 
   if (!repositoryPath) {
     return {
@@ -273,7 +277,9 @@ function inspectGitRepository(
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     });
-    return { git: { branch, clean: status.trim().length === 0 } };
+    const trimmedStatus = status.trim();
+    const uncommittedChanges = trimmedStatus === '' ? 0 : trimmedStatus.split(/\r?\n/).length;
+    return { git: { branch, clean: uncommittedChanges === 0, uncommittedChanges } };
   } catch {
     return {};
   }

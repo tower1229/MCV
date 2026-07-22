@@ -39,6 +39,7 @@ describe('inspectEnvironment', () => {
         expect.objectContaining({ id: 'claude-code', name: 'Claude Code', detected: true }),
         expect.objectContaining({ id: 'gemini', name: 'Gemini', detected: false }),
       ],
+      missingVariables: [],
       issues: [],
       nextActions: [],
     });

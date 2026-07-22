@@ -240,7 +240,7 @@ describe('Repository operations', () => {
     expect(report).toMatchObject({
       valid: true,
       issues: [],
-      git: { branch, clean: false },
+      git: { branch, clean: false, uncommittedChanges: 1 },
     });
     expect(execFileSync('git', ['status', '--porcelain'], {
       cwd: repositoryPath,

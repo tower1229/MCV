@@ -118,11 +118,16 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         }
         await (0, discover_1.discoverConfigurations)(context, options);
     });
-    program
+    const statusCommand = program
         .command('status')
         .description('Compare local configuration with the last deployment')
-        .action(async () => {
-        await (0, status_1.showStatus)(context);
+        .addOption(new commander_1.Option('--plain', 'Print a one-shot English text report'))
+        .addOption(new commander_1.Option('--json', 'Print one machine-readable report'))
+        .action(async (options) => {
+        if (options.plain && options.json) {
+            statusCommand.error("options '--plain' and '--json' cannot be used together", { exitCode: 2, code: 'mcv.conflictingOutputModes' });
+        }
+        await (0, status_1.showStatus)(context, options);
     });
     const restoreCommand = program
         .command('restore')
