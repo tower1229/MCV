@@ -20,7 +20,7 @@ describe('mcv discover', () => {
 
   it('reports detection and known config paths for every supported IDE', async () => {
     await createProgram({ homeDir, platform: 'win32', env: {}, pathEnv: '' })
-      .parseAsync(['node', 'mcv', 'discover']);
+      .parseAsync(['node', 'mcv', 'discover', '--plain']);
 
     expect(vi.mocked(console.log).mock.calls.map(([line]) => line)).toEqual([
       'Codex: not detected',
@@ -43,5 +43,28 @@ describe('mcv discover', () => {
       `[missing] ${path.join(homeDir, 'AppData', 'Roaming', 'Antigravity', 'User', 'settings.json')}`,
       `[missing] ${path.join(homeDir, 'AppData', 'Roaming', 'Antigravity', 'User', 'keybindings.json')}`,
     ]);
+  });
+
+  it('prints one structured Environment Report for --json', async () => {
+    await createProgram({ homeDir, platform: 'win32', env: {}, pathEnv: '' })
+      .parseAsync(['node', 'mcv', 'discover', '--json']);
+
+    expect(console.log).toHaveBeenCalledOnce();
+    const output = vi.mocked(console.log).mock.calls[0]?.[0];
+    expect(typeof output).toBe('string');
+    expect(JSON.parse(String(output))).toEqual({
+      schemaVersion: 1,
+      operation: 'discover',
+      status: 'reported',
+      ready: true,
+      environments: [
+        expect.objectContaining({ id: 'codex', detected: false }),
+        expect.objectContaining({ id: 'claude-code', detected: true }),
+        expect.objectContaining({ id: 'gemini', detected: false }),
+      ],
+      issues: [],
+      nextActions: [],
+    });
+    expect(String(output)).not.toMatch(/\u001b\[/);
   });
 });

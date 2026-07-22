@@ -1,15 +1,25 @@
-import { createAdapterDefinitions } from '../adapters';
 import type { DeviceContext } from '../adapters/types';
+import {
+  inspectEnvironment,
+  type EnvironmentReport,
+} from '../operations/environment';
+import { renderEnvironmentPlain } from '../renderers/environment';
+import { renderJson } from '../renderers/json';
 
-export async function discoverConfigurations(context: DeviceContext): Promise<void> {
-  for (const { adapter } of createAdapterDefinitions()) {
-    const [ide, files] = await Promise.all([
-      adapter.detect(context),
-      adapter.discoverFiles(context),
-    ]);
-    console.log(`${ide.name}: ${ide.detected ? 'detected' : 'not detected'}`);
-    for (const configPath of [...ide.configDirectories, ...files]) {
-      console.log(`[${configPath.exists ? 'found' : 'missing'}] ${configPath.path}`);
-    }
+export interface DiscoverOptions {
+  json?: boolean;
+  plain?: boolean;
+}
+
+export async function discoverConfigurations(
+  context: DeviceContext,
+  options: DiscoverOptions = {},
+): Promise<EnvironmentReport> {
+  const report = await inspectEnvironment(context);
+  if (options.json) {
+    console.log(renderJson(report));
+  } else {
+    for (const line of renderEnvironmentPlain(report)) console.log(line);
   }
+  return report;
 }

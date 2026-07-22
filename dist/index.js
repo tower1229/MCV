@@ -104,8 +104,10 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
     program
         .command('discover')
         .description('Detect supported AI IDEs and report their configuration paths')
-        .action(async () => {
-        await (0, discover_1.discoverConfigurations)(context);
+        .addOption(new commander_1.Option('--plain', 'Print a one-shot English text report').conflicts('json'))
+        .addOption(new commander_1.Option('--json', 'Print one machine-readable report').conflicts('plain'))
+        .action(async (options) => {
+        await (0, discover_1.discoverConfigurations)(context, options);
     });
     program
         .command('status')

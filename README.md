@@ -57,10 +57,11 @@ mcv init
 ### 2. 查看可发现的配置
 
 ```bash
-mcv discover
+mcv discover --plain
+mcv discover --json
 ```
 
-命令会报告三个 Adapter 的检测结果，以及已找到或缺失的已知配置路径。
+两个模式复用同一份 Environment Report：`--plain` 输出英文文本，`--json` 输出单个结构化 JSON 文档。报告包含三个 Adapter 的检测结果，以及已找到或缺失的已知配置路径。
 
 ### 3. 收集当前设备配置
 
@@ -119,7 +120,7 @@ mcv init       初始化仓库清单，并将当前设备绑定到该仓库
 mcv bind PATH  绑定已有仓库并校验 repository ID
 mcv unbind     移除本机绑定
 mcv migrate    预览或执行 schema v1 → v2 原子迁移
-mcv discover   检测 Codex、Claude Code、Gemini 及已知配置路径
+mcv discover   检测 Codex、Claude Code、Gemini 及已知配置路径；支持 --plain/--json
 mcv capture    预览并收集本机配置到 MCV 仓库
 mcv deploy     将仓库配置部署到本机；覆盖前保存本机旧版本
 mcv status     检查相对最近部署基线的文件漂移
