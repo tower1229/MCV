@@ -22,6 +22,8 @@ async function inspectEnvironment(context) {
         operation: 'discover',
         status: 'reported',
         ready: true,
+        repositoryPath: null,
+        changes: [],
         environments,
         issues: [],
         nextActions: [],

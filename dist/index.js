@@ -101,12 +101,15 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         .action(async (options) => {
         await (0, deploy_1.deployConfigurations)(context, deployDependencies, options);
     });
-    program
+    const discoverCommand = program
         .command('discover')
         .description('Detect supported AI IDEs and report their configuration paths')
-        .addOption(new commander_1.Option('--plain', 'Print a one-shot English text report').conflicts('json'))
-        .addOption(new commander_1.Option('--json', 'Print one machine-readable report').conflicts('plain'))
+        .addOption(new commander_1.Option('--plain', 'Print a one-shot English text report'))
+        .addOption(new commander_1.Option('--json', 'Print one machine-readable report'))
         .action(async (options) => {
+        if (options.plain && options.json) {
+            discoverCommand.error("options '--plain' and '--json' cannot be used together", { exitCode: 2, code: 'mcv.conflictingOutputModes' });
+        }
         await (0, discover_1.discoverConfigurations)(context, options);
     });
     program

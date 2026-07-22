@@ -32,6 +32,8 @@ describe('inspectEnvironment', () => {
       operation: 'discover',
       status: 'reported',
       ready: true,
+      repositoryPath: null,
+      changes: [],
       environments: [
         expect.objectContaining({ id: 'codex', name: 'Codex', detected: false }),
         expect.objectContaining({ id: 'claude-code', name: 'Claude Code', detected: true }),

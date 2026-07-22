@@ -1,5 +1,17 @@
 export const OPERATION_SCHEMA_VERSION = 1 as const;
 
+export type OperationName =
+  | 'discover'
+  | 'repository'
+  | 'init'
+  | 'bind'
+  | 'unbind'
+  | 'migrate'
+  | 'capture'
+  | 'deploy'
+  | 'status'
+  | 'restore';
+
 export type IssueSeverity =
   | 'notice'
   | 'warning'
@@ -13,40 +25,6 @@ export interface Issue {
   details?: string;
 }
 
-export type OperationStatus =
-  | 'reported'
-  | 'planned'
-  | 'succeeded'
-  | 'blocked'
-  | 'failed';
-
-export interface OperationContract {
-  schemaVersion: typeof OPERATION_SCHEMA_VERSION;
-  operation: string;
-  status: OperationStatus;
-  issues: Issue[];
-  nextActions: string[];
-}
-
-export interface Report extends OperationContract {
-  status: 'reported';
-  ready: boolean;
-}
-
-export interface Plan<TChange = unknown> extends OperationContract {
-  status: 'planned' | 'blocked';
-  operationId: string;
-  readyToApply: boolean;
-  changes: TChange[];
-  preconditions: Record<string, string>;
-}
-
-export interface Result<TData = unknown> extends OperationContract {
-  status: 'succeeded' | 'failed';
-  data?: TData;
-  error?: McvError;
-}
-
 export interface McvError {
   code: string;
   message: string;
@@ -54,3 +32,60 @@ export interface McvError {
   nextActions: string[];
 }
 
+export interface OperationContract<TChange = unknown> {
+  schemaVersion: typeof OPERATION_SCHEMA_VERSION;
+  operation: OperationName;
+  repositoryPath: string | null;
+  changes: TChange[];
+  issues: Issue[];
+  nextActions: string[];
+}
+
+export type Report<TChange = unknown> = OperationContract<TChange> & (
+  | {
+    status: 'reported';
+    ready: boolean;
+    error?: never;
+  }
+  | {
+    status: 'failed';
+    ready: false;
+    error: McvError;
+  }
+);
+
+interface PlanContract<TChange> extends OperationContract<TChange> {
+  operationId: string;
+  preconditions: Record<string, string>;
+}
+
+export type Plan<TChange = unknown> = PlanContract<TChange> & (
+  | {
+    status: 'planned';
+    readyToApply: boolean;
+    error?: never;
+  }
+  | {
+    status: 'failed';
+    readyToApply: false;
+    error: McvError;
+  }
+);
+
+export type Result<TData = unknown, TChange = unknown> = OperationContract<TChange> & (
+  | {
+    status: 'succeeded';
+    data?: TData;
+    error?: never;
+  }
+  | {
+    status: 'blocked';
+    data?: never;
+    error?: never;
+  }
+  | {
+    status: 'failed';
+    data?: never;
+    error: McvError;
+  }
+);

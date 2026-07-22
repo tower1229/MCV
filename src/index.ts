@@ -78,12 +78,18 @@ export function createProgram(
       await deployConfigurations(context, deployDependencies, options);
     });
 
-  program
+  const discoverCommand = program
     .command('discover')
     .description('Detect supported AI IDEs and report their configuration paths')
-    .addOption(new Option('--plain', 'Print a one-shot English text report').conflicts('json'))
-    .addOption(new Option('--json', 'Print one machine-readable report').conflicts('plain'))
+    .addOption(new Option('--plain', 'Print a one-shot English text report'))
+    .addOption(new Option('--json', 'Print one machine-readable report'))
     .action(async (options) => {
+      if (options.plain && options.json) {
+        discoverCommand.error(
+          "options '--plain' and '--json' cannot be used together",
+          { exitCode: 2, code: 'mcv.conflictingOutputModes' },
+        );
+      }
       await discoverConfigurations(context, options);
     });
 

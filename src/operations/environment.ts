@@ -17,10 +17,12 @@ export interface EnvironmentDetails {
   configFiles: DetectedConfigFile[];
 }
 
-export interface EnvironmentReport extends Report {
+export type EnvironmentReport = Report<never> & {
   operation: 'discover';
+  repositoryPath: null;
+  changes: [];
   environments: EnvironmentDetails[];
-}
+};
 
 export async function inspectEnvironment(
   context: DeviceContext,
@@ -46,6 +48,8 @@ export async function inspectEnvironment(
     operation: 'discover',
     status: 'reported',
     ready: true,
+    repositoryPath: null,
+    changes: [],
     environments,
     issues: [],
     nextActions: [],

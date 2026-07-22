@@ -8,4 +8,3 @@ export function renderEnvironmentPlain(report: EnvironmentReport): string[] {
     ),
   ]);
 }
-

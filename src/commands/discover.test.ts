@@ -57,6 +57,8 @@ describe('mcv discover', () => {
       operation: 'discover',
       status: 'reported',
       ready: true,
+      repositoryPath: null,
+      changes: [],
       environments: [
         expect.objectContaining({ id: 'codex', detected: false }),
         expect.objectContaining({ id: 'claude-code', detected: true }),
@@ -66,5 +68,15 @@ describe('mcv discover', () => {
       nextActions: [],
     });
     expect(String(output)).not.toMatch(/\u001b\[/);
+  });
+
+  it('rejects conflicting output modes with a usage exit code', async () => {
+    const program = createProgram({ homeDir, platform: 'win32', env: {}, pathEnv: '' });
+    const discoverCommand = program.commands.find((command) => command.name() === 'discover');
+    discoverCommand?.configureOutput({ writeErr: () => {} }).exitOverride();
+
+    await expect(
+      program.parseAsync(['node', 'mcv', 'discover', '--plain', '--json']),
+    ).rejects.toMatchObject({ exitCode: 2 });
   });
 });
