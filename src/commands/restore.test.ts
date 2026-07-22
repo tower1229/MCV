@@ -45,16 +45,20 @@ describe('mcv restore', () => {
         path.join(directory, 'manifest.json'),
         JSON.stringify({
           createdAt,
+          status: 'complete',
           files: [{
+            action: 'modify',
             originalPath: targetPath,
             backupPath: path.join('files', '0-settings.json'),
+            beforeHash: digest(content),
+            afterHash: digest('deployed'),
           }],
         }),
       );
     }
   });
 
-  it('ignores a newer failed deployment backup', async () => {
+  it('restores the reviewed backup while ignoring newer failed or damaged backups', async () => {
     const targetPath = path.join(testRoot, 'home', 'settings.json');
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
     fs.writeFileSync(targetPath, 'deployed');
@@ -62,11 +66,22 @@ describe('mcv restore', () => {
     for (const [name, createdAt, status, content] of [
       ['complete', '2026-07-19T00:00:00.000Z', 'complete', 'safe backup'],
       ['failed', '2026-07-20T00:00:00.000Z', 'failed', 'partial backup'],
+      ['damaged', '2026-07-21T00:00:00.000Z', 'complete', 'damaged backup'],
     ] as const) {
       const directory = path.join(backupRoot, name, 'files');
       fs.mkdirSync(directory, { recursive: true });
       fs.writeFileSync(path.join(directory, 'settings.json'), content);
-      fs.writeFileSync(path.join(backupRoot, name, 'manifest.json'), JSON.stringify({ createdAt, status, files: [{ originalPath: targetPath, backupPath: 'files/settings.json' }] }));
+      fs.writeFileSync(path.join(backupRoot, name, 'manifest.json'), JSON.stringify({
+        createdAt,
+        status,
+        files: [{
+          action: 'modify',
+          originalPath: targetPath,
+          backupPath: 'files/settings.json',
+          beforeHash: name === 'damaged' ? digest('different content') : digest(content),
+          afterHash: digest('deployed'),
+        }],
+      }));
     }
     await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
       .parseAsync(['node', 'mcv', 'restore']);
@@ -135,8 +150,6 @@ describe('mcv restore', () => {
     const backupPath = path.join('files', 'settings.json');
     fs.mkdirSync(path.join(directory, 'files'), { recursive: true });
     fs.writeFileSync(path.join(directory, backupPath), originalContent);
-    const digest = (content: string): string =>
-      crypto.createHash('sha256').update(content).digest('hex');
     fs.writeFileSync(path.join(directory, 'manifest.json'), JSON.stringify({
       createdAt: '2026-07-19T00:00:00.000Z',
       status: 'complete',
@@ -148,5 +161,9 @@ describe('mcv restore', () => {
         afterHash: digest(deployedContent),
       }],
     }));
+  }
+
+  function digest(content: string): string {
+    return crypto.createHash('sha256').update(content).digest('hex');
   }
 });

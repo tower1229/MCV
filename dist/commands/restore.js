@@ -37,7 +37,6 @@ exports.restoreLatestBackup = restoreLatestBackup;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const files_1 = require("../utils/files");
-const objects_1 = require("../utils/objects");
 const state_1 = require("../utils/state");
 const repository_1 = require("../utils/repository");
 const restore_1 = require("../operations/restore");
@@ -59,7 +58,7 @@ function restoreLatestBackup(context, options = {}) {
     if (boundRepositoryPath)
         (0, repository_1.readManifest)(boundRepositoryPath);
     const stateDirectory = path.dirname((0, state_1.getStateFilePath)(context));
-    const latest = findLatestBackup(path.join(stateDirectory, 'backups'));
+    const latest = (0, restore_1.findLatestVerifiedBackup)(path.join(stateDirectory, 'backups'));
     if (!latest)
         throw new Error('No deployment backup found.');
     for (const file of latest.manifest.files) {
@@ -127,26 +126,4 @@ function resolveBackupPath(directory, backupPath) {
     if (!fs.existsSync(sourcePath))
         throw new Error(`Backup file is missing: ${sourcePath}`);
     return sourcePath;
-}
-function findLatestBackup(backupRoot) {
-    if (!fs.existsSync(backupRoot))
-        return undefined;
-    return fs.readdirSync(backupRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).flatMap((entry) => {
-        const directory = path.join(backupRoot, entry.name);
-        const manifest = readBackupManifest(path.join(directory, 'manifest.json'));
-        return manifest ? [{ directory, manifest }] : [];
-    }).sort((left, right) => Date.parse(right.manifest.createdAt) - Date.parse(left.manifest.createdAt))[0];
-}
-function readBackupManifest(manifestPath) {
-    if (!fs.existsSync(manifestPath))
-        return undefined;
-    try {
-        const value = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-        if (!(0, objects_1.isRecord)(value) || value.status === 'pending' || value.status === 'failed' || typeof value.createdAt !== 'string' || !Array.isArray(value.files) || !value.files.every((file) => (0, objects_1.isRecord)(file) && typeof file.originalPath === 'string'))
-            return undefined;
-        return value;
-    }
-    catch {
-        return undefined;
-    }
 }

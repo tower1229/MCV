@@ -1,23 +1,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { atomicWriteFile, atomicWriteTextFile, hashFile } from '../utils/files';
-import { isRecord } from '../utils/objects';
 import { getStateFilePath, readState, writeState } from '../utils/state';
 import type { DeviceContext } from '../adapters/types';
 import { readManifest } from '../utils/repository';
-import { createRestorePlan } from '../operations/restore';
+import {
+  createRestorePlan,
+  findLatestVerifiedBackup,
+  type DeployBackupFile,
+} from '../operations/restore';
 import { renderJson } from '../renderers/json';
 import { renderRestorePlanPlain } from '../renderers/restore';
-
-interface BackupFile {
-  action?: 'add' | 'modify' | 'delete';
-  originalPath: string;
-  backupPath?: string;
-  beforeHash?: string;
-  afterHash?: string;
-}
-interface BackupManifest { createdAt: string; status?: 'pending' | 'complete' | 'failed'; files: BackupFile[]; }
-interface BackupCandidate { directory: string; manifest: BackupManifest; }
 
 export interface RestoreOptions {
   dryRun?: boolean;
@@ -38,7 +31,7 @@ export function restoreLatestBackup(
   const boundRepositoryPath = readState(context).repositoryPath;
   if (boundRepositoryPath) readManifest(boundRepositoryPath);
   const stateDirectory = path.dirname(getStateFilePath(context));
-  const latest = findLatestBackup(path.join(stateDirectory, 'backups'));
+  const latest = findLatestVerifiedBackup(path.join(stateDirectory, 'backups'));
   if (!latest) throw new Error('No deployment backup found.');
 
   for (const file of latest.manifest.files) {
@@ -80,7 +73,10 @@ export function restoreLatestBackup(
   console.log(`Restored ${latest.manifest.files.length} file(s) from the latest backup.`);
 }
 
-function backupCurrentState(stateDirectory: string, files: BackupFile[]): string {
+function backupCurrentState(
+  stateDirectory: string,
+  files: DeployBackupFile[],
+): string {
   const root = path.join(stateDirectory, 'restore-backups');
   fs.mkdirSync(root, { recursive: true });
   const directory = fs.mkdtempSync(path.join(root, 'before-restore-'));
@@ -101,22 +97,4 @@ function resolveBackupPath(directory: string, backupPath: string): string {
   if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) throw new Error(`Backup file path escapes its backup directory: ${backupPath}`);
   if (!fs.existsSync(sourcePath)) throw new Error(`Backup file is missing: ${sourcePath}`);
   return sourcePath;
-}
-
-function findLatestBackup(backupRoot: string): BackupCandidate | undefined {
-  if (!fs.existsSync(backupRoot)) return undefined;
-  return fs.readdirSync(backupRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).flatMap((entry) => {
-    const directory = path.join(backupRoot, entry.name);
-    const manifest = readBackupManifest(path.join(directory, 'manifest.json'));
-    return manifest ? [{ directory, manifest }] : [];
-  }).sort((left, right) => Date.parse(right.manifest.createdAt) - Date.parse(left.manifest.createdAt))[0];
-}
-
-function readBackupManifest(manifestPath: string): BackupManifest | undefined {
-  if (!fs.existsSync(manifestPath)) return undefined;
-  try {
-    const value = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown;
-    if (!isRecord(value) || value.status === 'pending' || value.status === 'failed' || typeof value.createdAt !== 'string' || !Array.isArray(value.files) || !value.files.every((file) => isRecord(file) && typeof file.originalPath === 'string')) return undefined;
-    return value as unknown as BackupManifest;
-  } catch { return undefined; }
 }

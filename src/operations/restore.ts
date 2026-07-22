@@ -16,7 +16,7 @@ import {
 
 type DeployBackupAction = 'add' | 'modify' | 'delete';
 
-interface DeployBackupFile {
+export interface DeployBackupFile {
   action: DeployBackupAction;
   originalPath: string;
   backupPath?: string;
@@ -30,7 +30,7 @@ interface DeployBackupManifest {
   files: DeployBackupFile[];
 }
 
-interface VerifiedDeployBackup {
+export interface VerifiedDeployBackup {
   directory: string;
   manifest: DeployBackupManifest;
   manifestHash: string;
@@ -125,7 +125,9 @@ function buildRestorePlan(
   };
 }
 
-function findLatestVerifiedBackup(backupRoot: string): VerifiedDeployBackup | undefined {
+export function findLatestVerifiedBackup(
+  backupRoot: string,
+): VerifiedDeployBackup | undefined {
   if (!fs.existsSync(backupRoot)) return undefined;
   return fs.readdirSync(backupRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
