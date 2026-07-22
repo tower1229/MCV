@@ -34,12 +34,14 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createDeployPlan = createDeployPlan;
+exports.applyDeployPlan = applyDeployPlan;
 const crypto = __importStar(require("crypto"));
 const buffer_1 = require("buffer");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const uuid_1 = require("uuid");
 const adapters_1 = require("../adapters");
+const overlay_policies_1 = require("../adapters/overlay-policies");
 const files_1 = require("../utils/files");
 const objects_1 = require("../utils/objects");
 const repository_1 = require("../utils/repository");
@@ -49,12 +51,16 @@ const structured_config_1 = require("../utils/structured-config");
 const variables_1 = require("../utils/variables");
 const deploy_skills_1 = require("../utils/deploy-skills");
 const contracts_1 = require("./contracts");
+const activeDeployPlans = new WeakMap();
 async function createDeployPlan(context) {
     const operationId = (0, uuid_1.v4)();
     let repositoryPath = null;
     try {
         repositoryPath = (0, repository_1.resolveBoundRepository)(context);
-        return await buildDeployPlan(context, repositoryPath, operationId);
+        const mutations = new Map();
+        const plan = await buildDeployPlan(context, repositoryPath, operationId, mutations);
+        registerDeployPlan(plan, mutations);
+        return plan;
     }
     catch {
         return freezeDeployPlan({
@@ -80,11 +86,11 @@ async function createDeployPlan(context) {
         });
     }
 }
-async function buildDeployPlan(context, repositoryPath, operationId) {
+async function buildDeployPlan(context, repositoryPath, operationId, mutations) {
     const manifest = (0, repository_1.readManifest)(repositoryPath);
     const definitions = (0, adapters_1.createAdapterDefinitions)().filter(({ targetId }) => manifest.targets[targetId]?.enabled === true);
     if (definitions.length === 0) {
-        return freezeDeployPlan({
+        return {
             schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
             operation: 'deploy',
             status: 'planned',
@@ -99,7 +105,7 @@ async function buildDeployPlan(context, repositoryPath, operationId) {
                     message: 'No IDE targets are enabled in this Repository.',
                 }],
             nextActions: ['Enable at least one IDE target in mcv.yaml before deploying configuration.'],
-        });
+        };
     }
     const deployContext = {
         ...context,
@@ -135,12 +141,14 @@ async function buildDeployPlan(context, repositoryPath, operationId) {
         const next = toBuffer(file.content);
         if (previous?.equals(next))
             return [];
-        const filePreview = preview(file.targetPath, file.capability, next, previous, issues);
+        const filePreview = preview(file.targetPath, file.ide, file.capability, next, previous, issues);
         if (filePreview.kind === 'text' && filePreview.diff.length === 0)
             return [];
         const change = previous === undefined ? 'add' : 'modify';
+        const id = selectionId(file.ide, file.capability, file.targetPath);
+        mutations.set(id, { content: next });
         return [{
-                id: selectionId(file.ide, file.capability, file.targetPath),
+                id,
                 ide: file.ide,
                 capability: file.capability,
                 name: displayName(file.targetPath, file.capability),
@@ -170,8 +178,9 @@ async function buildDeployPlan(context, repositoryPath, operationId) {
                 defaultSelected: false,
                 group: 'advanced',
                 strategy: 'replace-entire-file',
-                preview: preview(targetPath, 'skills', Buffer.alloc(0), fs.readFileSync(targetPath), issues),
+                preview: preview(targetPath, 'codex', 'skills', Buffer.alloc(0), fs.readFileSync(targetPath), issues),
             });
+            mutations.set(selectionId('codex', 'skills', targetPath), {});
         }
     }
     const sourcePreconditions = new Map();
@@ -197,9 +206,10 @@ async function buildDeployPlan(context, repositoryPath, operationId) {
             defaultSelected: false,
             group: 'advanced',
             strategy: semantics.strategy,
-            preview: preview(targetPath, capability, Buffer.alloc(0), fs.readFileSync(targetPath), issues),
+            preview: preview(targetPath, ide, capability, Buffer.alloc(0), fs.readFileSync(targetPath), issues),
         };
         changes.push(deletion);
+        mutations.set(deletion.id, {});
         sourcePreconditions.set(deletion.id, hashText(stableValue(inventoryEntry)));
     }
     changes.sort(compareChanges);
@@ -211,7 +221,7 @@ async function buildDeployPlan(context, repositoryPath, operationId) {
         ];
     }));
     const blocked = issues.some((issue) => issue.severity === 'decisionRequired' || issue.severity === 'error');
-    return freezeDeployPlan({
+    return {
         schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
         operation: 'deploy',
         status: 'planned',
@@ -224,7 +234,416 @@ async function buildDeployPlan(context, repositoryPath, operationId) {
         nextActions: blocked
             ? ['Resolve every decisionRequired or error Issue, then regenerate the Deploy Plan.']
             : [],
+    };
+}
+function registerDeployPlan(plan, mutations) {
+    freezeDeployPlan(plan);
+    activeDeployPlans.set(plan, { operationId: plan.operationId, mutations });
+}
+async function applyDeployPlan(context, plan, selection, options = {}) {
+    if (plan.status === 'failed')
+        return failedDeployResult(plan.repositoryPath, plan.error, plan.issues);
+    const active = activeDeployPlans.get(plan);
+    if (!active || active.operationId !== plan.operationId) {
+        return failedDeployResult(plan.repositoryPath, invalidPlanError());
+    }
+    const selectedIds = [...new Set(selection.changeIds)];
+    const knownIds = new Set(plan.changes.map((change) => change.id));
+    if (selectedIds.some((id) => !knownIds.has(id))) {
+        return failedDeployResult(plan.repositoryPath, {
+            code: 'deploy.invalidSelection',
+            message: 'The Deploy selection contains an ID that is not in the active Plan.',
+            nextActions: ['Choose only change IDs from the current Deploy Plan.'],
+        });
+    }
+    const selected = new Set(selectedIds);
+    const blocking = deployBlockingIssues(plan, selection, options);
+    if (blocking.length > 0)
+        return blockedDeployResult(plan, blocking);
+    if (!plan.repositoryPath || (0, repository_1.resolveBoundRepository)(context) !== plan.repositoryPath) {
+        activeDeployPlans.delete(plan);
+        return failedDeployResult(plan.repositoryPath, stalePlanError());
+    }
+    let freshPlan;
+    try {
+        freshPlan = await buildDeployPlan(context, plan.repositoryPath, plan.operationId, new Map());
+    }
+    catch {
+        activeDeployPlans.delete(plan);
+        return failedDeployResult(plan.repositoryPath, stalePlanError());
+    }
+    if (!sameDeploySnapshot(plan, freshPlan)) {
+        activeDeployPlans.delete(plan);
+        return failedDeployResult(plan.repositoryPath, stalePlanError());
+    }
+    const selectedChanges = plan.changes.filter((change) => selected.has(change.id));
+    const prepared = prepareDeployWrites(selectedChanges, active.mutations);
+    if (selectedChanges.length === 0) {
+        try {
+            updateDeployState(context, plan.repositoryPath, selectedChanges);
+        }
+        catch (error) {
+            activeDeployPlans.delete(plan);
+            return failedDeployResult(plan.repositoryPath, {
+                code: 'deploy.stateUpdateFailed',
+                message: 'Deploy could not record the successful empty selection in device state.',
+                technicalDetails: errorMessage(error),
+                nextActions: ['Check local state storage permissions, then generate a new Deploy Plan.'],
+            });
+        }
+        activeDeployPlans.delete(plan);
+        return {
+            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            operation: 'deploy',
+            status: 'succeeded',
+            repositoryPath: plan.repositoryPath,
+            changes: [],
+            issues: [],
+            nextActions: [],
+            data: { appliedChangeIds: [], writtenPaths: [], deletedPaths: [] },
+        };
+    }
+    let backupPath;
+    try {
+        backupPath = createDeployBackup(context, plan, selectedChanges, options.copyFile ?? fs.copyFileSync);
+    }
+    catch (error) {
+        activeDeployPlans.delete(plan);
+        if (error instanceof StaleDeployPlanError) {
+            return failedDeployResult(plan.repositoryPath, stalePlanError(error.message));
+        }
+        return failedDeployResult(plan.repositoryPath, {
+            code: 'deploy.backupFailed',
+            message: 'Deploy could not create and verify every selected backup before writing.',
+            technicalDetails: errorMessage(error),
+            nextActions: ['Check local state storage and target file permissions, then generate a new Deploy Plan.'],
+        });
+    }
+    try {
+        assertSelectedPreconditions(context, plan, selectedChanges);
+        applyPreparedDeployWrites(prepared, backupPath, options.writeFile ?? ((targetPath, content) => (0, files_1.atomicWriteFile)(targetPath, content)), options.removeFile ?? ((targetPath) => fs.rmSync(targetPath, { force: true })), options.restoreFile ?? ((targetPath, content) => (0, files_1.atomicWriteFile)(targetPath, content)), () => {
+            finalizeDeployBackup(backupPath);
+            updateDeployState(context, plan.repositoryPath, selectedChanges);
+        });
+        activeDeployPlans.delete(plan);
+        return {
+            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            operation: 'deploy',
+            status: 'succeeded',
+            repositoryPath: plan.repositoryPath,
+            changes: selectedChanges,
+            issues: [],
+            nextActions: [],
+            data: {
+                appliedChangeIds: selectedIds,
+                writtenPaths: prepared.filter((item) => item.change === 'write').map((item) => item.targetPath),
+                deletedPaths: prepared.filter((item) => item.change === 'delete').map((item) => item.targetPath),
+                backupPath,
+            },
+        };
+    }
+    catch (error) {
+        activeDeployPlans.delete(plan);
+        markDeployBackupFailed(backupPath, error);
+        if (error instanceof StaleDeployPlanError) {
+            return failedDeployResult(plan.repositoryPath, stalePlanError(error.message));
+        }
+        if (error instanceof DeployRollbackError) {
+            return failedDeployResult(plan.repositoryPath, {
+                code: 'deploy.rollbackFailed',
+                message: 'Deploy failed and could not fully restore the selected device configuration.',
+                technicalDetails: error.message,
+                nextActions: [`Restore the affected files from ${backupPath}, then generate a new Deploy Plan.`],
+            });
+        }
+        return failedDeployResult(plan.repositoryPath, {
+            code: 'deploy.transactionFailed',
+            message: 'Deploy could not commit the selected changes and restored the device configuration.',
+            technicalDetails: errorMessage(error),
+            nextActions: ['Check target permissions, then generate and review a new Deploy Plan.'],
+        });
+    }
+}
+function deployBlockingIssues(plan, selection, options) {
+    if (options.nonInteractive) {
+        const unsafe = plan.issues.some((issue) => issue.severity !== 'notice')
+            || plan.changes.some((change) => change.change === 'delete');
+        return unsafe ? [{
+                severity: 'decisionRequired',
+                code: 'deploy.nonInteractiveBlocked',
+                message: 'Non-interactive Deploy cannot apply warnings, decisions, errors, or deletions.',
+            }] : [];
+    }
+    const confirmed = new Set(selection.confirmedIssueCodes ?? []);
+    const warnings = plan.issues.filter((issue) => issue.severity === 'warning' && !confirmed.has(issue.code));
+    if (warnings.length > 0)
+        return warnings;
+    return plan.issues.filter((issue) => issue.severity === 'decisionRequired' || issue.severity === 'error');
+}
+function sameDeploySnapshot(left, right) {
+    return left.repositoryPath === right.repositoryPath
+        && stableValue(left.preconditions) === stableValue(right.preconditions)
+        && stableValue(left.changes.map(deploySnapshotChange))
+            === stableValue(right.changes.map(deploySnapshotChange))
+        && stableValue(left.issues.map((issue) => [issue.severity, issue.code]))
+            === stableValue(right.issues.map((issue) => [issue.severity, issue.code]));
+}
+function deploySnapshotChange(change) {
+    return {
+        id: change.id,
+        change: change.change,
+        capability: change.capability,
+        targetPath: change.targetPath,
+        preview: change.preview,
+    };
+}
+function prepareDeployWrites(changes, mutations) {
+    const grouped = new Map();
+    for (const change of changes) {
+        grouped.set(change.targetPath, [...(grouped.get(change.targetPath) ?? []), change]);
+    }
+    return [...grouped].map(([targetPath, targetChanges]) => {
+        if (targetChanges.some((change) => change.change === 'delete')) {
+            return { targetPath, change: 'delete' };
+        }
+        const mutation = mutations.get(targetChanges[0].id);
+        if (!mutation?.content)
+            throw new Error(`Missing active Deploy mutation for ${targetChanges[0].id}.`);
+        return {
+            targetPath,
+            change: 'write',
+            content: composeSelectedContent(targetPath, targetChanges, mutation.content),
+        };
     });
+}
+function composeSelectedContent(targetPath, changes, desiredContent) {
+    if (changes.some((change) => change.strategy === 'replace-entire-file')) {
+        return Buffer.from(desiredContent);
+    }
+    const format = structuredFormat(targetPath);
+    if (!format)
+        return Buffer.from(desiredContent);
+    const current = fs.existsSync(targetPath)
+        ? (0, structured_config_1.parseStructuredObject)(fs.readFileSync(targetPath, 'utf8'), format, targetPath)
+        : {};
+    const desired = (0, structured_config_1.parseStructuredObject)(desiredContent.toString('utf8'), format, targetPath);
+    const selectedCapabilities = new Set(changes.map((change) => change.capability));
+    const managedKey = managedTopLevelKey(changes[0].ide);
+    const result = { ...current };
+    if (selectedCapabilities.has('mcp'))
+        copyStructuredKey(desired, result, managedKey);
+    if (selectedCapabilities.has('native')) {
+        for (const key of new Set([...Object.keys(current), ...Object.keys(desired)])) {
+            if (key !== managedKey)
+                copyStructuredKey(desired, result, key);
+        }
+    }
+    return Buffer.from((0, structured_config_1.stringifyStructuredObject)(result, format));
+}
+function copyStructuredKey(source, target, key) {
+    if (key in source)
+        target[key] = source[key];
+    else
+        delete target[key];
+}
+function createDeployBackup(context, plan, changes, copyFile) {
+    assertSelectedPreconditions(context, plan, changes);
+    const backupRoot = path.join(path.dirname((0, state_1.getStateFilePath)(context)), 'backups');
+    fs.mkdirSync(backupRoot, { recursive: true });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = fs.mkdtempSync(path.join(backupRoot, `${timestamp}-`));
+    const filesPath = path.join(backupPath, 'files');
+    fs.mkdirSync(filesPath);
+    try {
+        const files = changes.map((change, index) => {
+            const expected = plan.preconditions[`target:${change.id}`];
+            if (change.change === 'add') {
+                if (fs.existsSync(change.targetPath))
+                    throw new StaleDeployPlanError('A selected add target appeared during backup.');
+                return { changeId: change.id, action: change.change, originalPath: change.targetPath };
+            }
+            const relativeBackupPath = path.join('files', `${index}-${path.basename(change.targetPath)}`);
+            const copiedPath = path.join(backupPath, relativeBackupPath);
+            copyFile(change.targetPath, copiedPath);
+            if ((0, files_1.hashFile)(copiedPath) !== expected || (0, files_1.hashFile)(change.targetPath) !== expected) {
+                throw new StaleDeployPlanError('A selected target changed while its backup was being verified.');
+            }
+            return {
+                changeId: change.id,
+                action: change.change,
+                originalPath: change.targetPath,
+                backupPath: relativeBackupPath,
+                beforeHash: expected,
+            };
+        });
+        const manifest = {
+            createdAt: new Date().toISOString(),
+            status: 'pending',
+            files,
+        };
+        (0, files_1.atomicWriteFile)(path.join(backupPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+        return backupPath;
+    }
+    catch (error) {
+        fs.rmSync(backupPath, { recursive: true, force: true });
+        throw error;
+    }
+}
+function assertSelectedPreconditions(context, plan, changes) {
+    const repositoryHash = plan.repositoryPath ? hashRepositoryInputs(plan.repositoryPath) : undefined;
+    const inventory = (0, state_1.readState)(context).managedInventory ?? {};
+    for (const change of changes) {
+        const targetHash = fs.existsSync(change.targetPath)
+            ? (0, files_1.hashFile)(change.targetPath)
+            : hashText('<missing>');
+        const sourceHash = change.change === 'delete' && inventory[change.targetPath] !== undefined
+            ? hashText(stableValue(inventory[change.targetPath]))
+            : repositoryHash;
+        if (targetHash !== plan.preconditions[`target:${change.id}`]
+            || sourceHash !== plan.preconditions[`source:${change.id}`]) {
+            throw new StaleDeployPlanError('Deploy source or target state changed after the Plan was reviewed.');
+        }
+    }
+}
+function applyPreparedDeployWrites(writes, backupPath, writeFile, removeFile, restoreFile, commit) {
+    const attemptedPaths = new Set();
+    try {
+        for (const write of writes) {
+            attemptedPaths.add(write.targetPath);
+            if (write.change === 'delete')
+                removeFile(write.targetPath);
+            else
+                writeFile(write.targetPath, write.content);
+        }
+        commit();
+    }
+    catch (error) {
+        const rollbackErrors = rollbackDeployWrites(backupPath, attemptedPaths, removeFile, restoreFile);
+        if (rollbackErrors.length > 0) {
+            throw new DeployRollbackError(`${errorMessage(error)} Rollback was incomplete: ${rollbackErrors.join('; ')}`);
+        }
+        throw error;
+    }
+}
+function rollbackDeployWrites(backupPath, attemptedPaths, removeFile, restoreFile) {
+    const manifest = readDeployBackupManifest(backupPath);
+    const entriesByPath = new Map();
+    for (const entry of manifest.files) {
+        if (attemptedPaths.has(entry.originalPath) && !entriesByPath.has(entry.originalPath)) {
+            entriesByPath.set(entry.originalPath, entry);
+        }
+    }
+    const errors = [];
+    for (const entry of [...entriesByPath.values()].reverse()) {
+        try {
+            if (!entry.backupPath)
+                removeFile(entry.originalPath);
+            else
+                restoreFile(entry.originalPath, fs.readFileSync(path.join(backupPath, entry.backupPath)));
+        }
+        catch (error) {
+            errors.push(`${entry.originalPath}: ${errorMessage(error)}`);
+        }
+    }
+    return errors;
+}
+function finalizeDeployBackup(backupPath) {
+    const manifest = readDeployBackupManifest(backupPath);
+    for (const entry of manifest.files) {
+        if (fs.existsSync(entry.originalPath))
+            entry.afterHash = (0, files_1.hashFile)(entry.originalPath);
+    }
+    manifest.status = 'complete';
+    manifest.completedAt = new Date().toISOString();
+    (0, files_1.atomicWriteFile)(path.join(backupPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+}
+function markDeployBackupFailed(backupPath, error) {
+    try {
+        const manifest = readDeployBackupManifest(backupPath);
+        manifest.status = 'failed';
+        manifest.failedAt = new Date().toISOString();
+        manifest.error = errorMessage(error);
+        (0, files_1.atomicWriteFile)(path.join(backupPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+    }
+    catch { /* Preserve the primary Deploy failure. */ }
+}
+function readDeployBackupManifest(backupPath) {
+    return JSON.parse(fs.readFileSync(path.join(backupPath, 'manifest.json'), 'utf8'));
+}
+function updateDeployState(context, repositoryPath, changes) {
+    const state = (0, state_1.readState)(context);
+    const baselineFiles = { ...(state.baselineSnapshot?.files ?? {}) };
+    const managedInventory = { ...(state.managedInventory ?? {}) };
+    for (const change of changes) {
+        if (change.change === 'delete' || !fs.existsSync(change.targetPath)) {
+            delete baselineFiles[change.targetPath];
+            delete managedInventory[change.targetPath];
+        }
+        else {
+            const hash = (0, files_1.hashFile)(change.targetPath);
+            baselineFiles[change.targetPath] = hash;
+            managedInventory[change.targetPath] = { source: repositoryPath, hash };
+        }
+    }
+    const lastDeploySelection = {};
+    for (const change of changes) {
+        const capabilities = lastDeploySelection[change.ide] ?? [];
+        if (!capabilities.includes(change.capability))
+            capabilities.push(change.capability);
+        lastDeploySelection[change.ide] = capabilities;
+    }
+    state.baselineSnapshot = { recordedAt: new Date().toISOString(), files: baselineFiles };
+    state.managedInventory = managedInventory;
+    state.lastDeploySelection = lastDeploySelection;
+    state.lastOperation = { kind: 'deploy', time: new Date().toISOString(), success: true };
+    (0, state_1.writeState)(context, state);
+}
+class StaleDeployPlanError extends Error {
+}
+class DeployRollbackError extends Error {
+}
+function errorMessage(error) {
+    return error instanceof Error ? error.message : String(error);
+}
+function invalidPlanError() {
+    return {
+        code: 'operation.invalidPlan',
+        message: 'The Deploy Plan is not the active in-process Plan.',
+        nextActions: ['Generate and review a new Deploy Plan.'],
+    };
+}
+function stalePlanError(technicalDetails) {
+    return {
+        code: 'operation.stalePlan',
+        message: 'Deploy source or target state changed after the Plan was generated.',
+        technicalDetails,
+        nextActions: ['Generate and review a new Deploy Plan.'],
+    };
+}
+function failedDeployResult(repositoryPath, error, issues = [{ severity: 'error', code: error.code, message: error.message }]) {
+    return {
+        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        operation: 'deploy',
+        status: 'failed',
+        repositoryPath,
+        changes: [],
+        issues,
+        nextActions: error.nextActions,
+        error,
+    };
+}
+function blockedDeployResult(plan, issues) {
+    return {
+        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        operation: 'deploy',
+        status: 'blocked',
+        repositoryPath: plan.repositoryPath,
+        changes: [],
+        issues,
+        nextActions: issues.some((issue) => issue.severity === 'warning')
+            ? ['Confirm every warning explicitly before applying the Deploy Plan.']
+            : ['Review and resolve the Deploy Plan interactively before applying it.'],
+    };
 }
 function freezeDeployPlan(plan) {
     for (const change of plan.changes) {
@@ -243,12 +662,12 @@ function freezeDeployPlan(plan) {
     }
     return Object.freeze(plan);
 }
-function preview(targetPath, capability, next, previous, issues) {
+function preview(targetPath, ide, capability, next, previous, issues) {
     const metadata = next.length === 0 && previous ? previous : next;
     if (!isText(next) || (previous !== undefined && !isText(previous))) {
         return { targetPath, kind: 'binary', bytes: metadata.length, sha256: hashBuffer(metadata) };
     }
-    const diff = renderSafeDiff(targetPath, capability, previous?.toString('utf8'), next.toString('utf8'));
+    const diff = renderSafeDiff(targetPath, ide, capability, previous?.toString('utf8'), next.toString('utf8'));
     if ((0, sanitize_1.scanTextForSecrets)(diff).length > 0) {
         issues.push({
             severity: 'error',
@@ -265,7 +684,7 @@ function preview(targetPath, capability, next, previous, issues) {
     }
     return { targetPath, kind: 'text', bytes: metadata.length, sha256: hashBuffer(metadata), diff };
 }
-function renderSafeDiff(targetPath, capability, previous, next) {
+function renderSafeDiff(targetPath, ide, capability, previous, next) {
     if (next.length === 0 || capability === 'rules' || capability === 'skills') {
         return renderChangedLines(previous, next);
     }
@@ -275,7 +694,7 @@ function renderSafeDiff(targetPath, capability, previous, next) {
     try {
         const before = previous === undefined ? {} : (0, structured_config_1.parseStructuredObject)(previous, format, targetPath);
         const after = (0, structured_config_1.parseStructuredObject)(next, format, targetPath);
-        const managedKey = format === 'toml' ? 'mcp_servers' : 'mcpServers';
+        const managedKey = managedTopLevelKey(ide);
         const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])]
             .filter((key) => capability === 'mcp' ? key === managedKey : key !== managedKey)
             .filter((key) => stableValue(before[key]) !== stableValue(after[key]))
@@ -301,6 +720,14 @@ function structuredFormat(targetPath) {
     if (targetPath.endsWith('.toml'))
         return 'toml';
     return undefined;
+}
+const MCP_PATH_BY_IDE = {
+    codex: overlay_policies_1.CODEX_MCP_PATH,
+    'claude-code': overlay_policies_1.CLAUDE_CODE_MCP_PATH,
+    gemini: overlay_policies_1.GEMINI_MCP_PATH,
+};
+function managedTopLevelKey(ide) {
+    return MCP_PATH_BY_IDE[ide].slice(2);
 }
 function stableValue(value) {
     if (Array.isArray(value))
@@ -361,8 +788,7 @@ function inferDeploymentSemantics(targetPath, targetId, repositoryPath, context)
     const capabilities = [];
     if (nativeSourceExists(targetPath, targetId, repositoryPath, context))
         capabilities.push('native');
-    if (isMcpTarget(targetPath, targetId, context)
-        && fs.existsSync(path.join(repositoryPath, 'common', 'mcp.yaml')))
+    if (isMcpTarget(targetPath, targetId, context))
         capabilities.push('mcp');
     return { capabilities: capabilities.length > 0 ? capabilities : ['native'], strategy: 'managed-merge' };
 }
@@ -372,7 +798,10 @@ function nativeSourceExists(targetPath, targetId, repositoryPath, context) {
         return false;
     const platform = context.platform === 'win32' ? 'windows' : 'macos';
     return fs.existsSync(path.join(repositoryPath, 'overrides', platform, ...candidate.split('/')))
-        || fs.existsSync(path.join(repositoryPath, ...candidate.split('/')));
+        || fs.existsSync(path.join(repositoryPath, ...candidate.split('/')))
+        || (targetId === 'gemini'
+            && candidate === 'ide/gemini/native/gemini-cli/settings.json'
+            && fs.existsSync(path.join(repositoryPath, 'ide', 'gemini', 'native', 'settings.json')));
 }
 function nativeRepositoryPath(targetPath, targetId, context) {
     const resolved = path.resolve(targetPath);

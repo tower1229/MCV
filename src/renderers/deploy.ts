@@ -1,4 +1,4 @@
-import type { DeployPlan } from '../operations/deploy';
+import type { DeployPlan, DeployResult } from '../operations/deploy';
 
 export function renderDeployPlanPlain(plan: DeployPlan): string[] {
   const lines = [`Deploy Plan: ${plan.repositoryPath ?? 'not bound'}`];
@@ -27,6 +27,17 @@ export function renderDeployPlanPlain(plan: DeployPlan): string[] {
     lines.push(`[${issue.severity}] ${issue.code}: ${issue.message}`);
   }
   for (const action of plan.nextActions) lines.push(`Next: ${action}`);
+  return lines;
+}
+
+export function renderDeployResultPlain(result: DeployResult): string[] {
+  if (result.status === 'succeeded') {
+    return [`Deployed ${result.data?.appliedChangeIds.length ?? 0} selected item(s) from ${result.repositoryPath}.`];
+  }
+  const lines = [`Deploy ${result.status}.`];
+  for (const issue of result.issues) lines.push(`[${issue.severity}] ${issue.code}: ${issue.message}`);
+  if (result.status === 'failed') lines.push(`Error: ${result.error.message}`);
+  for (const action of result.nextActions) lines.push(`Next: ${action}`);
   return lines;
 }
 

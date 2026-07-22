@@ -4,8 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceContext } from '../adapters/types';
+import { atomicWriteFile } from '../utils/files';
 import { readState, writeState } from '../utils/state';
-import { createDeployPlan } from './deploy';
+import { applyDeployPlan, createDeployPlan } from './deploy';
 
 describe('Deploy operations', () => {
   let testRoot: string;
@@ -222,6 +223,231 @@ describe('Deploy operations', () => {
       kind: 'text',
       diff: expect.stringContaining('compactMode'),
     });
+  });
+
+  it('fails before the first write when a selected backup cannot be verified', async () => {
+    const targetPath = path.join(homeDir, '.claude', 'CLAUDE.md');
+    const before = fs.readFileSync(targetPath, 'utf8');
+    const stateBefore = readState(context);
+    const plan = await createDeployPlan(context);
+    const selected = plan.changes.find((change) => change.targetPath === targetPath);
+    if (!selected) throw new Error('expected Shared Rules change');
+
+    const result = await applyDeployPlan(context, plan, { changeIds: [selected.id] }, {
+      copyFile: () => { throw new Error('backup disk full'); },
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'deploy.backupFailed', technicalDetails: expect.stringContaining('backup disk full') },
+    });
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe(before);
+    expect(readState(context)).toEqual(stateBefore);
+  });
+
+  it('rejects a precondition race before creating a backup or writing a target', async () => {
+    const targetPath = path.join(homeDir, '.claude', 'CLAUDE.md');
+    const plan = await createDeployPlan(context);
+    const selected = plan.changes.find((change) => change.targetPath === targetPath);
+    if (!selected) throw new Error('expected Shared Rules change');
+    fs.writeFileSync(targetPath, '# Changed after review\n');
+
+    const result = await applyDeployPlan(context, plan, { changeIds: [selected.id] });
+
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'operation.stalePlan' } });
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('# Changed after review\n');
+    expect(fs.existsSync(path.join(homeDir, 'Library', 'Application Support', 'mcv', 'backups')))
+      .toBe(false);
+  });
+
+  it('rolls back earlier selected writes and returns a structured failure Result', async () => {
+    const rulesPath = path.join(homeDir, '.claude', 'CLAUDE.md');
+    const skillPath = path.join(homeDir, '.claude', 'skills', 'review', 'SKILL.md');
+    const plan = await createDeployPlan(context);
+    const selected = plan.changes.filter((change) =>
+      change.targetPath === rulesPath || change.targetPath === skillPath);
+    expect(selected).toHaveLength(2);
+    let writeCount = 0;
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      { changeIds: selected.map((change) => change.id) },
+      {
+        writeFile: (targetPath, content) => {
+          writeCount += 1;
+          if (writeCount === 2) throw new Error('simulated write failure');
+          atomicWriteFile(targetPath, content);
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'deploy.transactionFailed', technicalDetails: expect.stringContaining('simulated write failure') },
+    });
+    expect(fs.readFileSync(rulesPath, 'utf8')).toBe('# Device rules\n');
+    expect(fs.existsSync(skillPath)).toBe(false);
+  });
+
+  it('restores a target when its writer modifies the file before throwing', async () => {
+    const targetPath = path.join(homeDir, '.claude', 'CLAUDE.md');
+    const plan = await createDeployPlan(context);
+    const selected = plan.changes.find((change) => change.targetPath === targetPath);
+    if (!selected) throw new Error('expected Shared Rules change');
+
+    const result = await applyDeployPlan(context, plan, { changeIds: [selected.id] }, {
+      writeFile: (pathToWrite, content) => {
+        atomicWriteFile(pathToWrite, content);
+        throw new Error('writer failed after rename');
+      },
+    });
+
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'deploy.transactionFailed' } });
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('# Device rules\n');
+  });
+
+  it('does not restore a selected target whose write was never attempted', async () => {
+    const rulesPath = path.join(homeDir, '.claude', 'CLAUDE.md');
+    const skillPath = path.join(homeDir, '.claude', 'skills', 'review', 'SKILL.md');
+    const laterPath = path.join(homeDir, '.claude', 'settings.json');
+    const plan = await createDeployPlan(context);
+    const selected = [rulesPath, skillPath, laterPath].map((targetPath) => {
+      const change = plan.changes.find((candidate) => candidate.targetPath === targetPath);
+      if (!change) throw new Error(`expected change for ${targetPath}`);
+      return change;
+    });
+    let writeCount = 0;
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      { changeIds: selected.map((change) => change.id) },
+      {
+        writeFile: (targetPath, content) => {
+          writeCount += 1;
+          if (writeCount === 1) {
+            atomicWriteFile(targetPath, content);
+            fs.writeFileSync(laterPath, '{"external":true}\n');
+            return;
+          }
+          throw new Error('stop before later target');
+        },
+      },
+    );
+
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'deploy.transactionFailed' } });
+    expect(fs.readFileSync(rulesPath, 'utf8')).toBe('# Device rules\n');
+    expect(fs.existsSync(skillPath)).toBe(false);
+    expect(fs.readFileSync(laterPath, 'utf8')).toBe('{"external":true}\n');
+  });
+
+  it('preserves the verified backup path when automatic rollback is incomplete', async () => {
+    const targetPath = path.join(homeDir, '.claude', 'CLAUDE.md');
+    const plan = await createDeployPlan(context);
+    const selected = plan.changes.find((change) => change.targetPath === targetPath);
+    if (!selected) throw new Error('expected Shared Rules change');
+
+    const result = await applyDeployPlan(context, plan, { changeIds: [selected.id] }, {
+      writeFile: () => { throw new Error('write denied'); },
+      restoreFile: () => { throw new Error('restore denied'); },
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'deploy.rollbackFailed',
+        technicalDetails: expect.stringContaining('restore denied'),
+        nextActions: [expect.stringContaining('backups')],
+      },
+    });
+  });
+
+  it('rejects foreign selection IDs and non-interactive deletions before writing', async () => {
+    const plan = await createDeployPlan(context);
+    const invalid = await applyDeployPlan(context, plan, { changeIds: ['deploy-not-in-plan'] });
+    expect(invalid).toMatchObject({
+      status: 'failed', error: { code: 'deploy.invalidSelection' },
+    });
+
+    const freshPlan = await createDeployPlan(context);
+    const deletion = freshPlan.changes.find((change) => change.change === 'delete');
+    if (!deletion) throw new Error('expected deletion candidate');
+    const defaultSelection = freshPlan.changes
+      .filter((change) => change.defaultSelected)
+      .map((change) => change.id);
+    const blocked = await applyDeployPlan(
+      context,
+      freshPlan,
+      { changeIds: defaultSelection },
+      { nonInteractive: true },
+    );
+    expect(blocked).toMatchObject({
+      status: 'blocked', issues: [expect.objectContaining({ code: 'deploy.nonInteractiveBlocked' })],
+    });
+    expect(fs.existsSync(deletion.targetPath)).toBe(true);
+  });
+
+  it('requires every warning to be explicitly confirmed and blocks --yes', async () => {
+    const rulesPath = path.join(homeDir, '.claude', 'CLAUDE.md');
+    const linkTarget = path.join(testRoot, 'linked-rules.md');
+    fs.writeFileSync(linkTarget, '# Linked rules\n');
+    fs.rmSync(rulesPath);
+    fs.symlinkSync(linkTarget, rulesPath);
+    const plan = await createDeployPlan(context);
+    const warningCodes = plan.issues
+      .filter((issue) => issue.severity === 'warning')
+      .map((issue) => issue.code);
+    expect(warningCodes.length).toBeGreaterThan(0);
+    const selectedIds = plan.changes.filter((change) => change.defaultSelected).map((change) => change.id);
+
+    const blocked = await applyDeployPlan(context, plan, { changeIds: selectedIds });
+    expect(blocked).toMatchObject({ status: 'blocked', issues: [expect.objectContaining({ severity: 'warning' })] });
+
+    const nonInteractivePlan = await createDeployPlan(context);
+    const nonInteractive = await applyDeployPlan(
+      context,
+      nonInteractivePlan,
+      { changeIds: nonInteractivePlan.changes.filter((change) => change.defaultSelected).map((change) => change.id) },
+      { nonInteractive: true },
+    );
+    expect(nonInteractive).toMatchObject({
+      status: 'blocked', issues: [expect.objectContaining({ code: 'deploy.nonInteractiveBlocked' })],
+    });
+
+    const confirmedPlan = await createDeployPlan(context);
+    const confirmed = await applyDeployPlan(context, confirmedPlan, {
+      changeIds: confirmedPlan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+      confirmedIssueCodes: warningCodes,
+    });
+    expect(confirmed.status).toBe('succeeded');
+    expect(fs.readFileSync(linkTarget, 'utf8')).toBe('# Linked rules\n');
+  });
+
+  it('applies only selected capabilities and updates only their device state scope', async () => {
+    const targetPath = path.join(homeDir, '.claude.json');
+    const plan = await createDeployPlan(context);
+    const native = plan.changes.find((change) =>
+      change.targetPath === targetPath && change.capability === 'native');
+    if (!native) throw new Error('expected Native change');
+
+    const result = await applyDeployPlan(context, plan, { changeIds: [native.id] });
+
+    expect(result).toMatchObject({
+      status: 'succeeded',
+      data: { appliedChangeIds: [native.id], writtenPaths: [targetPath], deletedPaths: [] },
+    });
+    expect(JSON.parse(fs.readFileSync(targetPath, 'utf8'))).toEqual({
+      localState: 'must-be-preserved',
+      compactMode: true,
+    });
+    const state = readState(context);
+    expect(state.baselineSnapshot?.files).toEqual({ [targetPath]: expect.any(String) });
+    expect(state.managedInventory).toEqual(expect.objectContaining({
+      [targetPath]: { source: repositoryPath, hash: expect.any(String) },
+    }));
+    expect(state.managedInventory).not.toHaveProperty(path.join(homeDir, '.claude', 'CLAUDE.md'));
+    expect(state.lastDeploySelection).toEqual({ 'claude-code': ['native'] });
   });
 });
 

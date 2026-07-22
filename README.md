@@ -97,9 +97,9 @@ git push
 mcv deploy
 ```
 
-MCV 会显示写入计划并请求确认，然后把仓库中的配置展开到当前设备。仓库是经过用户确认的配置事实源，不是本机回滚备份。
+MCV 会显示按 IDE/capability 分组的写入计划并请求确认，只执行该 Plan 中选中的 selection ID。Apply 会重新验证 operation ID、Repository 来源哈希和目标前置哈希；warning 必须交互确认，decision required 或 error 会阻止写入。仓库是经过用户确认的配置事实源，不是本机回滚备份。
 
-如果目标文件已经存在且将被修改，MCV 会先把部署前的本机旧版本保存到本机状态目录下的 `backups/`，再使用临时文件加原子重命名完成写入。再次部署相同内容不会创建新备份。
+每个选中变化都会在首次写入前备份并验证；写入或本机状态提交失败时，已写入变化会从验证过的备份回滚。成功后只更新实际 Apply 范围的 Baseline Snapshot、managed inventory，以及仅保存在本机、按 IDE/capability 记录的最近 Deploy selection。再次部署相同内容不会创建新备份。
 
 新设备进入 Repository 后执行 `mcv bind`，也可以执行 `mcv bind <path>` 显式指定路径。Bind 只校验 manifest 和 repository ID 并写入本机绑定；不会迁移或修改 Repository。普通命令不会因为当前目录恰好存在另一个 `mcv.yaml` 就越过已有绑定。
 
@@ -125,7 +125,7 @@ mcv unbind     只移除本机绑定；支持 --json
 mcv migrate    通过 --dry-run 预览 Migration Plan，使用 --yes 备份并迁移；支持 --json
 mcv discover   检测 Codex、Claude Code、Gemini 及已知配置路径；支持 --plain/--json
 mcv capture    预览并收集本机配置到 MCV 仓库
-mcv deploy     通过 --dry-run 按 IDE/capability 审阅 Deploy Plan；支持 --json，执行时覆盖前保存本机旧版本
+mcv deploy     通过 --dry-run 按 IDE/capability 审阅 Deploy Plan；支持 --json，Apply 时校验前置条件并事务备份/写入/回滚
 mcv status     检查相对最近部署基线的文件漂移
 mcv restore    用最近一次部署前保存的本机旧版本回滚对应文件
 ```

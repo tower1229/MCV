@@ -38,6 +38,7 @@ exports.readState = readState;
 exports.writeState = writeState;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const files_1 = require("./files");
 function getStateFilePath(context) {
     if (context.platform === 'win32') {
         return path.join(context.env.APPDATA || path.join(context.homeDir, 'AppData', 'Roaming'), 'mcv', 'config.json');
@@ -66,5 +67,5 @@ function writeState(context, state) {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf-8');
+    (0, files_1.atomicWriteTextFile)(statePath, JSON.stringify(state, null, 2));
 }

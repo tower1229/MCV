@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { DeviceContext } from '../adapters/types';
+import type { ConfigurationCapability } from '../adapters/types';
+import { atomicWriteTextFile } from './files';
 
 export interface BaselineSnapshot {
   recordedAt: string;
@@ -14,6 +16,7 @@ export interface McvState {
   repositoryPath?: string;
   baselineSnapshot?: BaselineSnapshot;
   managedInventory?: Record<string, { source: string; hash: string }>;
+  lastDeploySelection?: Partial<Record<'codex' | 'claude-code' | 'gemini', ConfigurationCapability[]>>;
   lastOperation?: { kind: 'capture' | 'deploy' | 'restore'; time: string; success: boolean };
 }
 
@@ -46,5 +49,5 @@ export function writeState(context: DeviceContext, state: McvState): void {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf-8');
+  atomicWriteTextFile(statePath, JSON.stringify(state, null, 2));
 }

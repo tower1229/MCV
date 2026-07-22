@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProgram } from '../index';
-import { applyDeployTransaction, findSymbolicLinkAncestor, type PlannedDeployFile } from './deploy';
+import { findSymbolicLinkAncestor } from '../utils/files';
 
 describe('mcv deploy', () => {
   const originalCwd = process.cwd();
@@ -115,25 +115,6 @@ describe('mcv deploy', () => {
     fs.mkdirSync(target);
     fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
     expect(findSymbolicLinkAncestor(path.join(link, 'nested', 'file.txt'))).toBe(link);
-  });
-
-  it('restores modified files even when cleanup of a created file fails', () => {
-    const createdPath = path.join(testRoot, 'created.txt');
-    const modifiedPath = path.join(testRoot, 'modified.txt');
-    const failedPath = path.join(testRoot, 'failed.txt');
-    fs.writeFileSync(modifiedPath, 'before');
-    const backupDirectory = path.join(testRoot, 'rollback-backup');
-    fs.mkdirSync(path.join(backupDirectory, 'files'), { recursive: true });
-    fs.writeFileSync(path.join(backupDirectory, 'files', 'modified.txt'), 'before');
-    fs.writeFileSync(path.join(backupDirectory, 'manifest.json'), JSON.stringify({ files: [{ originalPath: modifiedPath, backupPath: 'files/modified.txt' }] }));
-    const write = (content: string) => (file: { targetPath: string }) => fs.writeFileSync(file.targetPath, content);
-    const plan: PlannedDeployFile[] = [
-      { targetPath: createdPath, content: 'created', change: 'add', write: write('created') },
-      { targetPath: modifiedPath, content: 'after', change: 'modify', write: write('after') },
-      { targetPath: failedPath, content: 'failed', change: 'add', write: () => { throw new Error('primary write failure'); } },
-    ];
-    expect(() => applyDeployTransaction(plan, backupDirectory, { remove: () => { throw new Error('cleanup failure'); } })).toThrow(AggregateError);
-    expect(fs.readFileSync(modifiedPath, 'utf8')).toBe('before');
   });
 
   it('deploys canonical rules as Claude Code instructions', async () => {
@@ -358,13 +339,15 @@ describe('mcv deploy', () => {
   });
 
   it('deletes only prior managed inventory when prune is explicitly confirmed', async () => {
+    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Managed rules\n');
     const run = (...args: string[]) => createProgram(
       deviceContext('win32'), {}, { confirmDeploy: async () => true },
     ).parseAsync(['node', 'mcv', 'deploy', ...args]);
     await run();
-    const targetPath = path.join(homeDir, '.claude', 'settings.json');
+    const targetPath = path.join(homeDir, '.claude', 'CLAUDE.md');
     expect(fs.existsSync(targetPath)).toBe(true);
-    fs.rmSync(path.join(repositoryPath, 'ide', 'claude-code', 'native', 'settings.json'));
+    fs.rmSync(path.join(repositoryPath, 'common', 'AGENTS.md'));
     await run('--prune-managed');
     expect(fs.existsSync(targetPath)).toBe(false);
     await createProgram(deviceContext('win32')).parseAsync(['node', 'mcv', 'restore']);
