@@ -32,7 +32,19 @@ describe('mcv init', () => {
       platform: 'win32',
       env: { APPDATA: stateRoot },
       pathEnv: '',
-    }).parseAsync(['node', 'mcv', 'init']);
+    }).parseAsync(['node', 'mcv', 'init', '--yes', '--json']);
+
+    expect(console.log).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
+      schemaVersion: 1,
+      operation: 'init',
+      status: 'succeeded',
+      repositoryPath,
+      changes: [],
+      issues: [],
+      nextActions: [],
+      data: { repositoryId: expect.any(String), repositorySchemaVersion: 2 },
+    });
 
     const manifest = parseYaml(
       fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8'),
@@ -72,6 +84,45 @@ describe('mcv init', () => {
         files: {},
       },
     });
+  });
+
+  it('prints a read-only structured Init Plan', async () => {
+    await createProgram({
+      homeDir: stateRoot,
+      platform: 'win32',
+      env: { APPDATA: stateRoot },
+      pathEnv: '',
+    }).parseAsync(['node', 'mcv', 'init', '--dry-run', '--json']);
+
+    expect(console.log).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
+      schemaVersion: 1,
+      operation: 'init',
+      status: 'planned',
+      readyToApply: true,
+      operationId: expect.any(String),
+      preconditions: expect.any(Object),
+      repositoryPath,
+      changes: expect.arrayContaining([
+        expect.objectContaining({ id: 'repository-manifest', kind: 'add' }),
+        expect.objectContaining({ id: 'repository-binding', kind: 'bind' }),
+      ]),
+    });
+    expect(fs.existsSync(path.join(repositoryPath, 'mcv.yaml'))).toBe(false);
+    expect(fs.existsSync(path.join(stateRoot, 'mcv', 'config.json'))).toBe(false);
+  });
+
+  it('does not Apply Init without an explicit --yes', async () => {
+    await createProgram({
+      homeDir: stateRoot,
+      platform: 'win32',
+      env: { APPDATA: stateRoot },
+      pathEnv: '',
+    }).parseAsync(['node', 'mcv', 'init']);
+
+    expect(vi.mocked(console.log).mock.calls[0]?.[0]).toBe(`Init Plan: ${repositoryPath}`);
+    expect(fs.existsSync(path.join(repositoryPath, 'mcv.yaml'))).toBe(false);
+    expect(fs.existsSync(path.join(stateRoot, 'mcv', 'config.json'))).toBe(false);
   });
 
   it('is exposed as the mcv executable in the npm package', () => {

@@ -7,9 +7,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceContext } from '../adapters/types';
 import { readState, writeState } from '../utils/state';
 import {
+  applyInitPlan,
+  applyMigrationPlan,
   applyBindPlan,
   applyUnbindPlan,
   createBindPlan,
+  createInitPlan,
+  createMigrationPlan,
   createUnbindPlan,
   inspectRepository,
 } from './repository';
@@ -437,7 +441,171 @@ describe('Repository operations', () => {
       error: { code: 'repository.unsupportedSchema' },
     });
   });
+
+  it.each([false, true])('plans Init without writes and applies a valid empty Repository (git=%s)', (git) => {
+    const repositoryPath = path.join(testRoot, git ? 'init-git' : 'init-plain');
+    fs.mkdirSync(repositoryPath);
+    if (git) execFileSync('git', ['init'], { cwd: repositoryPath, stdio: 'ignore' });
+
+    const plan = createInitPlan(context, repositoryPath);
+
+    expect(plan).toMatchObject({
+      schemaVersion: 1,
+      operation: 'init',
+      status: 'planned',
+      readyToApply: true,
+      repositoryPath,
+      operationId: expect.any(String),
+      preconditions: {
+        manifest: 'missing',
+        state: 'missing',
+        stateTarget: expect.any(String),
+      },
+      changes: [
+        expect.objectContaining({ id: 'repository-manifest', kind: 'add', path: path.join(repositoryPath, 'mcv.yaml') }),
+        expect.objectContaining({ id: 'repository-binding', kind: 'bind', repositoryPath }),
+      ],
+      issues: [],
+    });
+    expect(fs.existsSync(path.join(repositoryPath, 'mcv.yaml'))).toBe(false);
+    expect(readState(context)).toEqual({});
+
+    const result = applyInitPlan(context, plan);
+
+    expect(result).toMatchObject({
+      operation: 'init',
+      status: 'succeeded',
+      repositoryPath,
+      data: {
+        repositoryId: expect.any(String),
+        repositorySchemaVersion: 2,
+      },
+    });
+    expect(() => readManifestForTest(repositoryPath)).not.toThrow();
+    expect(readState(context)).toMatchObject({
+      defaultRepositoryId: result.status === 'succeeded' ? result.data?.repositoryId : undefined,
+      repositoryPath,
+      baselineSnapshot: { files: {} },
+    });
+  });
+
+  it('rejects a stale Init Plan without overwriting the new target state', () => {
+    const repositoryPath = path.join(testRoot, 'init-stale');
+    fs.mkdirSync(repositoryPath);
+    const plan = createInitPlan(context, repositoryPath);
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), 'owned: elsewhere\n');
+
+    const result = applyInitPlan(context, plan);
+
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'operation.stalePlan' } });
+    expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).toBe('owned: elsewhere\n');
+    expect(readState(context)).toEqual({});
+  });
+
+  it('rejects an Init Plan whose operation ID is not the active in-process Plan', () => {
+    const repositoryPath = path.join(testRoot, 'init-operation-id');
+    fs.mkdirSync(repositoryPath);
+    const plan = createInitPlan(context, repositoryPath);
+
+    const result = applyInitPlan(context, { ...plan, operationId: 'different-operation-id' });
+
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'operation.invalidPlan' } });
+    expect(fs.existsSync(path.join(repositoryPath, 'mcv.yaml'))).toBe(false);
+  });
+
+  it('plans schema migration without writes and applies it only after verifying a backup', () => {
+    const repositoryPath = createV1Repository(testRoot, 'migration-plan');
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    const manifestBefore = fs.readFileSync(manifestPath, 'utf8');
+
+    const plan = createMigrationPlan(context, repositoryPath);
+
+    expect(plan).toMatchObject({
+      schemaVersion: 1,
+      operation: 'migrate',
+      status: 'planned',
+      readyToApply: true,
+      repositoryPath,
+      operationId: expect.any(String),
+      preconditions: { repository: expect.any(String), stateTarget: expect.any(String) },
+      changes: expect.arrayContaining([
+        expect.objectContaining({ id: 'repository-backup', kind: 'backup' }),
+        expect.objectContaining({ id: 'schema-version', kind: 'modify', before: 1, after: 2 }),
+        expect.objectContaining({ id: 'gemini-settings-layout', kind: 'move' }),
+        expect.objectContaining({ id: 'mcp-registry', kind: 'modify' }),
+      ]),
+    });
+    expect(fs.readFileSync(manifestPath, 'utf8')).toBe(manifestBefore);
+    expect(fs.existsSync(path.join(repositoryPath, 'ide', 'gemini', 'native', 'gemini-cli', 'settings.json'))).toBe(false);
+
+    const result = applyMigrationPlan(context, plan);
+
+    expect(result).toMatchObject({
+      operation: 'migrate',
+      status: 'succeeded',
+      repositoryPath,
+      data: {
+        repositoryId: 'migration-plan-id',
+        previousSchemaVersion: 1,
+        repositorySchemaVersion: 2,
+        backupPath: expect.any(String),
+        backupVerified: true,
+      },
+    });
+    if (result.status !== 'succeeded' || !result.data) throw new Error('expected migration success');
+    expect(fs.readFileSync(path.join(result.data.backupPath, 'mcv.yaml'), 'utf8')).toBe(manifestBefore);
+    expect(readManifestForTest(repositoryPath).schemaVersion).toBe(2);
+    expect(fs.existsSync(path.join(repositoryPath, 'ide', 'gemini', 'native', 'gemini-cli', 'settings.json'))).toBe(true);
+    expect(Object.keys(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'common', 'mcp.yaml'), 'utf8')).servers)).toEqual(['user']);
+  });
+
+  it('rejects a stale Migration Plan before backup or repository writes', () => {
+    const repositoryPath = createV1Repository(testRoot, 'migration-stale');
+    const plan = createMigrationPlan(context, repositoryPath);
+    fs.appendFileSync(path.join(repositoryPath, 'mcv.yaml'), '# changed\n');
+
+    const result = applyMigrationPlan(context, plan);
+
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'operation.stalePlan' } });
+    expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).schemaVersion).toBe(1);
+    expect(fs.existsSync(path.join(homeDir, 'mcv', 'repository-backups'))).toBe(false);
+  });
+
+  it('rejects a Migration Plan whose operation ID is not the active in-process Plan', () => {
+    const repositoryPath = createV1Repository(testRoot, 'migration-operation-id');
+    const plan = createMigrationPlan(context, repositoryPath);
+
+    const result = applyMigrationPlan(context, { ...plan, operationId: 'different-operation-id' });
+
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'operation.invalidPlan' } });
+    expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).schemaVersion).toBe(1);
+  });
 });
+
+function readManifestForTest(repositoryPath: string): Record<string, unknown> {
+  return yaml.parse(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')) as Record<string, unknown>;
+}
+
+function createV1Repository(root: string, name: string): string {
+  const repositoryPath = path.join(root, name);
+  fs.mkdirSync(path.join(repositoryPath, 'ide', 'gemini', 'native'), { recursive: true });
+  fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+  fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), yaml.stringify({
+    schemaVersion: 1,
+    repositoryId: `${name}-id`,
+    initializedAt: '2026-07-22T00:00:00.000Z',
+    targets: { gemini: { enabled: true } },
+    customField: 'preserved',
+  }));
+  fs.writeFileSync(path.join(repositoryPath, 'ide', 'gemini', 'native', 'settings.json'), '{}\n');
+  fs.writeFileSync(path.join(repositoryPath, 'common', 'mcp.yaml'), yaml.stringify({
+    servers: {
+      node_repl: { command: 'runtime/node_repl.exe' },
+      user: { command: 'server' },
+    },
+  }));
+  return repositoryPath;
+}
 
 function createRepository(root: string, name: string, repositoryId: string): string {
   const repositoryPath = path.join(root, name);

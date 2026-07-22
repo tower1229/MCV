@@ -1,66 +1,55 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import { v4 as uuidv4 } from 'uuid';
-import * as yaml from 'yaml';
-import { readState, writeState } from '../utils/state';
-import type { McvManifest } from '../utils/repository';
 import type { DeviceContext } from '../adapters/types';
+import {
+  applyInitPlan,
+  createInitPlan,
+  type InitPlan,
+  type InitResult,
+} from '../operations/repository';
+import { renderJson } from '../renderers/json';
+import { renderInitPlain } from '../renderers/repository';
 
-export function initRepository(context: DeviceContext, targetDir: string = process.cwd()): boolean {
-  const repositoryPath = path.resolve(targetDir);
-  const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+export interface InitOptions {
+  dryRun?: boolean;
+  yes?: boolean;
+  json?: boolean;
+}
 
-  if (fs.existsSync(manifestPath)) {
-    console.log('An mcv.yaml manifest already exists in this directory.');
-    console.log('You might want to run `mcv bind` instead to bind this existing repository to your device.');
-    return false;
+export function initRepository(
+  context: DeviceContext,
+  targetDir: string = process.cwd(),
+  options: InitOptions = {},
+): InitPlan | InitResult {
+  const plan = createInitPlan(context, targetDir);
+  if (options.dryRun || !options.yes) {
+    render(plan, options);
+    return plan;
   }
 
-  const repositoryId = uuidv4();
-  const initializedAt = new Date().toISOString();
-  const manifest: McvManifest = {
-    schemaVersion: 2,
-    repositoryId,
-    initializedAt,
-    targets: {
-      codex: { enabled: true },
-      claudeCode: { enabled: true },
-      gemini: {
-        enabled: true,
-        surfaces: { geminiCli: 'auto', antigravity: 'auto' },
-      },
-    },
-    variables: {},
-    security: {
-      scanSecrets: true,
-      allowPlaintextSecrets: false,
-    },
-    capture: {
-      preserveUnknownNativeFields: true,
-    },
-    deploy: {
-      backupBeforeWrite: true,
-      useSymlinks: false,
-    },
+  const result = plan.issues.some((issue) => issue.severity !== 'notice')
+    ? blockedInitResult(plan)
+    : applyInitPlan(context, plan);
+  render(result, options);
+  if (result.status === 'failed') process.exitCode = 1;
+  if (result.status === 'blocked') process.exitCode = 3;
+  return result;
+}
+
+function blockedInitResult(plan: InitPlan): InitResult {
+  return {
+    schemaVersion: plan.schemaVersion,
+    operation: 'init',
+    status: 'blocked',
+    repositoryPath: plan.repositoryPath,
+    changes: [],
+    issues: plan.issues,
+    nextActions: ['Review the Init Plan interactively before applying it.'],
   };
+}
 
-  const yamlStr = yaml.stringify(manifest);
-  fs.writeFileSync(manifestPath, yamlStr, 'utf-8');
-
-  console.log(`Initialized empty MCV repository in ${repositoryPath}`);
-  console.log(`Repository ID: ${repositoryId}`);
-
-  const state = readState(context);
-  state.schemaVersion = 2;
-  state.deviceId ??= uuidv4();
-  state.defaultRepositoryId = repositoryId;
-  state.repositoryPath = repositoryPath;
-  state.baselineSnapshot = {
-    recordedAt: initializedAt,
-    files: {},
-  };
-  writeState(context, state);
-
-  console.log('Successfully bound current device to this MCV repository.');
-  return true;
+function render(contract: InitPlan | InitResult, options: InitOptions): void {
+  if (options.json) {
+    console.log(renderJson(contract));
+    return;
+  }
+  for (const line of renderInitPlain(contract)) console.log(line);
 }

@@ -4,6 +4,7 @@ import { atomicWriteFile, atomicWriteTextFile, hashFile } from '../utils/files';
 import { isRecord } from '../utils/objects';
 import { getStateFilePath, readState, writeState } from '../utils/state';
 import type { DeviceContext } from '../adapters/types';
+import { readManifest } from '../utils/repository';
 
 interface BackupFile {
   action?: 'add' | 'modify' | 'delete';
@@ -16,6 +17,8 @@ interface BackupManifest { createdAt: string; status?: 'pending' | 'complete' | 
 interface BackupCandidate { directory: string; manifest: BackupManifest; }
 
 export function restoreLatestBackup(context: DeviceContext): void {
+  const boundRepositoryPath = readState(context).repositoryPath;
+  if (boundRepositoryPath) readManifest(boundRepositoryPath);
   const stateDirectory = path.dirname(getStateFilePath(context));
   const latest = findLatestBackup(path.join(stateDirectory, 'backups'));
   if (!latest) throw new Error('No deployment backup found.');

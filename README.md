@@ -118,11 +118,11 @@ mcv restore
 ## 命令
 
 ```text
-mcv init       初始化仓库清单，并将当前设备绑定到该仓库
+mcv init       通过 --dry-run 预览 Init Plan，使用 --yes 初始化并绑定仓库；支持 --json
 mcv repo       检查当前 Repository 绑定；支持 --plain/--json
 mcv bind [PATH] 绑定当前目录或显式路径，并校验 manifest/repository ID；支持 --json
 mcv unbind     只移除本机绑定；支持 --json
-mcv migrate    预览或执行 schema v1 → v2 原子迁移
+mcv migrate    通过 --dry-run 预览 Migration Plan，使用 --yes 备份并迁移；支持 --json
 mcv discover   检测 Codex、Claude Code、Gemini 及已知配置路径；支持 --plain/--json
 mcv capture    预览并收集本机配置到 MCV 仓库
 mcv deploy     将仓库配置部署到本机；覆盖前保存本机旧版本

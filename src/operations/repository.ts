@@ -5,6 +5,8 @@ import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import type { DeviceContext } from '../adapters/types';
+import { normalizeMcpServers } from '../core/mcp';
+import { atomicWriteTextFile } from '../utils/files';
 import { isRecord } from '../utils/objects';
 import {
   CURRENT_SCHEMA_VERSION,
@@ -78,7 +80,55 @@ export type UnbindPlan = Plan<RepositoryBindingChange> & {
   operation: 'unbind';
 };
 
+export interface InitChange {
+  id: 'repository-manifest' | 'repository-binding';
+  kind: 'add' | 'bind';
+  path?: string;
+  repositoryPath: string;
+  repositoryId: string;
+  initializedAt?: string;
+  schemaVersion?: typeof CURRENT_SCHEMA_VERSION;
+}
+
+export type InitPlan = Plan<InitChange> & { operation: 'init' };
+
+export interface InitData {
+  repositoryId: string;
+  repositorySchemaVersion: typeof CURRENT_SCHEMA_VERSION;
+}
+
+export type InitResult = Result<InitData, never> & {
+  operation: 'init';
+  changes: [];
+};
+
+export interface MigrationChange {
+  id: string;
+  kind: 'backup' | 'modify' | 'move';
+  path?: string;
+  sourcePath?: string;
+  targetPath?: string;
+  before?: number;
+  after?: number;
+}
+
+export type MigrationPlan = Plan<MigrationChange> & { operation: 'migrate' };
+
+export interface MigrationData {
+  repositoryId: string;
+  previousSchemaVersion: 1;
+  repositorySchemaVersion: typeof CURRENT_SCHEMA_VERSION;
+  backupPath: string;
+  backupVerified: true;
+}
+
+export type MigrationResult = Result<MigrationData, never> & {
+  operation: 'migrate';
+  changes: [];
+};
+
 const activeRepositoryPlans = new WeakMap<object, string>();
+const activeLifecyclePlans = new WeakMap<object, string>();
 
 export function inspectRepository(context: DeviceContext): RepositoryReport {
   const state = readState(context);
@@ -227,6 +277,335 @@ function inspectGitRepository(
   } catch {
     return {};
   }
+}
+
+export function createInitPlan(
+  context: DeviceContext,
+  repositoryPath: string = process.cwd(),
+): InitPlan {
+  const resolvedPath = path.resolve(repositoryPath);
+  const manifestPath = path.join(resolvedPath, 'mcv.yaml');
+  const stateSnapshot = readStateSnapshot(context);
+  const preconditions = {
+    manifest: hashOptionalFile(manifestPath),
+    manifestTarget: hashText(manifestPath),
+    state: stateSnapshot.hash,
+    stateTarget: hashText(stateSnapshot.path),
+  };
+  const operationId = uuidv4();
+  const failed = (error: McvError): InitPlan => freezeLifecyclePlan({
+    schemaVersion: OPERATION_SCHEMA_VERSION,
+    operation: 'init',
+    status: 'failed',
+    readyToApply: false,
+    operationId,
+    preconditions,
+    repositoryPath: resolvedPath,
+    changes: [],
+    issues: [{ severity: 'error', code: error.code, message: error.message }],
+    nextActions: error.nextActions,
+    error,
+  });
+
+  let entries: string[];
+  try {
+    if (!fs.statSync(resolvedPath).isDirectory()) {
+      return failed({
+        code: 'repository.invalidInitTarget',
+        message: 'The Init target is not a directory.',
+        nextActions: ['Choose an existing writable directory.'],
+      });
+    }
+    entries = fs.readdirSync(resolvedPath).filter((entry) => entry !== '.git');
+  } catch (error) {
+    return failed({
+      code: 'repository.invalidInitTarget',
+      message: 'MCV could not inspect the Init target directory.',
+      technicalDetails: error instanceof Error ? error.message : String(error),
+      nextActions: ['Choose an existing writable directory and try again.'],
+    });
+  }
+  if (preconditions.manifest !== 'missing') {
+    return failed({
+      code: 'repository.alreadyInitialized',
+      message: 'An mcv.yaml manifest already exists in this directory.',
+      nextActions: ['Run `mcv bind [path]` to bind the existing Repository.'],
+    });
+  }
+  if (stateSnapshot.state.repositoryPath || stateSnapshot.state.defaultRepositoryId) {
+    return failed({
+      code: 'repository.alreadyBound',
+      message: 'This device is already bound to an MCV Repository.',
+      nextActions: ['Run `mcv unbind` before initializing a different Repository.'],
+    });
+  }
+
+  const repositoryId = uuidv4();
+  const initializedAt = new Date().toISOString();
+  const issues: Issue[] = entries.length === 0 ? [] : [{
+    severity: 'warning',
+    code: 'repository.initTargetNotEmpty',
+    message: 'The Init target contains existing files that MCV will leave unchanged.',
+    details: `${entries.length} existing entr${entries.length === 1 ? 'y' : 'ies'}.`,
+  }];
+  return registerLifecyclePlan({
+    schemaVersion: OPERATION_SCHEMA_VERSION,
+    operation: 'init',
+    status: 'planned',
+    readyToApply: true,
+    operationId,
+    preconditions,
+    repositoryPath: resolvedPath,
+    changes: [{
+      id: 'repository-manifest',
+      kind: 'add',
+      path: manifestPath,
+      repositoryPath: resolvedPath,
+      repositoryId,
+      initializedAt,
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+    }, {
+      id: 'repository-binding',
+      kind: 'bind',
+      repositoryPath: resolvedPath,
+      repositoryId,
+    }],
+    issues,
+    nextActions: [],
+  });
+}
+
+export function applyInitPlan(context: DeviceContext, plan: InitPlan): InitResult {
+  if (plan.status === 'failed') return failedInitResult(plan.repositoryPath, plan.error, plan.issues);
+  const validation = validateLifecyclePlan(context, plan);
+  if ('error' in validation) return failedInitResult(plan.repositoryPath, validation.error);
+  const manifestChange = plan.changes.find((change) => change.id === 'repository-manifest');
+  const bindingChange = plan.changes.find((change) => change.id === 'repository-binding');
+  if (!manifestChange?.path || !manifestChange.initializedAt || !bindingChange) {
+    return failedInitResult(plan.repositoryPath, {
+      code: 'operation.invalidPlan',
+      message: 'The Init Plan does not contain the required manifest and binding changes.',
+      nextActions: ['Generate a new Init Plan.'],
+    });
+  }
+
+  const manifest = createEmptyManifest(manifestChange.repositoryId, manifestChange.initializedAt);
+  const state = validation.state;
+  state.schemaVersion = 2;
+  state.deviceId ??= uuidv4();
+  state.defaultRepositoryId = bindingChange.repositoryId;
+  state.repositoryPath = bindingChange.repositoryPath;
+  state.baselineSnapshot = { recordedAt: manifestChange.initializedAt, files: {} };
+  let manifestWritten = false;
+  try {
+    atomicWriteTextFile(manifestChange.path, yaml.stringify(manifest));
+    manifestWritten = true;
+    writeState(context, state);
+  } catch (error) {
+    if (manifestWritten) {
+      try { fs.rmSync(manifestChange.path, { force: true }); } catch { /* best effort rollback */ }
+    }
+    return failedInitResult(plan.repositoryPath, {
+      code: 'repository.initWriteFailed',
+      message: 'MCV could not initialize and bind the Repository.',
+      technicalDetails: error instanceof Error ? error.message : String(error),
+      nextActions: ['Check directory permissions and generate a new Init Plan.'],
+    });
+  } finally {
+    activeLifecyclePlans.delete(plan);
+  }
+  return {
+    schemaVersion: OPERATION_SCHEMA_VERSION,
+    operation: 'init',
+    status: 'succeeded',
+    repositoryPath: bindingChange.repositoryPath,
+    changes: [],
+    issues: [],
+    nextActions: [],
+    data: {
+      repositoryId: bindingChange.repositoryId,
+      repositorySchemaVersion: CURRENT_SCHEMA_VERSION,
+    },
+  };
+}
+
+export function createMigrationPlan(
+  context: DeviceContext,
+  repositoryPath: string = process.cwd(),
+): MigrationPlan {
+  const resolvedPath = path.resolve(repositoryPath);
+  const operationId = uuidv4();
+  const preconditions = {
+    repository: hashDirectory(resolvedPath),
+    repositoryTarget: hashText(resolvedPath),
+    stateTarget: hashText(path.dirname(getStateFilePath(context))),
+  };
+  const failed = (error: McvError): MigrationPlan => freezeLifecyclePlan({
+    schemaVersion: OPERATION_SCHEMA_VERSION,
+    operation: 'migrate',
+    status: 'failed',
+    readyToApply: false,
+    operationId,
+    preconditions,
+    repositoryPath: resolvedPath,
+    changes: [],
+    issues: [{ severity: 'error', code: error.code, message: error.message }],
+    nextActions: error.nextActions,
+    error,
+  });
+
+  const manifestPath = path.join(resolvedPath, 'mcv.yaml');
+  let raw: Record<string, unknown>;
+  try {
+    const parsed = yaml.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown;
+    if (!isRecord(parsed)) throw new Error(`${manifestPath} must contain a YAML object.`);
+    raw = parsed;
+  } catch (error) {
+    return failed({
+      code: 'repository.invalidManifest',
+      message: 'The selected directory does not contain a readable MCV Repository manifest.',
+      technicalDetails: error instanceof Error ? error.message : String(error),
+      nextActions: ['Choose a Repository containing a schema v1 mcv.yaml manifest.'],
+    });
+  }
+  if (raw.schemaVersion !== 1) {
+    const current = raw.schemaVersion === CURRENT_SCHEMA_VERSION;
+    return failed({
+      code: current ? 'repository.migrationNotRequired' : 'repository.unsupportedSchema',
+      message: current
+        ? 'This Repository already uses the current schema.'
+        : `Repository schema ${String(raw.schemaVersion)} is not supported by this MCV version.`,
+      nextActions: current
+        ? ['Continue with the requested Repository operation.']
+        : ['Update MCV to a version that supports this Repository schema.'],
+    });
+  }
+  if (typeof raw.repositoryId !== 'string' || raw.repositoryId.length === 0) {
+    return failed({
+      code: 'repository.invalidManifest',
+      message: 'The schema v1 manifest does not contain a Repository ID.',
+      nextActions: ['Repair repositoryId in mcv.yaml before migrating.'],
+    });
+  }
+
+  const changes: MigrationChange[] = [{
+    id: 'repository-backup',
+    kind: 'backup',
+    path: path.join(path.dirname(getStateFilePath(context)), 'repository-backups'),
+  }, {
+    id: 'schema-version',
+    kind: 'modify',
+    path: manifestPath,
+    before: 1,
+    after: CURRENT_SCHEMA_VERSION,
+  }];
+  for (const mapping of geminiLayoutMappings(resolvedPath)) {
+    if (fs.existsSync(mapping.sourcePath) && !fs.existsSync(mapping.targetPath)) {
+      changes.push({ id: mapping.id, kind: 'move', sourcePath: mapping.sourcePath, targetPath: mapping.targetPath });
+    }
+  }
+  const registryPath = path.join(resolvedPath, 'common', 'mcp.yaml');
+  const normalizedRegistry = readNormalizedMcpRegistry(registryPath);
+  if (normalizedRegistry !== undefined && normalizedRegistry !== fs.readFileSync(registryPath, 'utf8')) {
+    changes.push({ id: 'mcp-registry', kind: 'modify', path: registryPath });
+  }
+  return registerLifecyclePlan({
+    schemaVersion: OPERATION_SCHEMA_VERSION,
+    operation: 'migrate',
+    status: 'planned',
+    readyToApply: true,
+    operationId,
+    preconditions,
+    repositoryPath: resolvedPath,
+    changes,
+    issues: [],
+    nextActions: [],
+  });
+}
+
+export function applyMigrationPlan(
+  context: DeviceContext,
+  plan: MigrationPlan,
+): MigrationResult {
+  if (plan.status === 'failed') return failedMigrationResult(plan.repositoryPath, plan.error, plan.issues);
+  const validation = validateLifecyclePlan(context, plan);
+  if ('error' in validation) return failedMigrationResult(plan.repositoryPath, validation.error);
+  if (!plan.repositoryPath) {
+    return failedMigrationResult(null, {
+      code: 'operation.invalidPlan',
+      message: 'The Migration Plan does not identify a Repository.',
+      nextActions: ['Generate a new Migration Plan.'],
+    });
+  }
+
+  const repositoryPath = plan.repositoryPath;
+  const backupRoot = path.join(path.dirname(getStateFilePath(context)), 'repository-backups');
+  let backupPath: string | undefined;
+  let backupVerified = false;
+  try {
+    fs.mkdirSync(backupRoot, { recursive: true });
+    const backupDirectory = fs.mkdtempSync(path.join(backupRoot, 'schema-v1-'));
+    backupPath = path.join(backupDirectory, 'repository');
+    fs.cpSync(repositoryPath, backupPath, { recursive: true, verbatimSymlinks: true });
+    if (hashDirectory(backupPath) !== plan.preconditions.repository) {
+      throw new Error('The Repository backup did not match the planned source snapshot.');
+    }
+    backupVerified = true;
+
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    const raw = yaml.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown;
+    if (!isRecord(raw) || raw.schemaVersion !== 1) throw new Error('The Repository is no longer schema v1.');
+    const migrated = migrateV1Manifest(raw);
+    validateManifest(migrated as unknown as Record<string, unknown>, manifestPath);
+    for (const change of plan.changes) {
+      if (change.kind === 'move' && change.sourcePath && change.targetPath) {
+        fs.mkdirSync(path.dirname(change.targetPath), { recursive: true });
+        fs.renameSync(change.sourcePath, change.targetPath);
+      }
+      if (change.id === 'mcp-registry' && change.path) {
+        const content = readNormalizedMcpRegistry(change.path);
+        if (content === undefined) throw new Error('The MCP registry can no longer be normalized.');
+        atomicWriteTextFile(change.path, content);
+      }
+    }
+    atomicWriteTextFile(manifestPath, yaml.stringify(migrated));
+    readManifest(repositoryPath);
+  } catch (error) {
+    if (backupVerified && backupPath && fs.existsSync(backupPath)) {
+      try {
+        fs.rmSync(repositoryPath, { recursive: true, force: true });
+        fs.cpSync(backupPath, repositoryPath, { recursive: true, verbatimSymlinks: true });
+      } catch { /* preserve the verified backup for manual recovery */ }
+    }
+    return failedMigrationResult(repositoryPath, {
+      code: 'repository.migrationFailed',
+      message: 'MCV could not back up and migrate the Repository safely.',
+      technicalDetails: error instanceof Error ? error.message : String(error),
+      nextActions: backupVerified && backupPath
+        ? [`Recover the Repository from ${backupPath} before retrying.`]
+        : ['Check local state and Repository permissions before retrying.'],
+    });
+  } finally {
+    activeLifecyclePlans.delete(plan);
+  }
+
+  const manifest = readManifest(repositoryPath);
+  return {
+    schemaVersion: OPERATION_SCHEMA_VERSION,
+    operation: 'migrate',
+    status: 'succeeded',
+    repositoryPath,
+    changes: [],
+    issues: [],
+    nextActions: [],
+    data: {
+      repositoryId: manifest.repositoryId,
+      previousSchemaVersion: 1,
+      repositorySchemaVersion: CURRENT_SCHEMA_VERSION,
+      backupPath: backupPath as string,
+      backupVerified: true,
+    },
+  };
 }
 
 export function createBindPlan(
@@ -683,4 +1062,202 @@ function inspectManifestIdentity(repositoryPath: string): {
   } catch {
     return { repositoryId: null, schemaVersion: null };
   }
+}
+
+function createEmptyManifest(repositoryId: string, initializedAt: string): McvManifest {
+  return {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    repositoryId,
+    initializedAt,
+    targets: {
+      codex: { enabled: true },
+      claudeCode: { enabled: true },
+      gemini: {
+        enabled: true,
+        surfaces: { geminiCli: 'auto', antigravity: 'auto' },
+      },
+    },
+    variables: {},
+    security: { scanSecrets: true, allowPlaintextSecrets: false },
+    capture: { preserveUnknownNativeFields: true },
+    deploy: { backupBeforeWrite: true, useSymlinks: false },
+  };
+}
+
+function migrateV1Manifest(raw: Record<string, unknown>): McvManifest {
+  const targets = isRecord(raw.targets) ? raw.targets : {};
+  const gemini = isRecord(targets.gemini) ? targets.gemini : {};
+  const migrated = {
+    ...raw,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    repositoryId: String(raw.repositoryId),
+    initializedAt: typeof raw.initializedAt === 'string' ? raw.initializedAt : new Date().toISOString(),
+    targets: {
+      ...targets,
+      codex: {
+        ...(isRecord(targets.codex) ? targets.codex : {}),
+        enabled: isRecord(targets.codex) ? targets.codex.enabled !== false : true,
+      },
+      claudeCode: {
+        ...(isRecord(targets.claudeCode) ? targets.claudeCode : {}),
+        enabled: isRecord(targets.claudeCode) ? targets.claudeCode.enabled !== false : true,
+      },
+      gemini: {
+        ...gemini,
+        enabled: gemini.enabled !== false,
+        surfaces: { geminiCli: 'auto', antigravity: 'auto' },
+      },
+    },
+    variables: isRecord(raw.variables) ? raw.variables : {},
+    security: { scanSecrets: true, allowPlaintextSecrets: false },
+    capture: {
+      preserveUnknownNativeFields: !isRecord(raw.capture)
+        || raw.capture.preserveUnknownNativeFields !== false,
+    },
+    deploy: { backupBeforeWrite: true, useSymlinks: false },
+  } as unknown as McvManifest;
+  delete (migrated as unknown as Record<string, unknown>).includeRuntimeState;
+  delete (migrated as unknown as Record<string, unknown>).allowPlaintextSecrets;
+  return migrated;
+}
+
+function geminiLayoutMappings(repositoryPath: string): Array<{
+  id: string;
+  sourcePath: string;
+  targetPath: string;
+}> {
+  const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native');
+  return [
+    { id: 'gemini-settings-layout', sourcePath: path.join(nativeRoot, 'settings.json'), targetPath: path.join(nativeRoot, 'gemini-cli', 'settings.json') },
+    { id: 'antigravity-config-layout', sourcePath: path.join(nativeRoot, 'config.json'), targetPath: path.join(nativeRoot, 'antigravity', 'config.json') },
+    { id: 'antigravity-mcp-layout', sourcePath: path.join(nativeRoot, 'mcp_config.json'), targetPath: path.join(nativeRoot, 'antigravity', 'mcp_config.json') },
+  ];
+}
+
+function readNormalizedMcpRegistry(registryPath: string): string | undefined {
+  if (!fs.existsSync(registryPath)) return undefined;
+  const registry = yaml.parse(fs.readFileSync(registryPath, 'utf8')) as unknown;
+  if (!isRecord(registry) || !isRecord(registry.servers)) return undefined;
+  const normalized = normalizeMcpServers(registry.servers, 'codex');
+  return yaml.stringify({ ...registry, servers: normalized.servers });
+}
+
+function hashDirectory(root: string): string {
+  const hash = createHash('sha256');
+  const visit = (current: string, relative: string): void => {
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink()) {
+      hash.update(`link\0${relative}\0${fs.readlinkSync(current)}\0`);
+      return;
+    }
+    if (stat.isDirectory()) {
+      hash.update(`directory\0${relative}\0`);
+      for (const entry of fs.readdirSync(current).sort()) {
+        visit(path.join(current, entry), relative ? `${relative}/${entry}` : entry);
+      }
+      return;
+    }
+    if (stat.isFile()) {
+      hash.update(`file\0${relative}\0`);
+      hash.update(fs.readFileSync(current));
+      hash.update('\0');
+      return;
+    }
+    hash.update(`other\0${relative}\0`);
+  };
+  try {
+    visit(root, '');
+    return hash.digest('hex');
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unreadable';
+  }
+}
+
+function registerLifecyclePlan<T extends InitPlan | MigrationPlan>(plan: T): T {
+  freezeLifecyclePlan(plan);
+  activeLifecyclePlans.set(plan, plan.operationId);
+  return plan;
+}
+
+function freezeLifecyclePlan<T extends InitPlan | MigrationPlan>(plan: T): T {
+  for (const change of plan.changes) Object.freeze(change);
+  Object.freeze(plan.changes);
+  for (const issue of plan.issues) Object.freeze(issue);
+  Object.freeze(plan.issues);
+  Object.freeze(plan.nextActions);
+  Object.freeze(plan.preconditions);
+  if (plan.status === 'failed') {
+    Object.freeze(plan.error.nextActions);
+    Object.freeze(plan.error);
+  }
+  Object.freeze(plan);
+  return plan;
+}
+
+function validateLifecyclePlan(
+  context: DeviceContext,
+  plan: InitPlan | MigrationPlan,
+): { state: McvState } | { error: McvError } {
+  if (activeLifecyclePlans.get(plan) !== plan.operationId) {
+    return { error: {
+      code: 'operation.invalidPlan',
+      message: 'The Repository lifecycle Plan is not the active in-process Plan.',
+      nextActions: [`Generate a new ${plan.operation === 'init' ? 'Init' : 'Migration'} Plan.`],
+    } };
+  }
+  if (plan.operation === 'init') {
+    const stateSnapshot = readStateSnapshot(context);
+    const manifestPath = plan.repositoryPath ? path.join(plan.repositoryPath, 'mcv.yaml') : '';
+    const stale = hashText(stateSnapshot.path) !== plan.preconditions.stateTarget
+      || stateSnapshot.hash !== plan.preconditions.state
+      || hashText(manifestPath) !== plan.preconditions.manifestTarget
+      || hashOptionalFile(manifestPath) !== plan.preconditions.manifest;
+    if (!stale) return { state: stateSnapshot.state };
+  } else {
+    const backupTarget = path.dirname(getStateFilePath(context));
+    const stale = hashText(plan.repositoryPath ?? '') !== plan.preconditions.repositoryTarget
+      || hashText(backupTarget) !== plan.preconditions.stateTarget
+      || hashDirectory(plan.repositoryPath ?? '') !== plan.preconditions.repository;
+    if (!stale) return { state: readState(context) };
+  }
+  activeLifecyclePlans.delete(plan);
+  return { error: {
+    code: 'operation.stalePlan',
+    message: 'Repository or local binding state changed after the Plan was generated.',
+    nextActions: [`Generate and review a new ${plan.operation === 'init' ? 'Init' : 'Migration'} Plan.`],
+  } };
+}
+
+function failedInitResult(
+  repositoryPath: string | null,
+  error: McvError,
+  issues: Issue[] = [{ severity: 'error', code: error.code, message: error.message }],
+): InitResult {
+  return {
+    schemaVersion: OPERATION_SCHEMA_VERSION,
+    operation: 'init',
+    status: 'failed',
+    repositoryPath,
+    changes: [],
+    issues,
+    nextActions: error.nextActions,
+    error,
+  };
+}
+
+function failedMigrationResult(
+  repositoryPath: string | null,
+  error: McvError,
+  issues: Issue[] = [{ severity: 'error', code: error.code, message: error.message }],
+): MigrationResult {
+  return {
+    schemaVersion: OPERATION_SCHEMA_VERSION,
+    operation: 'migrate',
+    status: 'failed',
+    repositoryPath,
+    changes: [],
+    issues,
+    nextActions: error.nextActions,
+    error,
+  };
 }

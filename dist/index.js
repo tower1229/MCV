@@ -61,12 +61,16 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         .name('mcv')
         .description('Mobile Configuration Vehicle - Personal AI IDE configuration manager')
         .version(packageVersion);
-    program
+    const initCommand = program
         .command('init')
         .description('Initialize a new MCV repository in the current directory')
-        .action(async () => {
-        const initialized = (0, init_1.initRepository)(context);
-        if (!initialized || !process.stdin.isTTY)
+        .option('--dry-run', 'Preview initialization without writing')
+        .option('--yes', 'Initialize without prompting after reviewing a dry-run')
+        .option('--json', 'Print one machine-readable Plan or Result')
+        .action(async (options) => {
+        validateWriteOutputOptions(initCommand, options);
+        const result = (0, init_1.initRepository)(context, process.cwd(), options);
+        if (result.status !== 'succeeded' || !process.stdin.isTTY)
             return;
         await (0, discover_1.discoverConfigurations)(context);
         const prompt = (0, promises_1.createInterface)({ input: process.stdin, output: process.stdout });
@@ -146,9 +150,14 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         .action((options) => {
         (0, binding_1.unbind)(context, options);
     });
-    program.command('migrate [path]').description('Migrate a v1 repository to schema v2')
+    const migrateCommand = program.command('migrate [path]').description('Migrate a v1 repository to schema v2')
         .option('--dry-run', 'Preview migration without writing')
-        .action((repositoryPath = process.cwd(), options) => (0, binding_1.migrate)(context, repositoryPath, options.dryRun === true));
+        .option('--yes', 'Migrate without prompting after reviewing a dry-run')
+        .option('--json', 'Print one machine-readable Plan or Result')
+        .action((repositoryPath = process.cwd(), options) => {
+        validateWriteOutputOptions(migrateCommand, options);
+        (0, binding_1.migrate)(context, repositoryPath, options);
+    });
     program.action(async () => {
         if (!process.stdin.isTTY) {
             program.outputHelp();
@@ -175,6 +184,20 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
             await createProgram(context, captureDependencies, deployDependencies).parseAsync(['node', 'mcv', command]);
     });
     return program;
+}
+function validateWriteOutputOptions(command, options) {
+    if (options.dryRun && options.yes) {
+        command.error("options '--dry-run' and '--yes' cannot be used together", {
+            exitCode: 2,
+            code: 'mcv.conflictingWriteModes',
+        });
+    }
+    if (options.json && !options.dryRun && !options.yes) {
+        command.error("option '--json' requires '--dry-run' or '--yes'", {
+            exitCode: 2,
+            code: 'mcv.missingWriteMode',
+        });
+    }
 }
 if (require.main === module) {
     createProgram().parse();

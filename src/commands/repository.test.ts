@@ -94,6 +94,56 @@ describe('mcv Repository routes', () => {
     expect(readState(context())).not.toHaveProperty('repositoryPath');
     expect(readState(context())).not.toHaveProperty('defaultRepositoryId');
   });
+
+  it('renders a Migration Plan and Result as structured JSON', async () => {
+    const oldRepository = path.join(testRoot, 'old-repository');
+    fs.mkdirSync(oldRepository);
+    fs.writeFileSync(path.join(oldRepository, 'mcv.yaml'), yaml.stringify({
+      schemaVersion: 1,
+      repositoryId: 'old-repository-id',
+      initializedAt: '2026-07-22T00:00:00.000Z',
+      targets: {},
+    }));
+
+    await createProgram(context()).parseAsync(['node', 'mcv', 'migrate', oldRepository, '--dry-run', '--json']);
+    expect(console.log).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
+      operation: 'migrate',
+      status: 'planned',
+      readyToApply: true,
+      repositoryPath: oldRepository,
+      changes: expect.arrayContaining([
+        expect.objectContaining({ id: 'repository-backup', kind: 'backup' }),
+        expect.objectContaining({ id: 'schema-version', before: 1, after: 2 }),
+      ]),
+    });
+    expect(yaml.parse(fs.readFileSync(path.join(oldRepository, 'mcv.yaml'), 'utf8')).schemaVersion).toBe(1);
+
+    vi.mocked(console.log).mockClear();
+    await createProgram(context()).parseAsync(['node', 'mcv', 'migrate', oldRepository, '--yes', '--json']);
+    expect(console.log).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
+      operation: 'migrate',
+      status: 'succeeded',
+      repositoryPath: oldRepository,
+      data: { previousSchemaVersion: 1, repositorySchemaVersion: 2, backupVerified: true },
+    });
+  });
+
+  it('does not Apply Migration without an explicit --yes', async () => {
+    const oldRepository = path.join(testRoot, 'old-repository-no-mode');
+    fs.mkdirSync(oldRepository);
+    fs.writeFileSync(path.join(oldRepository, 'mcv.yaml'), yaml.stringify({
+      schemaVersion: 1,
+      repositoryId: 'old-repository-no-mode-id',
+      targets: {},
+    }));
+
+    await createProgram(context()).parseAsync(['node', 'mcv', 'migrate', oldRepository]);
+
+    expect(vi.mocked(console.log).mock.calls[0]?.[0]).toBe(`Migration Plan: ${oldRepository}`);
+    expect(yaml.parse(fs.readFileSync(path.join(oldRepository, 'mcv.yaml'), 'utf8')).schemaVersion).toBe(1);
+  });
 });
 
 function createRepository(root: string, name: string, repositoryId: string): string {

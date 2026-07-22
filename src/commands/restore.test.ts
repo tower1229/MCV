@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProgram } from '../index';
+import { writeState } from '../utils/state';
 
 describe('mcv restore', () => {
   const originalCwd = process.cwd();
@@ -69,5 +70,20 @@ describe('mcv restore', () => {
     await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
       .parseAsync(['node', 'mcv', 'restore']);
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('safe backup');
+  });
+
+  it('blocks Restore while the bound Repository still uses an old schema', async () => {
+    const repositoryPath = path.join(testRoot, 'old-repository');
+    fs.mkdirSync(repositoryPath);
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), 'schemaVersion: 1\nrepositoryId: old-repository-id\n');
+    const context = { homeDir: stateRoot, platform: 'win32' as const, env: { APPDATA: stateRoot } };
+    writeState(context, {
+      schemaVersion: 2,
+      repositoryPath,
+      defaultRepositoryId: 'old-repository-id',
+    });
+
+    await expect(createProgram(context).parseAsync(['node', 'mcv', 'restore']))
+      .rejects.toThrow('Repository schema 1 requires migration');
   });
 });

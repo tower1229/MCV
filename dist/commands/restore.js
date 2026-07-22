@@ -39,7 +39,11 @@ const path = __importStar(require("path"));
 const files_1 = require("../utils/files");
 const objects_1 = require("../utils/objects");
 const state_1 = require("../utils/state");
+const repository_1 = require("../utils/repository");
 function restoreLatestBackup(context) {
+    const boundRepositoryPath = (0, state_1.readState)(context).repositoryPath;
+    if (boundRepositoryPath)
+        (0, repository_1.readManifest)(boundRepositoryPath);
     const stateDirectory = path.dirname((0, state_1.getStateFilePath)(context));
     const latest = findLatestBackup(path.join(stateDirectory, 'backups'));
     if (!latest)

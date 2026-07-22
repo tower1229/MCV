@@ -104,4 +104,78 @@ describe('packaged mcv CLI', () => {
       fs.rmSync(isolatedRoot, { recursive: true, force: true });
     }
   });
+
+  it('prints one read-only Init Plan JSON document', () => {
+    const isolatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-init-'));
+    const repositoryPath = path.join(isolatedRoot, 'repository');
+    fs.mkdirSync(repositoryPath);
+    const resolvedRepositoryPath = fs.realpathSync(repositoryPath);
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [cliPath, 'init', '--dry-run', '--json'],
+        {
+          cwd: repositoryPath,
+          encoding: 'utf8',
+          env: { ...process.env, HOME: isolatedRoot, APPDATA: isolatedRoot },
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
+        schemaVersion: 1,
+        operation: 'init',
+        status: 'planned',
+        readyToApply: true,
+        repositoryPath: resolvedRepositoryPath,
+        operationId: expect.any(String),
+      }));
+      expect(fs.existsSync(path.join(repositoryPath, 'mcv.yaml'))).toBe(false);
+    } finally {
+      fs.rmSync(isolatedRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('prints one Migration Result JSON document after a verified backup', () => {
+    const isolatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-migrate-'));
+    const repositoryPath = path.join(isolatedRoot, 'repository');
+    fs.mkdirSync(repositoryPath);
+    const resolvedRepositoryPath = fs.realpathSync(repositoryPath);
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 1',
+      'repositoryId: process-migration-id',
+      'initializedAt: 2026-07-22T00:00:00.000Z',
+      'targets: {}',
+      '',
+    ].join('\n'));
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [cliPath, 'migrate', '--yes', '--json'],
+        {
+          cwd: repositoryPath,
+          encoding: 'utf8',
+          env: { ...process.env, HOME: isolatedRoot, APPDATA: isolatedRoot },
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
+        schemaVersion: 1,
+        operation: 'migrate',
+        status: 'succeeded',
+        repositoryPath: resolvedRepositoryPath,
+        data: expect.objectContaining({
+          previousSchemaVersion: 1,
+          repositorySchemaVersion: 2,
+          backupVerified: true,
+        }),
+      }));
+      expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).toContain('schemaVersion: 2');
+    } finally {
+      fs.rmSync(isolatedRoot, { recursive: true, force: true });
+    }
+  });
 });

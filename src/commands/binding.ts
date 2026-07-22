@@ -1,17 +1,21 @@
-import { migrateRepository } from '../utils/repository';
 import type { DeviceContext } from '../adapters/types';
 import {
+  applyMigrationPlan,
   applyBindPlan,
   applyUnbindPlan,
   createBindPlan,
+  createMigrationPlan,
   createUnbindPlan,
   inspectRepository,
   type BindResult,
+  type MigrationPlan,
+  type MigrationResult,
   type RepositoryReport,
   type UnbindResult,
 } from '../operations/repository';
 import {
   renderBindPlain,
+  renderMigrationPlain,
   renderRepositoryPlain,
   renderUnbindPlain,
 } from '../renderers/repository';
@@ -19,6 +23,7 @@ import { renderJson } from '../renderers/json';
 
 export interface RepositoryOutputOptions {
   json?: boolean;
+  yes?: boolean;
 }
 
 export function showRepository(
@@ -51,9 +56,19 @@ export function unbind(
   return result;
 }
 
-export function migrate(context: DeviceContext, repositoryPath: string, dryRun: boolean): void {
-  const manifest = migrateRepository(context, repositoryPath, dryRun);
-  console.log(`${dryRun ? 'Migration preview' : 'Migrated repository'}: schema v${manifest.schemaVersion}`);
+export function migrate(
+  context: DeviceContext,
+  repositoryPath: string,
+  options: RepositoryOutputOptions & { dryRun?: boolean } = {},
+): MigrationPlan | MigrationResult {
+  const plan = createMigrationPlan(context, repositoryPath);
+  const contract = options.dryRun || !options.yes
+    ? plan
+    : applyMigrationPlan(context, plan);
+  if (options.json) console.log(renderJson(contract));
+  else for (const line of renderMigrationPlain(contract)) console.log(line);
+  if (contract.status === 'failed') process.exitCode = 1;
+  return contract;
 }
 
 function render<T extends RepositoryReport | BindResult | UnbindResult>(

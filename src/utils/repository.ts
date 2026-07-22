@@ -1,10 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { atomicWriteTextFile } from './files';
-import { getStateFilePath, readState } from './state';
+import { readState } from './state';
 import { isRecord } from './objects';
-import { normalizeMcpServers } from '../core/mcp';
 import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020';
 import type { DeviceContext } from '../adapters/types';
 
@@ -72,82 +70,4 @@ export function resolveBoundRepository(context: DeviceContext, explicitPath?: st
     throw new Error('Bound repository ID does not match local state. Run `mcv bind <path>` again.');
   }
   return candidate;
-}
-
-export function migrateRepository(context: DeviceContext, repositoryPath: string, dryRun: boolean): McvManifest {
-  const manifestPath = path.join(repositoryPath, 'mcv.yaml');
-  if (!fs.existsSync(manifestPath)) throw new Error(`${repositoryPath} does not contain mcv.yaml.`);
-  const raw = yaml.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown;
-  if (!isRecord(raw)) throw new Error(`${manifestPath} must contain a YAML object.`);
-  if (raw.schemaVersion === 2) {
-    validateManifest(raw, manifestPath);
-    return raw as unknown as McvManifest;
-  }
-  if (raw.schemaVersion !== 1) throw new Error(`Unsupported repository schema ${String(raw.schemaVersion)}.`);
-  const targets = isRecord(raw.targets) ? raw.targets : {};
-  const gemini = isRecord(targets.gemini) ? targets.gemini : {};
-  const migrated = {
-    ...raw,
-    schemaVersion: 2,
-    repositoryId: String(raw.repositoryId),
-    initializedAt: typeof raw.initializedAt === 'string' ? raw.initializedAt : new Date().toISOString(),
-    targets: {
-      ...targets,
-      codex: { ...(isRecord(targets.codex) ? targets.codex : {}), enabled: isRecord(targets.codex) ? targets.codex.enabled !== false : true },
-      claudeCode: { ...(isRecord(targets.claudeCode) ? targets.claudeCode : {}), enabled: isRecord(targets.claudeCode) ? targets.claudeCode.enabled !== false : true },
-      gemini: {
-        ...gemini,
-        enabled: gemini.enabled !== false,
-        surfaces: { geminiCli: 'auto', antigravity: 'auto' },
-      },
-    },
-    variables: isRecord(raw.variables) ? raw.variables : {},
-    security: { scanSecrets: true, allowPlaintextSecrets: false },
-    capture: {
-      preserveUnknownNativeFields: !isRecord(raw.capture) || raw.capture.preserveUnknownNativeFields !== false,
-    },
-    deploy: { backupBeforeWrite: true, useSymlinks: false },
-  } as unknown as McvManifest;
-  delete (migrated as unknown as Record<string, unknown>).includeRuntimeState;
-  delete (migrated as unknown as Record<string, unknown>).allowPlaintextSecrets;
-  if (dryRun) return migrated;
-  const backupRoot = path.join(path.dirname(getStateFilePath(context)), 'repository-backups');
-  fs.mkdirSync(backupRoot, { recursive: true });
-  const backupDirectory = fs.mkdtempSync(path.join(backupRoot, 'schema-v1-'));
-  const backupPath = path.join(backupDirectory, 'repository');
-  fs.cpSync(repositoryPath, backupPath, { recursive: true });
-  try {
-    migrateGeminiNativeLayout(repositoryPath);
-    migrateMcpRegistry(repositoryPath);
-    atomicWriteTextFile(manifestPath, yaml.stringify(migrated));
-  } catch (error) {
-    fs.cpSync(backupPath, repositoryPath, { recursive: true, force: true });
-    throw error;
-  }
-  return migrated;
-}
-
-function migrateGeminiNativeLayout(repositoryPath: string): void {
-  const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native');
-  const mappings = [
-    ['settings.json', path.join('gemini-cli', 'settings.json')],
-    ['config.json', path.join('antigravity', 'config.json')],
-    ['mcp_config.json', path.join('antigravity', 'mcp_config.json')],
-  ];
-  for (const [legacy, current] of mappings) {
-    const source = path.join(nativeRoot, legacy);
-    const destination = path.join(nativeRoot, current);
-    if (!fs.existsSync(source) || fs.existsSync(destination)) continue;
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.renameSync(source, destination);
-  }
-}
-
-function migrateMcpRegistry(repositoryPath: string): void {
-  const registryPath = path.join(repositoryPath, 'common', 'mcp.yaml');
-  if (!fs.existsSync(registryPath)) return;
-  const registry = yaml.parse(fs.readFileSync(registryPath, 'utf8')) as unknown;
-  if (!isRecord(registry) || !isRecord(registry.servers)) return;
-  const normalized = normalizeMcpServers(registry.servers, 'codex');
-  atomicWriteTextFile(registryPath, yaml.stringify({ ...registry, servers: normalized.servers }));
 }

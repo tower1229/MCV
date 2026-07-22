@@ -50,13 +50,13 @@ describe('mcv init interaction', () => {
           return false;
         },
       },
-    ).parseAsync(['node', 'mcv', 'init']);
+    ).parseAsync(['node', 'mcv', 'init', '--yes']);
   });
 
   it('closes the main menu prompt before a selected command starts reading terminal input', async () => {
     const context = { homeDir, platform: 'darwin' as const, env: {}, pathEnv: '' };
     Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: false });
-    await createProgram(context).parseAsync(['node', 'mcv', 'init']);
+    await createProgram(context).parseAsync(['node', 'mcv', 'init', '--yes']);
     Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
     terminalPrompt.question.mockReset().mockResolvedValueOnce('2');
     terminalPrompt.close.mockReset();

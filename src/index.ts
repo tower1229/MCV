@@ -40,12 +40,16 @@ export function createProgram(
     .description('Mobile Configuration Vehicle - Personal AI IDE configuration manager')
     .version(packageVersion);
 
-  program
+  const initCommand = program
     .command('init')
     .description('Initialize a new MCV repository in the current directory')
-    .action(async () => {
-      const initialized = initRepository(context);
-      if (!initialized || !process.stdin.isTTY) return;
+    .option('--dry-run', 'Preview initialization without writing')
+    .option('--yes', 'Initialize without prompting after reviewing a dry-run')
+    .option('--json', 'Print one machine-readable Plan or Result')
+    .action(async (options) => {
+      validateWriteOutputOptions(initCommand, options);
+      const result = initRepository(context, process.cwd(), options);
+      if (result.status !== 'succeeded' || !process.stdin.isTTY) return;
       await discoverConfigurations(context);
       const prompt = createInterface({ input: process.stdin, output: process.stdout });
       let shouldCapture = false;
@@ -133,9 +137,14 @@ export function createProgram(
     .action((options) => {
       unbind(context, options);
     });
-  program.command('migrate [path]').description('Migrate a v1 repository to schema v2')
+  const migrateCommand = program.command('migrate [path]').description('Migrate a v1 repository to schema v2')
     .option('--dry-run', 'Preview migration without writing')
-    .action((repositoryPath = process.cwd(), options) => migrate(context, repositoryPath, options.dryRun === true));
+    .option('--yes', 'Migrate without prompting after reviewing a dry-run')
+    .option('--json', 'Print one machine-readable Plan or Result')
+    .action((repositoryPath = process.cwd(), options) => {
+      validateWriteOutputOptions(migrateCommand, options);
+      migrate(context, repositoryPath, options);
+    });
 
   program.action(async () => {
     if (!process.stdin.isTTY) { program.outputHelp(); return; }
@@ -155,6 +164,24 @@ export function createProgram(
   });
 
   return program;
+}
+
+function validateWriteOutputOptions(
+  command: Command,
+  options: { dryRun?: boolean; yes?: boolean; json?: boolean },
+): void {
+  if (options.dryRun && options.yes) {
+    command.error("options '--dry-run' and '--yes' cannot be used together", {
+      exitCode: 2,
+      code: 'mcv.conflictingWriteModes',
+    });
+  }
+  if (options.json && !options.dryRun && !options.yes) {
+    command.error("option '--json' requires '--dry-run' or '--yes'", {
+      exitCode: 2,
+      code: 'mcv.missingWriteMode',
+    });
+  }
 }
 
 if (require.main === module) {
