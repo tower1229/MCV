@@ -124,8 +124,28 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         .action(() => {
         (0, restore_1.restoreLatestBackup)(context);
     });
-    program.command('bind <path>').description('Bind this device to an existing MCV repository').action((repositoryPath) => (0, binding_1.bind)(context, repositoryPath));
-    program.command('unbind').description('Remove the repository binding from this device').action(() => (0, binding_1.unbind)(context));
+    const repositoryCommand = program.command('repo')
+        .description('Inspect the current MCV Repository binding')
+        .addOption(new commander_1.Option('--plain', 'Print a one-shot English text report'))
+        .addOption(new commander_1.Option('--json', 'Print one machine-readable report'))
+        .action((options) => {
+        if (options.plain && options.json) {
+            repositoryCommand.error("options '--plain' and '--json' cannot be used together", { exitCode: 2, code: 'mcv.conflictingOutputModes' });
+        }
+        (0, binding_1.showRepository)(context, options);
+    });
+    program.command('bind [path]')
+        .description('Bind this device to an existing MCV Repository')
+        .addOption(new commander_1.Option('--json', 'Print one machine-readable result'))
+        .action((repositoryPath, options) => {
+        (0, binding_1.bind)(context, repositoryPath, options);
+    });
+    program.command('unbind')
+        .description('Remove the Repository binding from this device')
+        .addOption(new commander_1.Option('--json', 'Print one machine-readable result'))
+        .action((options) => {
+        (0, binding_1.unbind)(context, options);
+    });
     program.command('migrate [path]').description('Migrate a v1 repository to schema v2')
         .option('--dry-run', 'Preview migration without writing')
         .action((repositoryPath = process.cwd(), options) => (0, binding_1.migrate)(context, repositoryPath, options.dryRun === true));

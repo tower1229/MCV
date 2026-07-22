@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { atomicWriteTextFile } from './files';
-import { getStateFilePath, readState, writeState } from './state';
+import { getStateFilePath, readState } from './state';
 import { isRecord } from './objects';
 import { normalizeMcpServers } from '../core/mcp';
 import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020';
@@ -72,24 +72,6 @@ export function resolveBoundRepository(context: DeviceContext, explicitPath?: st
     throw new Error('Bound repository ID does not match local state. Run `mcv bind <path>` again.');
   }
   return candidate;
-}
-
-export function bindRepository(context: DeviceContext, repositoryPath: string): void {
-  const resolved = path.resolve(repositoryPath);
-  const manifest = migrateRepository(context, resolved, false);
-  const state = readState(context);
-  state.schemaVersion = 2;
-  state.repositoryPath = resolved;
-  state.defaultRepositoryId = manifest.repositoryId;
-  writeState(context, state);
-}
-
-export function unbindRepository(context: DeviceContext): void {
-  const state = readState(context);
-  delete state.repositoryPath;
-  delete state.defaultRepositoryId;
-  delete state.baselineSnapshot;
-  writeState(context, state);
 }
 
 export function migrateRepository(context: DeviceContext, repositoryPath: string, dryRun: boolean): McvManifest {

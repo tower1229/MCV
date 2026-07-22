@@ -40,8 +40,6 @@ exports.CURRENT_SCHEMA_VERSION = void 0;
 exports.readManifest = readManifest;
 exports.validateManifest = validateManifest;
 exports.resolveBoundRepository = resolveBoundRepository;
-exports.bindRepository = bindRepository;
-exports.unbindRepository = unbindRepository;
 exports.migrateRepository = migrateRepository;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -94,22 +92,6 @@ function resolveBoundRepository(context, explicitPath) {
         throw new Error('Bound repository ID does not match local state. Run `mcv bind <path>` again.');
     }
     return candidate;
-}
-function bindRepository(context, repositoryPath) {
-    const resolved = path.resolve(repositoryPath);
-    const manifest = migrateRepository(context, resolved, false);
-    const state = (0, state_1.readState)(context);
-    state.schemaVersion = 2;
-    state.repositoryPath = resolved;
-    state.defaultRepositoryId = manifest.repositoryId;
-    (0, state_1.writeState)(context, state);
-}
-function unbindRepository(context) {
-    const state = (0, state_1.readState)(context);
-    delete state.repositoryPath;
-    delete state.defaultRepositoryId;
-    delete state.baselineSnapshot;
-    (0, state_1.writeState)(context, state);
 }
 function migrateRepository(context, repositoryPath, dryRun) {
     const manifestPath = path.join(repositoryPath, 'mcv.yaml');

@@ -15,7 +15,7 @@ import {
 } from './commands/deploy';
 import { showStatus } from './commands/status';
 import { restoreLatestBackup } from './commands/restore';
-import { bind, migrate, unbind } from './commands/binding';
+import { bind, migrate, showRepository, unbind } from './commands/binding';
 import { createInterface } from 'readline/promises';
 // package.json is the single version source for both npm and the CLI.
 const packageVersion = (require('../package.json') as { version: string }).version;
@@ -107,8 +107,32 @@ export function createProgram(
       restoreLatestBackup(context);
     });
 
-  program.command('bind <path>').description('Bind this device to an existing MCV repository').action((repositoryPath) => bind(context, repositoryPath));
-  program.command('unbind').description('Remove the repository binding from this device').action(() => unbind(context));
+  const repositoryCommand = program.command('repo')
+    .description('Inspect the current MCV Repository binding')
+    .addOption(new Option('--plain', 'Print a one-shot English text report'))
+    .addOption(new Option('--json', 'Print one machine-readable report'))
+    .action((options) => {
+      if (options.plain && options.json) {
+        repositoryCommand.error(
+          "options '--plain' and '--json' cannot be used together",
+          { exitCode: 2, code: 'mcv.conflictingOutputModes' },
+        );
+      }
+      showRepository(context, options);
+    });
+
+  program.command('bind [path]')
+    .description('Bind this device to an existing MCV Repository')
+    .addOption(new Option('--json', 'Print one machine-readable result'))
+    .action((repositoryPath, options) => {
+      bind(context, repositoryPath, options);
+    });
+  program.command('unbind')
+    .description('Remove the Repository binding from this device')
+    .addOption(new Option('--json', 'Print one machine-readable result'))
+    .action((options) => {
+      unbind(context, options);
+    });
   program.command('migrate [path]').description('Migrate a v1 repository to schema v2')
     .option('--dry-run', 'Preview migration without writing')
     .action((repositoryPath = process.cwd(), options) => migrate(context, repositoryPath, options.dryRun === true));
