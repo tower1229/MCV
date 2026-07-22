@@ -47,6 +47,7 @@ export function unbind(
 ): UnbindResult {
   const result = applyUnbindPlan(context, createUnbindPlan(context));
   render(result, options, renderUnbindPlain);
+  if (result.status === 'failed') process.exitCode = 1;
   return result;
 }
 

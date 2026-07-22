@@ -36,10 +36,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.inspectRepository = inspectRepository;
 exports.createBindPlan = createBindPlan;
 exports.applyBindPlan = applyBindPlan;
-exports.bindRepository = bindRepository;
 exports.createUnbindPlan = createUnbindPlan;
 exports.applyUnbindPlan = applyUnbindPlan;
-exports.unbindRepository = unbindRepository;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const yaml = __importStar(require("yaml"));
@@ -78,6 +76,16 @@ function inspectRepository(context) {
     const inspectedSchemaVersion = identity.schemaVersion;
     if (inspectedSchemaVersion !== null
         && inspectedSchemaVersion !== repository_1.CURRENT_SCHEMA_VERSION) {
+        const migratable = inspectedSchemaVersion === 1;
+        const code = migratable
+            ? 'repository.migrationRequired'
+            : 'repository.unsupportedSchema';
+        const message = migratable
+            ? `Repository schema ${inspectedSchemaVersion} requires migration.`
+            : `Repository schema ${inspectedSchemaVersion} is not supported by this MCV version.`;
+        const nextActions = migratable
+            ? ['Run `mcv migrate --dry-run` to review the required migration.']
+            : ['Update MCV to a version that supports this Repository schema.'];
         return {
             schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
             operation: 'repository',
@@ -90,10 +98,10 @@ function inspectRepository(context) {
             changes: [],
             issues: [{
                     severity: 'error',
-                    code: 'repository.migrationRequired',
-                    message: `Repository schema ${inspectedSchemaVersion} requires migration.`,
+                    code,
+                    message,
                 }],
-            nextActions: ['Run `mcv migrate --dry-run` to review the required migration.'],
+            nextActions,
         };
     }
     let manifest;
@@ -181,16 +189,28 @@ function inspectGitRepository(repositoryPath) {
 function createBindPlan(context, repositoryPath = process.cwd()) {
     const resolvedPath = path.resolve(repositoryPath);
     const operationId = (0, uuid_1.v4)();
+    const stateSnapshot = readStateSnapshot(context);
+    const manifestPath = path.join(resolvedPath, 'mcv.yaml');
+    const manifestSnapshot = readManifestSnapshot(manifestPath);
     const preconditions = {
-        manifest: hashOptionalFile(path.join(resolvedPath, 'mcv.yaml')),
-        state: hashOptionalFile((0, state_1.getStateFilePath)(context)),
+        manifest: manifestSnapshot.hash,
+        state: stateSnapshot.hash,
+        stateTarget: hashText(stateSnapshot.path),
     };
-    const identity = inspectManifestIdentity(resolvedPath);
+    const identity = manifestSnapshot.identity;
     if (identity.schemaVersion !== null
         && identity.schemaVersion !== repository_1.CURRENT_SCHEMA_VERSION) {
-        const nextActions = ['Run `mcv migrate --dry-run` to review the required migration.'];
-        const message = `Repository schema ${identity.schemaVersion} requires migration.`;
-        return {
+        const migratable = identity.schemaVersion === 1;
+        const code = migratable
+            ? 'repository.migrationRequired'
+            : 'repository.unsupportedSchema';
+        const nextActions = migratable
+            ? ['Run `mcv migrate --dry-run` to review the required migration.']
+            : ['Update MCV to a version that supports this Repository schema.'];
+        const message = migratable
+            ? `Repository schema ${identity.schemaVersion} requires migration.`
+            : `Repository schema ${identity.schemaVersion} is not supported by this MCV version.`;
+        return freezePlan({
             schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
             operation: 'bind',
             status: 'failed',
@@ -201,23 +221,21 @@ function createBindPlan(context, repositoryPath = process.cwd()) {
             changes: [],
             issues: [{
                     severity: 'error',
-                    code: 'repository.migrationRequired',
+                    code,
                     message,
                 }],
             nextActions,
             error: {
-                code: 'repository.migrationRequired',
+                code,
                 message,
                 nextActions,
             },
-        };
+        });
     }
-    let manifest;
-    try {
-        manifest = (0, repository_1.readManifest)(resolvedPath);
-    }
-    catch (error) {
-        return {
+    const manifest = manifestSnapshot.manifest;
+    if (!manifest) {
+        const error = manifestSnapshot.error;
+        return freezePlan({
             schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
             operation: 'bind',
             status: 'failed',
@@ -235,16 +253,16 @@ function createBindPlan(context, repositoryPath = process.cwd()) {
             error: {
                 code: 'repository.invalidManifest',
                 message: 'The selected directory is not a valid MCV Repository.',
-                technicalDetails: error instanceof Error ? error.message : String(error),
+                technicalDetails: error,
                 nextActions: ['Choose a directory containing a valid mcv.yaml manifest.'],
             },
-        };
+        });
     }
-    const state = (0, state_1.readState)(context);
+    const state = stateSnapshot.state;
     const previousRepositoryPath = state.repositoryPath ?? null;
     if (state.defaultRepositoryId
         && state.defaultRepositoryId !== manifest.repositoryId) {
-        return {
+        return freezePlan({
             schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
             operation: 'bind',
             status: 'failed',
@@ -264,7 +282,7 @@ function createBindPlan(context, repositoryPath = process.cwd()) {
                 message: 'The Repository ID does not match the current local binding.',
                 nextActions: ['Unbind the current Repository before binding a different one.'],
             },
-        };
+        });
     }
     const plan = {
         schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
@@ -289,9 +307,9 @@ function createBindPlan(context, repositoryPath = process.cwd()) {
 function applyBindPlan(context, plan) {
     if (plan.status === 'failed')
         return failedResultFromPlan(plan);
-    const staleError = validateActivePlan(context, plan);
-    if (staleError)
-        return failedBindResult(plan.repositoryPath, staleError);
+    const validation = validateActivePlan(context, plan);
+    if ('error' in validation)
+        return failedBindResult(plan.repositoryPath, validation.error);
     const change = plan.changes[0];
     if (!change?.repositoryPath || !change.repositoryId) {
         return failedBindResult(plan.repositoryPath, {
@@ -300,7 +318,7 @@ function applyBindPlan(context, plan) {
             nextActions: ['Generate a new Bind Plan.'],
         });
     }
-    const state = (0, state_1.readState)(context);
+    const state = validation.state;
     state.schemaVersion = 2;
     state.repositoryPath = change.repositoryPath;
     state.defaultRepositoryId = change.repositoryId;
@@ -333,11 +351,9 @@ function applyBindPlan(context, plan) {
         },
     };
 }
-function bindRepository(context, repositoryPath = process.cwd()) {
-    return applyBindPlan(context, createBindPlan(context, repositoryPath));
-}
 function createUnbindPlan(context) {
-    const state = (0, state_1.readState)(context);
+    const stateSnapshot = readStateSnapshot(context);
+    const state = stateSnapshot.state;
     const previousRepositoryPath = state.repositoryPath ?? null;
     const repositoryId = state.defaultRepositoryId ?? null;
     const plan = {
@@ -346,7 +362,10 @@ function createUnbindPlan(context) {
         status: 'planned',
         readyToApply: true,
         operationId: (0, uuid_1.v4)(),
-        preconditions: { state: hashOptionalFile((0, state_1.getStateFilePath)(context)) },
+        preconditions: {
+            state: stateSnapshot.hash,
+            stateTarget: hashText(stateSnapshot.path),
+        },
         repositoryPath: previousRepositoryPath,
         changes: [{
                 id: 'repository-binding',
@@ -363,9 +382,9 @@ function createUnbindPlan(context) {
 function applyUnbindPlan(context, plan) {
     if (plan.status === 'failed')
         return failedUnbindResult(plan.repositoryPath, plan.error);
-    const staleError = validateActivePlan(context, plan);
-    if (staleError)
-        return failedUnbindResult(plan.repositoryPath, staleError);
+    const validation = validateActivePlan(context, plan);
+    if ('error' in validation)
+        return failedUnbindResult(plan.repositoryPath, validation.error);
     const change = plan.changes[0];
     if (!change) {
         return failedUnbindResult(plan.repositoryPath, {
@@ -374,7 +393,7 @@ function applyUnbindPlan(context, plan) {
             nextActions: ['Generate a new Unbind Plan.'],
         });
     }
-    const state = (0, state_1.readState)(context);
+    const state = validation.state;
     delete state.repositoryPath;
     delete state.defaultRepositoryId;
     try {
@@ -405,10 +424,12 @@ function applyUnbindPlan(context, plan) {
         },
     };
 }
-function unbindRepository(context) {
-    return applyUnbindPlan(context, createUnbindPlan(context));
-}
 function registerPlan(plan) {
+    freezePlan(plan);
+    activeRepositoryPlans.set(plan, plan.operationId);
+    return plan;
+}
+function freezePlan(plan) {
     for (const change of plan.changes)
         Object.freeze(change);
     Object.freeze(plan.changes);
@@ -417,34 +438,38 @@ function registerPlan(plan) {
     Object.freeze(plan.issues);
     Object.freeze(plan.nextActions);
     Object.freeze(plan.preconditions);
+    if (plan.status === 'failed') {
+        Object.freeze(plan.error.nextActions);
+        Object.freeze(plan.error);
+    }
     Object.freeze(plan);
-    activeRepositoryPlans.set(plan, plan.operationId);
     return plan;
 }
 function validateActivePlan(context, plan) {
     if (activeRepositoryPlans.get(plan) !== plan.operationId) {
-        return {
-            code: 'operation.invalidPlan',
-            message: 'The Repository Plan is not the active in-process Plan.',
-            nextActions: ['Generate a new Repository Plan.'],
-        };
+        return { error: {
+                code: 'operation.invalidPlan',
+                message: 'The Repository Plan is not the active in-process Plan.',
+                nextActions: ['Generate a new Repository Plan.'],
+            } };
     }
-    const currentStateHash = hashOptionalFile((0, state_1.getStateFilePath)(context));
+    const stateSnapshot = readStateSnapshot(context);
     const manifestPath = plan.repositoryPath
         ? path.join(plan.repositoryPath, 'mcv.yaml')
         : null;
-    const stale = currentStateHash !== plan.preconditions.state
+    const stale = hashText(stateSnapshot.path) !== plan.preconditions.stateTarget
+        || stateSnapshot.hash !== plan.preconditions.state
         || (plan.operation === 'bind'
             && manifestPath !== null
             && hashOptionalFile(manifestPath) !== plan.preconditions.manifest);
     if (!stale)
-        return undefined;
+        return { state: stateSnapshot.state };
     activeRepositoryPlans.delete(plan);
-    return {
-        code: 'operation.stalePlan',
-        message: 'Repository or local binding state changed after the Plan was generated.',
-        nextActions: ['Generate and review a new Repository Plan.'],
-    };
+    return { error: {
+            code: 'operation.stalePlan',
+            message: 'Repository or local binding state changed after the Plan was generated.',
+            nextActions: ['Generate and review a new Repository Plan.'],
+        } };
 }
 function failedResultFromPlan(plan) {
     const error = plan.status === 'failed'
@@ -488,6 +513,73 @@ function hashOptionalFile(filePath) {
         if (error.code === 'ENOENT')
             return 'missing';
         return 'unreadable';
+    }
+}
+function hashText(value) {
+    return (0, crypto_1.createHash)('sha256').update(value).digest('hex');
+}
+function readStateSnapshot(context) {
+    const statePath = (0, state_1.getStateFilePath)(context);
+    try {
+        const content = fs.readFileSync(statePath);
+        let state = {};
+        try {
+            state = JSON.parse(content.toString('utf8'));
+        }
+        catch {
+            // Match readState(): invalid local state is treated as empty.
+        }
+        return {
+            path: statePath,
+            hash: (0, crypto_1.createHash)('sha256').update(content).digest('hex'),
+            state,
+        };
+    }
+    catch (error) {
+        return {
+            path: statePath,
+            hash: error.code === 'ENOENT' ? 'missing' : 'unreadable',
+            state: {},
+        };
+    }
+}
+function readManifestSnapshot(manifestPath) {
+    let content;
+    try {
+        content = fs.readFileSync(manifestPath);
+    }
+    catch (error) {
+        return {
+            hash: error.code === 'ENOENT' ? 'missing' : 'unreadable',
+            identity: { repositoryId: null, schemaVersion: null },
+            error: error instanceof Error ? error.message : String(error),
+        };
+    }
+    const hash = (0, crypto_1.createHash)('sha256').update(content).digest('hex');
+    try {
+        const raw = yaml.parse(content.toString('utf8'));
+        if (!(0, objects_1.isRecord)(raw)) {
+            return {
+                hash,
+                identity: { repositoryId: null, schemaVersion: null },
+                error: `${manifestPath} must contain a YAML object.`,
+            };
+        }
+        const identity = {
+            repositoryId: typeof raw.repositoryId === 'string' ? raw.repositoryId : null,
+            schemaVersion: typeof raw.schemaVersion === 'number' ? raw.schemaVersion : null,
+        };
+        if (identity.schemaVersion !== repository_1.CURRENT_SCHEMA_VERSION)
+            return { hash, identity };
+        (0, repository_1.validateManifest)(raw, manifestPath);
+        return { hash, identity, manifest: raw };
+    }
+    catch (error) {
+        return {
+            hash,
+            identity: { repositoryId: null, schemaVersion: null },
+            error: error instanceof Error ? error.message : String(error),
+        };
     }
 }
 function inspectManifestIdentity(repositoryPath) {

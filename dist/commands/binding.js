@@ -23,6 +23,8 @@ function bind(context, repositoryPath, options = {}) {
 function unbind(context, options = {}) {
     const result = (0, repository_2.applyUnbindPlan)(context, (0, repository_2.createUnbindPlan)(context));
     render(result, options, repository_3.renderUnbindPlain);
+    if (result.status === 'failed')
+        process.exitCode = 1;
     return result;
 }
 function migrate(context, repositoryPath, dryRun) {

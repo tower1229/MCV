@@ -9,11 +9,9 @@ import { readState, writeState } from '../utils/state';
 import {
   applyBindPlan,
   applyUnbindPlan,
-  bindRepository,
   createBindPlan,
   createUnbindPlan,
   inspectRepository,
-  unbindRepository,
 } from './repository';
 
 describe('Repository operations', () => {
@@ -43,7 +41,7 @@ describe('Repository operations', () => {
     process.chdir(createRepository(testRoot, 'repository-current', 'repository-current-id'));
     const repositoryPath = process.cwd();
 
-    const result = bindRepository(context);
+    const result = applyBindPlan(context, createBindPlan(context));
 
     expect(result).toEqual({
       schemaVersion: 1,
@@ -68,7 +66,7 @@ describe('Repository operations', () => {
   it('binds an explicitly supplied Repository path', () => {
     const repositoryPath = createRepository(testRoot, 'repository-explicit', 'repository-explicit-id');
 
-    const result = bindRepository(context, repositoryPath);
+    const result = applyBindPlan(context, createBindPlan(context, repositoryPath));
 
     expect(result).toMatchObject({
       operation: 'bind',
@@ -91,7 +89,7 @@ describe('Repository operations', () => {
       repositoryPath: originalPath,
     });
 
-    const result = bindRepository(context, otherPath);
+    const result = applyBindPlan(context, createBindPlan(context, otherPath));
 
     expect(result).toMatchObject({
       operation: 'bind',
@@ -113,7 +111,7 @@ describe('Repository operations', () => {
     fs.mkdirSync(invalidPath);
     writeState(context, { schemaVersion: 2, deviceId: 'device-id' });
 
-    const result = bindRepository(context, invalidPath);
+    const result = applyBindPlan(context, createBindPlan(context, invalidPath));
 
     expect(result).toMatchObject({
       operation: 'bind',
@@ -136,7 +134,7 @@ describe('Repository operations', () => {
       repositoryPath: missingOldPath,
     });
 
-    const result = bindRepository(context, movedPath);
+    const result = applyBindPlan(context, createBindPlan(context, movedPath));
 
     expect(result).toMatchObject({
       operation: 'bind',
@@ -167,7 +165,7 @@ describe('Repository operations', () => {
       lastOperation: { kind: 'deploy', time: '2026-07-22T00:00:00.000Z', success: true },
     });
 
-    const result = unbindRepository(context);
+    const result = applyUnbindPlan(context, createUnbindPlan(context));
 
     expect(result).toMatchObject({
       schemaVersion: 1,
@@ -281,7 +279,7 @@ describe('Repository operations', () => {
       repositoryId: 'repository-bind-old-schema-id',
     }));
 
-    const result = bindRepository(context, repositoryPath);
+    const result = applyBindPlan(context, createBindPlan(context, repositoryPath));
 
     expect(result).toMatchObject({
       status: 'failed',
@@ -344,6 +342,27 @@ describe('Repository operations', () => {
     expect(readState(context)).toEqual({ schemaVersion: 2, deviceId: 'changed-after-plan' });
   });
 
+  it('rejects applying a Bind Plan to a different device state target', () => {
+    const repositoryPath = createRepository(testRoot, 'repository-cross-device', 'repository-cross-device-id');
+    const plan = createBindPlan(context, repositoryPath);
+    const otherHome = path.join(testRoot, 'other-home');
+    fs.mkdirSync(otherHome);
+    const otherContext: DeviceContext = {
+      homeDir: otherHome,
+      platform: 'win32',
+      env: { APPDATA: otherHome },
+      pathEnv: '',
+    };
+
+    const result = applyBindPlan(otherContext, plan);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'operation.stalePlan' },
+    });
+    expect(readState(otherContext)).toEqual({});
+  });
+
   it('rejects a Bind Plan when the manifest changes after planning', () => {
     const repositoryPath = createRepository(testRoot, 'repository-manifest-race', 'repository-manifest-race-id');
     const plan = createBindPlan(context, repositoryPath);
@@ -382,6 +401,41 @@ describe('Repository operations', () => {
 
     expect(result).toMatchObject({ status: 'succeeded', operation: 'unbind' });
     expect(readState(context)).toEqual({ schemaVersion: 2, deviceId: 'device-id' });
+  });
+
+  it('freezes a failed Bind Plan as an immutable in-process snapshot', () => {
+    const invalidPath = path.join(testRoot, 'repository-failed-plan');
+    fs.mkdirSync(invalidPath);
+
+    const plan = createBindPlan(context, invalidPath);
+
+    expect(plan).toMatchObject({ status: 'failed', readyToApply: false });
+    expect(Object.isFrozen(plan)).toBe(true);
+    expect(Object.isFrozen(plan.issues)).toBe(true);
+    expect(Object.isFrozen(plan.nextActions)).toBe(true);
+  });
+
+  it('reports a future schema as unsupported instead of migratable', () => {
+    const repositoryPath = path.join(testRoot, 'repository-future-schema');
+    fs.mkdirSync(repositoryPath);
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), yaml.stringify({
+      schemaVersion: 3,
+      repositoryId: 'repository-future-schema-id',
+    }));
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'repository-future-schema-id',
+      repositoryPath,
+    });
+
+    expect(inspectRepository(context)).toMatchObject({
+      valid: false,
+      issues: [{ code: 'repository.unsupportedSchema' }],
+    });
+    expect(createBindPlan(context, repositoryPath)).toMatchObject({
+      status: 'failed',
+      error: { code: 'repository.unsupportedSchema' },
+    });
   });
 });
 
