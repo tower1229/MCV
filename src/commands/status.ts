@@ -7,16 +7,16 @@ import { hashFile } from '../utils/files';
 import { readManifest } from '../utils/repository';
 import { readState } from '../utils/state';
 
-export async function showStatus(context?: DeviceContext): Promise<void> {
-  const state = readState();
+export async function showStatus(context: DeviceContext): Promise<void> {
+  const state = readState(context);
   if (state.repositoryPath) {
     console.log(`[bound] ${state.repositoryPath} (${state.defaultRepositoryId ?? 'unknown repository ID'})`);
     if (!fs.existsSync(path.join(state.repositoryPath, 'mcv.yaml'))) {
       console.log('[repository-missing] Bound repository cannot be read.');
     } else {
       reportGit(state.repositoryPath);
-      if (context) await reportSurfaces(state.repositoryPath, context);
-      reportMissingEnvironment(state.repositoryPath, context?.env ?? process.env);
+      await reportSurfaces(state.repositoryPath, context);
+      reportMissingEnvironment(state.repositoryPath, context.env);
     }
   }
 

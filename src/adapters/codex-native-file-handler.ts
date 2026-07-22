@@ -123,7 +123,7 @@ export class CodexNativeFileHandler implements NativeFileHandler {
       const resolved = resolvePortableValue(
         parsed,
         context.variables ?? {},
-        context.platform ?? process.platform,
+        context.platform,
       ) as Record<string, unknown>;
       files.push({ targetPath, content: stringifyStructuredObject(resolved, 'toml') });
     }

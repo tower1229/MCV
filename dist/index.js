@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.createDefaultDeviceContext = createDefaultDeviceContext;
 exports.createProgram = createProgram;
 const commander_1 = require("commander");
 const os = __importStar(require("os"));
@@ -47,7 +48,14 @@ const binding_1 = require("./commands/binding");
 const promises_1 = require("readline/promises");
 // package.json is the single version source for both npm and the CLI.
 const packageVersion = require('../package.json').version;
-function createProgram(context = { homeDir: os.homedir(), env: process.env }, captureDependencies = {}, deployDependencies = {}) {
+function createDefaultDeviceContext() {
+    return {
+        homeDir: os.homedir(),
+        platform: process.platform,
+        env: process.env,
+    };
+}
+function createProgram(context = createDefaultDeviceContext(), captureDependencies = {}, deployDependencies = {}) {
     const program = new commander_1.Command();
     program
         .name('mcv')
@@ -57,7 +65,7 @@ function createProgram(context = { homeDir: os.homedir(), env: process.env }, ca
         .command('init')
         .description('Initialize a new MCV repository in the current directory')
         .action(async () => {
-        const initialized = (0, init_1.initRepository)();
+        const initialized = (0, init_1.initRepository)(context);
         if (!initialized || !process.stdin.isTTY)
             return;
         await (0, discover_1.discoverConfigurations)(context);
@@ -107,13 +115,13 @@ function createProgram(context = { homeDir: os.homedir(), env: process.env }, ca
         .command('restore')
         .description('Restore local configuration from the latest deployment backup')
         .action(() => {
-        (0, restore_1.restoreLatestBackup)();
+        (0, restore_1.restoreLatestBackup)(context);
     });
-    program.command('bind <path>').description('Bind this device to an existing MCV repository').action(binding_1.bind);
-    program.command('unbind').description('Remove the repository binding from this device').action(binding_1.unbind);
+    program.command('bind <path>').description('Bind this device to an existing MCV repository').action((repositoryPath) => (0, binding_1.bind)(context, repositoryPath));
+    program.command('unbind').description('Remove the repository binding from this device').action(() => (0, binding_1.unbind)(context));
     program.command('migrate [path]').description('Migrate a v1 repository to schema v2')
         .option('--dry-run', 'Preview migration without writing')
-        .action((repositoryPath = process.cwd(), options) => (0, binding_1.migrate)(repositoryPath, options.dryRun === true));
+        .action((repositoryPath = process.cwd(), options) => (0, binding_1.migrate)(context, repositoryPath, options.dryRun === true));
     program.action(async () => {
         if (!process.stdin.isTTY) {
             program.outputHelp();
@@ -125,7 +133,7 @@ function createProgram(context = { homeDir: os.homedir(), env: process.env }, ca
             if (answer.trim() === '6') {
                 const repositoryPath = await prompt.question('Repository path (blank to cancel): ');
                 if (repositoryPath.trim())
-                    (0, binding_1.bind)(repositoryPath.trim());
+                    (0, binding_1.bind)(context, repositoryPath.trim());
                 return;
             }
             const command = { '1': 'discover', '2': 'capture', '3': 'deploy', '4': 'status', '5': 'restore' }[answer.trim()];

@@ -42,7 +42,7 @@ const files_1 = require("../utils/files");
 const repository_1 = require("../utils/repository");
 const state_1 = require("../utils/state");
 async function showStatus(context) {
-    const state = (0, state_1.readState)();
+    const state = (0, state_1.readState)(context);
     if (state.repositoryPath) {
         console.log(`[bound] ${state.repositoryPath} (${state.defaultRepositoryId ?? 'unknown repository ID'})`);
         if (!fs.existsSync(path.join(state.repositoryPath, 'mcv.yaml'))) {
@@ -50,9 +50,8 @@ async function showStatus(context) {
         }
         else {
             reportGit(state.repositoryPath);
-            if (context)
-                await reportSurfaces(state.repositoryPath, context);
-            reportMissingEnvironment(state.repositoryPath, context?.env ?? process.env);
+            await reportSurfaces(state.repositoryPath, context);
+            reportMissingEnvironment(state.repositoryPath, context.env);
         }
     }
     const baseline = state.baselineSnapshot;

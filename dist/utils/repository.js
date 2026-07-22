@@ -76,8 +76,8 @@ function createManifestValidator() {
     const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
     return new _2020_1.default({ allErrors: true, useDefaults: true, strict: true }).compile(schema);
 }
-function resolveBoundRepository(explicitPath) {
-    const state = (0, state_1.readState)();
+function resolveBoundRepository(context, explicitPath) {
+    const state = (0, state_1.readState)(context);
     const current = process.cwd();
     const candidate = explicitPath
         ? path.resolve(explicitPath)
@@ -95,23 +95,23 @@ function resolveBoundRepository(explicitPath) {
     }
     return candidate;
 }
-function bindRepository(repositoryPath) {
+function bindRepository(context, repositoryPath) {
     const resolved = path.resolve(repositoryPath);
-    const manifest = migrateRepository(resolved, false);
-    const state = (0, state_1.readState)();
+    const manifest = migrateRepository(context, resolved, false);
+    const state = (0, state_1.readState)(context);
     state.schemaVersion = 2;
     state.repositoryPath = resolved;
     state.defaultRepositoryId = manifest.repositoryId;
-    (0, state_1.writeState)(state);
+    (0, state_1.writeState)(context, state);
 }
-function unbindRepository() {
-    const state = (0, state_1.readState)();
+function unbindRepository(context) {
+    const state = (0, state_1.readState)(context);
     delete state.repositoryPath;
     delete state.defaultRepositoryId;
     delete state.baselineSnapshot;
-    (0, state_1.writeState)(state);
+    (0, state_1.writeState)(context, state);
 }
-function migrateRepository(repositoryPath, dryRun) {
+function migrateRepository(context, repositoryPath, dryRun) {
     const manifestPath = path.join(repositoryPath, 'mcv.yaml');
     if (!fs.existsSync(manifestPath))
         throw new Error(`${repositoryPath} does not contain mcv.yaml.`);
@@ -152,7 +152,7 @@ function migrateRepository(repositoryPath, dryRun) {
     delete migrated.allowPlaintextSecrets;
     if (dryRun)
         return migrated;
-    const backupRoot = path.join(path.dirname((0, state_1.getStateFilePath)()), 'repository-backups');
+    const backupRoot = path.join(path.dirname((0, state_1.getStateFilePath)(context)), 'repository-backups');
     fs.mkdirSync(backupRoot, { recursive: true });
     const backupDirectory = fs.mkdtempSync(path.join(backupRoot, 'schema-v1-'));
     const backupPath = path.join(backupDirectory, 'repository');

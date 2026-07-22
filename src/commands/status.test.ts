@@ -5,21 +5,16 @@ import { createProgram } from '../index';
 
 describe('mcv status', () => {
   const originalCwd = process.cwd();
-  const originalEnv = { ...process.env };
   let testRoot: string;
   let stateRoot: string;
 
   beforeEach(() => {
     testRoot = fs.mkdtempSync(path.join(originalCwd, '.mcv-status-test-'));
     stateRoot = path.join(testRoot, 'device');
-    process.env.APPDATA = stateRoot;
-    process.env.HOME = stateRoot;
-    process.env.USERPROFILE = stateRoot;
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
-    process.env = { ...originalEnv };
     vi.restoreAllMocks();
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
@@ -45,7 +40,11 @@ describe('mcv status', () => {
       }),
     );
 
-    await createProgram().parseAsync(['node', 'mcv', 'status']);
+    await createProgram({
+      homeDir: stateRoot,
+      platform: 'win32',
+      env: { APPDATA: stateRoot },
+    }).parseAsync(['node', 'mcv', 'status']);
 
     expect(vi.mocked(console.log).mock.calls.map(([line]) => line)).toEqual([
       `[matching] ${matchingPath}`,

@@ -6,7 +6,6 @@ import { parse as parseToml } from 'smol-toml';
 
 describe('mcv capture', () => {
   const originalCwd = process.cwd();
-  const originalEnv = { ...process.env };
   let testRoot: string;
   let repositoryPath: string;
   let homeDir: string;
@@ -28,24 +27,26 @@ describe('mcv capture', () => {
       JSON.stringify({ theme: 'dark', apiToken: 'must-not-leak' }),
     );
     process.chdir(repositoryPath);
-    process.env.APPDATA = stateRoot;
-    process.env.HOME = stateRoot;
-    process.env.USERPROFILE = stateRoot;
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
-    process.env = { ...originalEnv };
     vi.restoreAllMocks();
     fs.rmSync(testRoot, { recursive: true, force: true });
+  });
+
+  const deviceContext = (platform: NodeJS.Platform = 'darwin') => ({
+    homeDir,
+    platform,
+    env: { APPDATA: stateRoot },
   });
 
   it('previews only sanitized content and does not write when the user declines', async () => {
     const confirmCapture = vi.fn().mockResolvedValue(false);
 
     await createProgram(
-      { homeDir, platform: 'win32' },
+      deviceContext('win32'),
       { confirmCapture },
     ).parseAsync(['node', 'mcv', 'capture']);
 
@@ -75,7 +76,7 @@ describe('mcv capture', () => {
     );
 
     await createProgram(
-      { homeDir, platform: 'win32' },
+      deviceContext('win32'),
       { confirmCapture: async () => true },
     ).parseAsync(['node', 'mcv', 'capture']);
 
@@ -123,7 +124,7 @@ describe('mcv capture', () => {
     );
 
     await createProgram(
-      { homeDir },
+      deviceContext(),
       { confirmCapture: async () => true },
     ).parseAsync(['node', 'mcv', 'capture']);
 
@@ -165,7 +166,7 @@ describe('mcv capture', () => {
     );
 
     await createProgram(
-      { homeDir },
+      deviceContext(),
       { confirmCapture: async () => true },
     ).parseAsync(['node', 'mcv', 'capture']);
 
@@ -199,7 +200,7 @@ describe('mcv capture', () => {
     );
 
     await createProgram(
-      { homeDir },
+      deviceContext(),
       { confirmCapture: async () => true },
     ).parseAsync(['node', 'mcv', 'capture']);
 
@@ -235,7 +236,7 @@ describe('mcv capture', () => {
     fs.writeFileSync(path.join(homeDir, '.claude', 'CLAUDE.md'), '# Claude rules\n');
 
     await expect(createProgram(
-      { homeDir, pathEnv: '' },
+      { ...deviceContext(), pathEnv: '' },
       { confirmCapture: async () => true },
     ).parseAsync(['node', 'mcv', 'capture'])).rejects.toThrow(
       'Conflicting managed captures for common/AGENTS.md',

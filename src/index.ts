@@ -20,8 +20,16 @@ import { createInterface } from 'readline/promises';
 // package.json is the single version source for both npm and the CLI.
 const packageVersion = (require('../package.json') as { version: string }).version;
 
+export function createDefaultDeviceContext(): DeviceContext {
+  return {
+    homeDir: os.homedir(),
+    platform: process.platform,
+    env: process.env,
+  };
+}
+
 export function createProgram(
-  context: DeviceContext = { homeDir: os.homedir(), env: process.env },
+  context: DeviceContext = createDefaultDeviceContext(),
   captureDependencies: CaptureDependencies = {},
   deployDependencies: DeployDependencies = {},
 ): Command {
@@ -36,7 +44,7 @@ export function createProgram(
     .command('init')
     .description('Initialize a new MCV repository in the current directory')
     .action(async () => {
-      const initialized = initRepository();
+      const initialized = initRepository(context);
       if (!initialized || !process.stdin.isTTY) return;
       await discoverConfigurations(context);
       const prompt = createInterface({ input: process.stdin, output: process.stdout });
@@ -86,14 +94,14 @@ export function createProgram(
     .command('restore')
     .description('Restore local configuration from the latest deployment backup')
     .action(() => {
-      restoreLatestBackup();
+      restoreLatestBackup(context);
     });
 
-  program.command('bind <path>').description('Bind this device to an existing MCV repository').action(bind);
-  program.command('unbind').description('Remove the repository binding from this device').action(unbind);
+  program.command('bind <path>').description('Bind this device to an existing MCV repository').action((repositoryPath) => bind(context, repositoryPath));
+  program.command('unbind').description('Remove the repository binding from this device').action(() => unbind(context));
   program.command('migrate [path]').description('Migrate a v1 repository to schema v2')
     .option('--dry-run', 'Preview migration without writing')
-    .action((repositoryPath = process.cwd(), options) => migrate(repositoryPath, options.dryRun === true));
+    .action((repositoryPath = process.cwd(), options) => migrate(context, repositoryPath, options.dryRun === true));
 
   program.action(async () => {
     if (!process.stdin.isTTY) { program.outputHelp(); return; }
@@ -102,7 +110,7 @@ export function createProgram(
       const answer = await prompt.question('MCV: 1) discover 2) capture 3) deploy 4) status 5) restore 6) bind  Select: ');
       if (answer.trim() === '6') {
         const repositoryPath = await prompt.question('Repository path (blank to cancel): ');
-        if (repositoryPath.trim()) bind(repositoryPath.trim());
+        if (repositoryPath.trim()) bind(context, repositoryPath.trim());
         return;
       }
       const command = ({ '1': 'discover', '2': 'capture', '3': 'deploy', '4': 'status', '5': 'restore' } as Record<string, string>)[answer.trim()];

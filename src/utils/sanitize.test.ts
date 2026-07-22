@@ -15,6 +15,7 @@ describe('sanitizeConfig', () => {
       sanitizeConfig(input, {
         homeDir: 'C:\\Users\\测试 用户',
         platform: 'win32',
+        env: {},
       }),
     ).toEqual({
       value: {
@@ -37,7 +38,7 @@ describe('sanitizeConfig', () => {
   });
 
   it('does not treat a keyboard shortcut key as a secret field', () => {
-    expect(sanitizeConfig({ key: 'ctrl+enter', 'extension.apiKey': 'secret' }, { homeDir: '/home/user' }).value).toEqual({
+    expect(sanitizeConfig({ key: 'ctrl+enter', 'extension.apiKey': 'secret' }, { homeDir: '/home/user', platform: 'linux', env: {} }).value).toEqual({
       key: 'ctrl+enter',
       'extension.apiKey': '${env:EXTENSION_API_KEY}',
     });
@@ -55,6 +56,7 @@ describe('sanitizeConfig', () => {
         {
           homeDir: '/Users/测试 用户',
           platform: 'darwin',
+          env: {},
           variables: { PROJECTS_HOME: '/Volumes/工作盘/Code' },
         },
       ),
@@ -79,7 +81,7 @@ describe('sanitizeConfig', () => {
         a_b: { c: '/opt/first' },
         a: { b_c: '/opt/second' },
       },
-      { homeDir: '/Users/example', platform: 'darwin' },
+      { homeDir: '/Users/example', platform: 'darwin', env: {} },
     );
 
     expect(result.value.a_b.c).not.toBe(result.value.a.b_c);

@@ -46,7 +46,7 @@ const state_1 = require("../utils/state");
 const variables_1 = require("../utils/variables");
 const repository_1 = require("../utils/repository");
 async function deployConfigurations(context, dependencies = {}, options = {}) {
-    const repositoryPath = (0, repository_1.resolveBoundRepository)();
+    const repositoryPath = (0, repository_1.resolveBoundRepository)(context);
     const manifest = (0, repository_1.readManifest)(repositoryPath);
     const definitions = (0, adapters_1.createAdapterDefinitions)().filter(({ targetId }) => manifest.targets?.[targetId]?.enabled === true);
     if (definitions.length === 0) {
@@ -71,7 +71,7 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
         return false;
     });
     const legacySkillDuplicates = findLegacyCodexSkillDuplicates(context, safeDeployFiles, definitions.some(({ targetId }) => targetId === 'codex'));
-    const state = options.pruneManaged === true ? (0, state_1.readState)() : undefined;
+    const state = options.pruneManaged === true ? (0, state_1.readState)(context) : undefined;
     const managedInventory = state?.managedInventory ?? {};
     for (const targetPath of legacySkillDuplicates.files) {
         managedInventory[targetPath] = { source: 'codex-legacy-duplicate', hash: (0, files_1.hashFile)(targetPath) };
@@ -80,7 +80,7 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
     if (options.yes && plan.some((file) => file.change === 'delete'))
         throw new Error('--yes never applies deletions; review and confirm --prune-managed interactively.');
     if (plan.length === 0) {
-        recordDeploymentBaseline(safeDeployFiles);
+        recordDeploymentBaseline(context, safeDeployFiles, repositoryPath);
         if (options.json)
             console.log(JSON.stringify({ repositoryPath, changes: [], skipped: [...skippedLinks].map(([targetPath, linkPath]) => ({ targetPath, reason: 'symbolic-link-ancestor', linkPath })), legacySkillDuplicates: legacySkillDuplicates.names }, null, 2));
         else {
@@ -113,19 +113,19 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
         console.log('Deploy cancelled; local configuration was not changed.');
         return;
     }
-    const backupDirectory = createDeploymentBackup(plan);
+    const backupDirectory = createDeploymentBackup(context, plan);
     try {
         applyDeployTransaction(plan, backupDirectory);
     }
     catch (error) {
         markDeploymentBackupFailed(backupDirectory, error);
-        const state = (0, state_1.readState)();
+        const state = (0, state_1.readState)(context);
         state.lastOperation = { kind: 'deploy', time: new Date().toISOString(), success: false };
-        (0, state_1.writeState)(state);
+        (0, state_1.writeState)(context, state);
         throw error;
     }
     finalizeDeploymentBackup(backupDirectory, plan);
-    recordDeploymentBaseline(safeDeployFiles, repositoryPath);
+    recordDeploymentBaseline(context, safeDeployFiles, repositoryPath);
     console.log(`Deployed ${plan.length} file(s) from ${repositoryPath}.`);
 }
 function reportSkippedLinks(skippedLinks) {
@@ -144,7 +144,7 @@ function findLegacyCodexSkillDuplicates(context, deployFiles, codexEnabled) {
     if (!codexEnabled)
         return { names: [], files: [] };
     const officialRoot = path.resolve(context.homeDir, '.agents', 'skills');
-    const codexHome = (context.env ?? process.env).CODEX_HOME || path.join(context.homeDir, '.codex');
+    const codexHome = context.env.CODEX_HOME || path.join(context.homeDir, '.codex');
     const legacyRoot = path.resolve(codexHome, 'skills');
     if (samePath(officialRoot, legacyRoot, context.platform) || findSymbolicLinkAncestor(legacyRoot)) {
         return { names: [], files: [] };
@@ -203,8 +203,8 @@ function collectRegularFiles(root) {
 function samePath(left, right, platform) {
     return platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
-function recordDeploymentBaseline(files, repositoryPath) {
-    const state = (0, state_1.readState)();
+function recordDeploymentBaseline(context, files, repositoryPath) {
+    const state = (0, state_1.readState)(context);
     state.baselineSnapshot = {
         recordedAt: new Date().toISOString(),
         files: Object.fromEntries(files
@@ -218,10 +218,10 @@ function recordDeploymentBaseline(files, repositoryPath) {
         .filter((file) => fs.existsSync(file.targetPath))
         .map((file) => [file.targetPath, { source: repositoryPath ?? 'repository', hash: (0, files_1.hashFile)(file.targetPath) }]));
     state.lastOperation = { kind: 'deploy', time: new Date().toISOString(), success: true };
-    (0, state_1.writeState)(state);
+    (0, state_1.writeState)(context, state);
 }
-function createDeploymentBackup(plan) {
-    const backupRoot = path.join(path.dirname((0, state_1.getStateFilePath)()), 'backups');
+function createDeploymentBackup(context, plan) {
+    const backupRoot = path.join(path.dirname((0, state_1.getStateFilePath)(context)), 'backups');
     fs.mkdirSync(backupRoot, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupDirectory = fs.mkdtempSync(path.join(backupRoot, `${timestamp}-`));
@@ -334,7 +334,7 @@ function buildDeployPlan(files, managedInventory) {
     return [...changes, ...deletions];
 }
 function resolveManifestVariables(declarations, context, repositoryPath) {
-    const platform = context.platform ?? process.platform;
+    const platform = context.platform;
     const platformKey = platform === 'win32'
         ? 'windows'
         : platform === 'darwin'

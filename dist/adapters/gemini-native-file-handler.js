@@ -145,11 +145,11 @@ class GeminiNativeFileHandler {
             const content = fs.readFileSync(source, 'utf8');
             if (relative === 'antigravity/keybindings.json') {
                 const parsed = JSON.parse(content);
-                const resolved = (0, variables_1.resolvePortableValue)(parsed, context.variables ?? {}, context.platform ?? process.platform);
+                const resolved = (0, variables_1.resolvePortableValue)(parsed, context.variables ?? {}, context.platform);
                 return [{ targetPath, content: `${JSON.stringify(resolved, null, 2)}\n` }];
             }
             const parsed = (0, structured_config_1.parseStructuredObject)(content, 'json', source);
-            const resolved = (0, variables_1.resolvePortableValue)(parsed, context.variables ?? {}, context.platform ?? process.platform);
+            const resolved = (0, variables_1.resolvePortableValue)(parsed, context.variables ?? {}, context.platform);
             return [{ targetPath, content: (0, structured_config_1.stringifyStructuredObject)(resolved, 'json') }];
         });
         return { files: deployed, write: (file) => (0, files_1.atomicWriteFile)(file.targetPath, file.content) };
@@ -162,8 +162,8 @@ class GeminiNativeFileHandler {
             || fs.existsSync(path.join(root, 'skills'));
     }
     antigravityUserDirectory(context) {
-        const env = context.env ?? {};
-        if ((context.platform ?? process.platform) === 'win32')
+        const env = context.env;
+        if (context.platform === 'win32')
             return path.join(env.APPDATA || path.join(context.homeDir, 'AppData', 'Roaming'), 'Antigravity', 'User');
         return path.join(context.homeDir, 'Library', 'Application Support', 'Antigravity', 'User');
     }

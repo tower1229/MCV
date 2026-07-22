@@ -38,18 +38,17 @@ exports.readState = readState;
 exports.writeState = writeState;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
-const os = __importStar(require("os"));
-function getStateFilePath() {
-    if (process.platform === 'win32') {
-        return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'mcv', 'config.json');
+function getStateFilePath(context) {
+    if (context.platform === 'win32') {
+        return path.join(context.env.APPDATA || path.join(context.homeDir, 'AppData', 'Roaming'), 'mcv', 'config.json');
     }
-    if (process.platform === 'darwin') {
-        return path.join(os.homedir(), 'Library', 'Application Support', 'mcv', 'config.json');
+    if (context.platform === 'darwin') {
+        return path.join(context.homeDir, 'Library', 'Application Support', 'mcv', 'config.json');
     }
-    return path.join(os.homedir(), '.config', 'mcv', 'config.json');
+    return path.join(context.homeDir, '.config', 'mcv', 'config.json');
 }
-function readState() {
-    const statePath = getStateFilePath();
+function readState(context) {
+    const statePath = getStateFilePath(context);
     if (fs.existsSync(statePath)) {
         try {
             const content = fs.readFileSync(statePath, 'utf-8');
@@ -61,8 +60,8 @@ function readState() {
     }
     return {};
 }
-function writeState(state) {
-    const statePath = getStateFilePath();
+function writeState(context, state) {
+    const statePath = getStateFilePath(context);
     const dir = path.dirname(statePath);
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });

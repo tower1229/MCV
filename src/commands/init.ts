@@ -4,8 +4,9 @@ import { v4 as uuidv4 } from 'uuid';
 import * as yaml from 'yaml';
 import { readState, writeState } from '../utils/state';
 import type { McvManifest } from '../utils/repository';
+import type { DeviceContext } from '../adapters/types';
 
-export function initRepository(targetDir: string = process.cwd()): boolean {
+export function initRepository(context: DeviceContext, targetDir: string = process.cwd()): boolean {
   const repositoryPath = path.resolve(targetDir);
   const manifestPath = path.join(repositoryPath, 'mcv.yaml');
 
@@ -49,7 +50,7 @@ export function initRepository(targetDir: string = process.cwd()): boolean {
   console.log(`Initialized empty MCV repository in ${repositoryPath}`);
   console.log(`Repository ID: ${repositoryId}`);
 
-  const state = readState();
+  const state = readState(context);
   state.schemaVersion = 2;
   state.deviceId ??= uuidv4();
   state.defaultRepositoryId = repositoryId;
@@ -58,7 +59,7 @@ export function initRepository(targetDir: string = process.cwd()): boolean {
     recordedAt: initializedAt,
     files: {},
   };
-  writeState(state);
+  writeState(context, state);
 
   console.log('Successfully bound current device to this MCV repository.');
   return true;

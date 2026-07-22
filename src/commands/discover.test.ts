@@ -19,7 +19,8 @@ describe('mcv discover', () => {
   });
 
   it('reports detection and known config paths for every supported IDE', async () => {
-    await createProgram({ homeDir, pathEnv: '' }).parseAsync(['node', 'mcv', 'discover']);
+    await createProgram({ homeDir, platform: 'win32', env: {}, pathEnv: '' })
+      .parseAsync(['node', 'mcv', 'discover']);
 
     expect(vi.mocked(console.log).mock.calls.map(([line]) => line)).toEqual([
       'Codex: not detected',

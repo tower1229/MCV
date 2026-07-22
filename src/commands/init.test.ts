@@ -6,7 +6,6 @@ import { createProgram } from '../index';
 
 describe('mcv init', () => {
   const originalCwd = process.cwd();
-  const originalEnv = { ...process.env };
   let testRoot: string;
   let repositoryPath: string;
   let stateRoot: string;
@@ -18,21 +17,22 @@ describe('mcv init', () => {
     fs.mkdirSync(repositoryPath);
 
     process.chdir(repositoryPath);
-    process.env.APPDATA = stateRoot;
-    process.env.HOME = stateRoot;
-    process.env.USERPROFILE = stateRoot;
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
-    process.env = { ...originalEnv };
     vi.restoreAllMocks();
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
 
   it('marks the current directory as an MCV repository and binds this device', async () => {
-    await createProgram().parseAsync(['node', 'mcv', 'init']);
+    await createProgram({
+      homeDir: stateRoot,
+      platform: 'win32',
+      env: { APPDATA: stateRoot },
+      pathEnv: '',
+    }).parseAsync(['node', 'mcv', 'init']);
 
     const manifest = parseYaml(
       fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8'),

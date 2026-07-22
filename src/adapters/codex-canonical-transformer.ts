@@ -52,7 +52,7 @@ export class CodexCanonicalTransformer implements CanonicalTransformer {
     const files: DeployFile[] = [];
     if (source.rules !== undefined) {
       files.push({
-        targetPath: path.join((context.env ?? process.env).CODEX_HOME || path.join(context.homeDir, '.codex'), 'AGENTS.md'),
+        targetPath: path.join(context.env.CODEX_HOME || path.join(context.homeDir, '.codex'), 'AGENTS.md'),
         content: source.rules,
       });
     }

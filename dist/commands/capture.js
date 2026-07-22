@@ -46,7 +46,7 @@ const state_1 = require("../utils/state");
 const sanitize_1 = require("../utils/sanitize");
 const structured_config_1 = require("../utils/structured-config");
 async function captureConfigurations(context, dependencies = {}, options = {}) {
-    const repositoryPath = (0, repository_1.resolveBoundRepository)();
+    const repositoryPath = (0, repository_1.resolveBoundRepository)(context);
     const manifest = (0, repository_1.readManifest)(repositoryPath);
     const definitions = (0, adapters_1.createAdapterDefinitions)().filter(({ targetId }) => manifest.targets[targetId]?.enabled === true);
     if (definitions.length === 0) {
@@ -130,9 +130,9 @@ async function captureConfigurations(context, dependencies = {}, options = {}) {
         return;
     }
     applyCaptureTransaction(plan);
-    const state = (0, state_1.readState)();
+    const state = (0, state_1.readState)(context);
     state.lastOperation = { kind: 'capture', time: new Date().toISOString(), success: true };
-    (0, state_1.writeState)(state);
+    (0, state_1.writeState)(context, state);
     console.log(`Captured ${plan.length} file(s) into ${repositoryPath}.`);
 }
 async function resolveMcpConflicts(repositoryPath, files, dependencies, options, warnings) {
@@ -315,7 +315,7 @@ function getStructuredFormat(repositoryPath) {
     return undefined;
 }
 function resolveManifestVariables(variables, context) {
-    const platform = context.platform ?? process.platform;
+    const platform = context.platform;
     const key = platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux';
     return Object.fromEntries(Object.entries(variables ?? {}).flatMap(([name, declaration]) => {
         const value = typeof declaration === 'string' ? declaration : (0, objects_1.isRecord)(declaration) && typeof declaration[key] === 'string' ? declaration[key] : undefined;

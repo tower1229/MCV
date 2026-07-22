@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import type { DeviceContext } from '../adapters/types';
 
 export interface BaselineSnapshot {
   recordedAt: string;
@@ -17,18 +17,18 @@ export interface McvState {
   lastOperation?: { kind: 'capture' | 'deploy' | 'restore'; time: string; success: boolean };
 }
 
-export function getStateFilePath(): string {
-  if (process.platform === 'win32') {
-    return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'mcv', 'config.json');
+export function getStateFilePath(context: DeviceContext): string {
+  if (context.platform === 'win32') {
+    return path.join(context.env.APPDATA || path.join(context.homeDir, 'AppData', 'Roaming'), 'mcv', 'config.json');
   }
-  if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', 'mcv', 'config.json');
+  if (context.platform === 'darwin') {
+    return path.join(context.homeDir, 'Library', 'Application Support', 'mcv', 'config.json');
   }
-  return path.join(os.homedir(), '.config', 'mcv', 'config.json');
+  return path.join(context.homeDir, '.config', 'mcv', 'config.json');
 }
 
-export function readState(): McvState {
-  const statePath = getStateFilePath();
+export function readState(context: DeviceContext): McvState {
+  const statePath = getStateFilePath(context);
   if (fs.existsSync(statePath)) {
     try {
       const content = fs.readFileSync(statePath, 'utf-8');
@@ -40,8 +40,8 @@ export function readState(): McvState {
   return {};
 }
 
-export function writeState(state: McvState): void {
-  const statePath = getStateFilePath();
+export function writeState(context: DeviceContext, state: McvState): void {
+  const statePath = getStateFilePath(context);
   const dir = path.dirname(statePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });

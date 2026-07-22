@@ -118,7 +118,7 @@ function parameterizeHomePath(value, context) {
             absolutePath.replace(/\\/g, '/'),
             absolutePath.replace(/\//g, '\\'),
         ])].map((variant) => ({ name, absolutePath: variant })));
-    const caseInsensitive = (context.platform ?? process.platform) === 'win32';
+    const caseInsensitive = context.platform === 'win32';
     let result = value;
     let replacementCount = 0;
     for (const replacement of replacements.sort((left, right) => right.absolutePath.length - left.absolutePath.length)) {
@@ -130,7 +130,24 @@ function parameterizeHomePath(value, context) {
             return `\${${replacement.name}}`;
         });
     }
-    return { value: result, replacementCount };
+    return {
+        value: replacementCount === 0
+            ? result
+            : normalizePortableSeparators(result, context.platform),
+        replacementCount,
+    };
+}
+function normalizePortableSeparators(value, platform) {
+    const uris = [];
+    const protectedValue = value.replace(/[a-zA-Z][a-zA-Z0-9+.-]*:\/\/\S+/g, (uri) => {
+        const token = `\uE000MCV_URI_${uris.length}\uE001`;
+        uris.push(uri);
+        return token;
+    });
+    const normalized = platform === 'win32'
+        ? protectedValue.replace(/\//g, '\\')
+        : protectedValue.replace(/\\/g, '/');
+    return normalized.replace(/\uE000MCV_URI_(\d+)\uE001/g, (_token, index) => uris[Number(index)]);
 }
 function escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

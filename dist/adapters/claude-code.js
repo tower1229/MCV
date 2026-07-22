@@ -79,7 +79,7 @@ class ClaudeCodeAdapter {
     }
     mergeDeploymentFiles(nativeFiles, canonicalFiles, context) {
         const mergedPaths = [
-            path.join((context.env ?? process.env).CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'settings.json'),
+            path.join(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'settings.json'),
             path.join(context.homeDir, '.claude.json'),
         ];
         const otherFiles = [...nativeFiles, ...canonicalFiles].filter((file) => !mergedPaths.includes(file.targetPath));
@@ -106,11 +106,11 @@ class ClaudeCodeAdapter {
         return [...otherFiles, ...mergedFiles];
     }
     hasExecutable(context) {
-        const platform = context.platform ?? process.platform;
-        const pathEnv = context.pathEnv ?? process.env.PATH ?? '';
+        const platform = context.platform;
+        const pathEnv = context.pathEnv ?? context.env.PATH ?? '';
         const delimiter = platform === 'win32' ? ';' : ':';
         const extensions = platform === 'win32'
-            ? (context.pathExt ?? process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+            ? (context.pathExt ?? context.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
                 .split(';')
                 .filter(Boolean)
                 .map((extension) => extension.toLowerCase())

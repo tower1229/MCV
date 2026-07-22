@@ -112,11 +112,11 @@ export class GeminiNativeFileHandler implements NativeFileHandler {
       const content = fs.readFileSync(source, 'utf8');
       if (relative === 'antigravity/keybindings.json') {
         const parsed = JSON.parse(content) as unknown;
-        const resolved = resolvePortableValue(parsed, context.variables ?? {}, context.platform ?? process.platform);
+        const resolved = resolvePortableValue(parsed, context.variables ?? {}, context.platform);
         return [{ targetPath, content: `${JSON.stringify(resolved, null, 2)}\n` }];
       }
       const parsed = parseStructuredObject(content, 'json', source);
-      const resolved = resolvePortableValue(parsed, context.variables ?? {}, context.platform ?? process.platform) as Record<string, unknown>;
+      const resolved = resolvePortableValue(parsed, context.variables ?? {}, context.platform) as Record<string, unknown>;
       return [{ targetPath, content: stringifyStructuredObject(resolved, 'json') }];
     });
     return { files: deployed, write: (file) => atomicWriteFile(file.targetPath, file.content) };
@@ -132,8 +132,8 @@ export class GeminiNativeFileHandler implements NativeFileHandler {
   }
 
   private antigravityUserDirectory(context: DeviceContext): string {
-    const env = context.env ?? {};
-    if ((context.platform ?? process.platform) === 'win32') return path.join(env.APPDATA || path.join(context.homeDir, 'AppData', 'Roaming'), 'Antigravity', 'User');
+    const env = context.env;
+    if (context.platform === 'win32') return path.join(env.APPDATA || path.join(context.homeDir, 'AppData', 'Roaming'), 'Antigravity', 'User');
     return path.join(context.homeDir, 'Library', 'Application Support', 'Antigravity', 'User');
   }
 }

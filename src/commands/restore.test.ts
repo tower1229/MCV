@@ -5,21 +5,16 @@ import { createProgram } from '../index';
 
 describe('mcv restore', () => {
   const originalCwd = process.cwd();
-  const originalEnv = { ...process.env };
   let testRoot: string;
   let stateRoot: string;
 
   beforeEach(() => {
     testRoot = fs.mkdtempSync(path.join(originalCwd, '.mcv-restore-test-'));
     stateRoot = path.join(testRoot, 'device');
-    process.env.APPDATA = stateRoot;
-    process.env.HOME = stateRoot;
-    process.env.USERPROFILE = stateRoot;
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
-    process.env = { ...originalEnv };
     vi.restoreAllMocks();
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
@@ -33,7 +28,8 @@ describe('mcv restore', () => {
     createBackup('older', '2026-07-18T00:00:00.000Z', 'older content');
     createBackup('latest', '2026-07-19T00:00:00.000Z', 'restored content');
 
-    await createProgram().parseAsync(['node', 'mcv', 'restore']);
+    await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
+      .parseAsync(['node', 'mcv', 'restore']);
 
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('restored content');
     expect(vi.mocked(console.log)).toHaveBeenCalledWith(`[restored] ${targetPath}`);
@@ -70,7 +66,8 @@ describe('mcv restore', () => {
       fs.writeFileSync(path.join(directory, 'settings.json'), content);
       fs.writeFileSync(path.join(backupRoot, name, 'manifest.json'), JSON.stringify({ createdAt, status, files: [{ originalPath: targetPath, backupPath: 'files/settings.json' }] }));
     }
-    await createProgram().parseAsync(['node', 'mcv', 'restore']);
+    await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
+      .parseAsync(['node', 'mcv', 'restore']);
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('safe backup');
   });
 });

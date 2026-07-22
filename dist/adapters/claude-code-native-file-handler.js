@@ -190,7 +190,7 @@ class ClaudeCodeNativeFileHandler {
             if (!(0, objects_1.isRecord)(parsed)) {
                 throw new Error(`${mapping.sourcePath} must contain a JSON object.`);
             }
-            const resolved = (0, variables_1.resolvePortableValue)(parsed, context.variables ?? {}, context.platform ?? process.platform);
+            const resolved = (0, variables_1.resolvePortableValue)(parsed, context.variables ?? {}, context.platform);
             return [{
                     targetPath: mapping.targetPath,
                     content: `${JSON.stringify(resolved, null, 2)}\n`,

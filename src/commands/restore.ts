@@ -3,6 +3,7 @@ import * as path from 'path';
 import { atomicWriteFile, atomicWriteTextFile, hashFile } from '../utils/files';
 import { isRecord } from '../utils/objects';
 import { getStateFilePath, readState, writeState } from '../utils/state';
+import type { DeviceContext } from '../adapters/types';
 
 interface BackupFile {
   action?: 'add' | 'modify' | 'delete';
@@ -14,8 +15,8 @@ interface BackupFile {
 interface BackupManifest { createdAt: string; status?: 'pending' | 'complete' | 'failed'; files: BackupFile[]; }
 interface BackupCandidate { directory: string; manifest: BackupManifest; }
 
-export function restoreLatestBackup(): void {
-  const stateDirectory = path.dirname(getStateFilePath());
+export function restoreLatestBackup(context: DeviceContext): void {
+  const stateDirectory = path.dirname(getStateFilePath(context));
   const latest = findLatestBackup(path.join(stateDirectory, 'backups'));
   if (!latest) throw new Error('No deployment backup found.');
 
@@ -49,11 +50,11 @@ export function restoreLatestBackup(): void {
     }
     throw error;
   }
-  const state = readState();
+  const state = readState(context);
   delete state.baselineSnapshot;
   delete state.managedInventory;
   state.lastOperation = { kind: 'restore', time: new Date().toISOString(), success: true };
-  writeState(state);
+  writeState(context, state);
   console.log(`Current pre-restore state saved to ${restoreBackup}.`);
   console.log(`Restored ${latest.manifest.files.length} file(s) from the latest backup.`);
 }

@@ -41,7 +41,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const sanitize_1 = require("../utils/sanitize");
 function getSkillSources(context, enabled) {
-    const env = context.env ?? {};
+    const env = context.env;
     const codexHome = env.CODEX_HOME || path.join(context.homeDir, '.codex');
     const claudeHome = env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude');
     const geminiHome = path.join(context.homeDir, '.gemini');

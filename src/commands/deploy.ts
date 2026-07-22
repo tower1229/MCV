@@ -47,7 +47,7 @@ export async function deployConfigurations(
   dependencies: DeployDependencies = {},
   options: DeployOptions = {},
 ): Promise<void> {
-  const repositoryPath = resolveBoundRepository();
+  const repositoryPath = resolveBoundRepository(context);
   const manifest = readManifest(repositoryPath);
   const definitions = createAdapterDefinitions().filter(
     ({ targetId }) => manifest.targets?.[targetId]?.enabled === true,
@@ -84,7 +84,7 @@ export async function deployConfigurations(
     safeDeployFiles,
     definitions.some(({ targetId }) => targetId === 'codex'),
   );
-  const state = options.pruneManaged === true ? readState() : undefined;
+  const state = options.pruneManaged === true ? readState(context) : undefined;
   const managedInventory = state?.managedInventory ?? {};
   for (const targetPath of legacySkillDuplicates.files) {
     managedInventory[targetPath] = { source: 'codex-legacy-duplicate', hash: hashFile(targetPath) };
@@ -92,7 +92,7 @@ export async function deployConfigurations(
   const plan = buildDeployPlan(safeDeployFiles, options.pruneManaged === true ? managedInventory : undefined);
   if (options.yes && plan.some((file) => file.change === 'delete')) throw new Error('--yes never applies deletions; review and confirm --prune-managed interactively.');
   if (plan.length === 0) {
-    recordDeploymentBaseline(safeDeployFiles);
+    recordDeploymentBaseline(context, safeDeployFiles, repositoryPath);
     if (options.json) console.log(JSON.stringify({ repositoryPath, changes: [], skipped: [...skippedLinks].map(([targetPath, linkPath]) => ({ targetPath, reason: 'symbolic-link-ancestor', linkPath })), legacySkillDuplicates: legacySkillDuplicates.names }, null, 2));
     else {
       reportSkippedLinks(skippedLinks);
@@ -123,18 +123,18 @@ export async function deployConfigurations(
     return;
   }
 
-  const backupDirectory = createDeploymentBackup(plan);
+  const backupDirectory = createDeploymentBackup(context, plan);
   try {
     applyDeployTransaction(plan, backupDirectory);
   } catch (error) {
     markDeploymentBackupFailed(backupDirectory, error);
-    const state = readState();
+    const state = readState(context);
     state.lastOperation = { kind: 'deploy', time: new Date().toISOString(), success: false };
-    writeState(state);
+    writeState(context, state);
     throw error;
   }
   finalizeDeploymentBackup(backupDirectory, plan);
-  recordDeploymentBaseline(safeDeployFiles, repositoryPath);
+  recordDeploymentBaseline(context, safeDeployFiles, repositoryPath);
   console.log(`Deployed ${plan.length} file(s) from ${repositoryPath}.`);
 }
 
@@ -156,7 +156,7 @@ function findLegacyCodexSkillDuplicates(
 ): LegacySkillDuplicates {
   if (!codexEnabled) return { names: [], files: [] };
   const officialRoot = path.resolve(context.homeDir, '.agents', 'skills');
-  const codexHome = (context.env ?? process.env).CODEX_HOME || path.join(context.homeDir, '.codex');
+  const codexHome = context.env.CODEX_HOME || path.join(context.homeDir, '.codex');
   const legacyRoot = path.resolve(codexHome, 'skills');
   if (samePath(officialRoot, legacyRoot, context.platform) || findSymbolicLinkAncestor(legacyRoot)) {
     return { names: [], files: [] };
@@ -212,8 +212,8 @@ function samePath(left: string, right: string, platform: NodeJS.Platform | undef
   return platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
-function recordDeploymentBaseline(files: DeployFile[], repositoryPath?: string): void {
-  const state = readState();
+function recordDeploymentBaseline(context: DeviceContext, files: DeployFile[], repositoryPath?: string): void {
+  const state = readState(context);
   state.baselineSnapshot = {
     recordedAt: new Date().toISOString(),
     files: Object.fromEntries(
@@ -229,11 +229,11 @@ function recordDeploymentBaseline(files: DeployFile[], repositoryPath?: string):
     .filter((file) => fs.existsSync(file.targetPath))
     .map((file) => [file.targetPath, { source: repositoryPath ?? 'repository', hash: hashFile(file.targetPath) }]));
   state.lastOperation = { kind: 'deploy', time: new Date().toISOString(), success: true };
-  writeState(state);
+  writeState(context, state);
 }
 
-function createDeploymentBackup(plan: PlannedDeployFile[]): string {
-  const backupRoot = path.join(path.dirname(getStateFilePath()), 'backups');
+function createDeploymentBackup(context: DeviceContext, plan: PlannedDeployFile[]): string {
+  const backupRoot = path.join(path.dirname(getStateFilePath(context)), 'backups');
   fs.mkdirSync(backupRoot, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backupDirectory = fs.mkdtempSync(path.join(backupRoot, `${timestamp}-`));
@@ -343,7 +343,7 @@ function resolveManifestVariables(
   context: DeviceContext,
   repositoryPath: string,
 ): Record<string, string> {
-  const platform = context.platform ?? process.platform;
+  const platform = context.platform;
   const platformKey = platform === 'win32'
     ? 'windows'
     : platform === 'darwin'

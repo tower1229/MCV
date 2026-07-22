@@ -6,6 +6,7 @@ import { getStateFilePath, readState, writeState } from './state';
 import { isRecord } from './objects';
 import { normalizeMcpServers } from '../core/mcp';
 import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020';
+import type { DeviceContext } from '../adapters/types';
 
 export const CURRENT_SCHEMA_VERSION = 2;
 let manifestValidator: ValidateFunction | undefined;
@@ -53,8 +54,8 @@ function createManifestValidator(): ValidateFunction {
   return new Ajv2020({ allErrors: true, useDefaults: true, strict: true }).compile(schema);
 }
 
-export function resolveBoundRepository(explicitPath?: string): string {
-  const state = readState();
+export function resolveBoundRepository(context: DeviceContext, explicitPath?: string): string {
+  const state = readState(context);
   const current = process.cwd();
   const candidate = explicitPath
     ? path.resolve(explicitPath)
@@ -73,25 +74,25 @@ export function resolveBoundRepository(explicitPath?: string): string {
   return candidate;
 }
 
-export function bindRepository(repositoryPath: string): void {
+export function bindRepository(context: DeviceContext, repositoryPath: string): void {
   const resolved = path.resolve(repositoryPath);
-  const manifest = migrateRepository(resolved, false);
-  const state = readState();
+  const manifest = migrateRepository(context, resolved, false);
+  const state = readState(context);
   state.schemaVersion = 2;
   state.repositoryPath = resolved;
   state.defaultRepositoryId = manifest.repositoryId;
-  writeState(state);
+  writeState(context, state);
 }
 
-export function unbindRepository(): void {
-  const state = readState();
+export function unbindRepository(context: DeviceContext): void {
+  const state = readState(context);
   delete state.repositoryPath;
   delete state.defaultRepositoryId;
   delete state.baselineSnapshot;
-  writeState(state);
+  writeState(context, state);
 }
 
-export function migrateRepository(repositoryPath: string, dryRun: boolean): McvManifest {
+export function migrateRepository(context: DeviceContext, repositoryPath: string, dryRun: boolean): McvManifest {
   const manifestPath = path.join(repositoryPath, 'mcv.yaml');
   if (!fs.existsSync(manifestPath)) throw new Error(`${repositoryPath} does not contain mcv.yaml.`);
   const raw = yaml.parse(fs.readFileSync(manifestPath, 'utf8')) as unknown;
@@ -128,7 +129,7 @@ export function migrateRepository(repositoryPath: string, dryRun: boolean): McvM
   delete (migrated as unknown as Record<string, unknown>).includeRuntimeState;
   delete (migrated as unknown as Record<string, unknown>).allowPlaintextSecrets;
   if (dryRun) return migrated;
-  const backupRoot = path.join(path.dirname(getStateFilePath()), 'repository-backups');
+  const backupRoot = path.join(path.dirname(getStateFilePath(context)), 'repository-backups');
   fs.mkdirSync(backupRoot, { recursive: true });
   const backupDirectory = fs.mkdtempSync(path.join(backupRoot, 'schema-v1-'));
   const backupPath = path.join(backupDirectory, 'repository');

@@ -39,7 +39,7 @@ const path = __importStar(require("path"));
 const uuid_1 = require("uuid");
 const yaml = __importStar(require("yaml"));
 const state_1 = require("../utils/state");
-function initRepository(targetDir = process.cwd()) {
+function initRepository(context, targetDir = process.cwd()) {
     const repositoryPath = path.resolve(targetDir);
     const manifestPath = path.join(repositoryPath, 'mcv.yaml');
     if (fs.existsSync(manifestPath)) {
@@ -78,7 +78,7 @@ function initRepository(targetDir = process.cwd()) {
     fs.writeFileSync(manifestPath, yamlStr, 'utf-8');
     console.log(`Initialized empty MCV repository in ${repositoryPath}`);
     console.log(`Repository ID: ${repositoryId}`);
-    const state = (0, state_1.readState)();
+    const state = (0, state_1.readState)(context);
     state.schemaVersion = 2;
     state.deviceId ??= (0, uuid_1.v4)();
     state.defaultRepositoryId = repositoryId;
@@ -87,7 +87,7 @@ function initRepository(targetDir = process.cwd()) {
         recordedAt: initializedAt,
         files: {},
     };
-    (0, state_1.writeState)(state);
+    (0, state_1.writeState)(context, state);
     console.log('Successfully bound current device to this MCV repository.');
     return true;
 }

@@ -145,9 +145,8 @@ TTY 中执行 `mcv` 打开首页；执行任一业务子命令则作为深链接
 
 ## Further Notes
 
-- The current verified baseline is 13 test files and 44 passing tests with TypeScript typecheck passing; implementation must preserve or strengthen this baseline at every phase.
+- The current verified baseline is 13 test files and 45 passing tests with TypeScript typecheck passing; implementation must preserve or strengthen this baseline at every phase.
 - Domain language must distinguish Repository, Baseline Snapshot, Drift, Pending Deployment Change, and Restore Conflict. Internal terms such as Canonical, Adapter, Overlay, and Drift should be rendered as user-facing English such as Shared Configuration, IDE Support, Merge Behavior, and Local Managed Change.
 - A non-Git Repository is a first-class valid state. Documentation may recommend Git, but product UI must not warn, prompt for `git init`, or imply degraded correctness.
 - The ESM decision is recorded separately as an accepted architecture decision because it is a package-wide, difficult-to-reverse trade-off.
 - Terminal recovery and basic PTY interruption coverage are release gates for the first default TUI, not optional polish.
-

@@ -34,7 +34,7 @@ describe('CodexAdapter', () => {
     );
     fs.writeFileSync(path.join(codexRoot, 'AGENTS.md'), '# Rules\n');
     const adapter = new CodexAdapter();
-    const context = { homeDir, platform: 'win32' as const };
+    const context = { homeDir, platform: 'win32' as const, env: {} };
 
     await expect(adapter.detect(context)).resolves.toMatchObject({
       id: 'codex',

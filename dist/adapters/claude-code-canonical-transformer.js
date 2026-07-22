@@ -82,13 +82,13 @@ class ClaudeCodeCanonicalTransformer {
         const files = [];
         if (source.rules !== undefined) {
             files.push({
-                targetPath: path.join((context.env ?? process.env).CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'CLAUDE.md'),
+                targetPath: path.join(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'CLAUDE.md'),
                 content: source.rules,
             });
         }
         for (const skill of source.skills) {
             files.push({
-                targetPath: path.join((context.env ?? process.env).CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'skills', skill.relativePath),
+                targetPath: path.join(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'skills', skill.relativePath),
                 content: skill.content,
             });
         }

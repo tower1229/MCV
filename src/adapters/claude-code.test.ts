@@ -21,7 +21,7 @@ describe('ClaudeCodeAdapter', () => {
     fs.writeFileSync(path.join(claudeDir, 'settings.json'), '{}');
 
     const adapter = new ClaudeCodeAdapter();
-    const context = { homeDir };
+    const context = { homeDir, platform: 'darwin' as const, env: {} };
 
     await expect(adapter.detect(context)).resolves.toEqual({
       id: 'claude-code',
@@ -65,6 +65,7 @@ describe('ClaudeCodeAdapter', () => {
       adapter.detect({
         homeDir,
         platform: 'win32',
+        env: {},
         pathEnv: binDir,
         pathExt: '.CMD',
       }),
@@ -77,9 +78,9 @@ describe('ClaudeCodeAdapter', () => {
     const adapter = new ClaudeCodeAdapter();
 
     await expect(
-      adapter.detect({ homeDir, pathEnv: '' }),
+      adapter.detect({ homeDir, platform: 'darwin', env: {}, pathEnv: '' }),
     ).resolves.toMatchObject({ detected: true });
-    await expect(adapter.detect({ homeDir, pathEnv: '' })).resolves.toMatchObject({
+    await expect(adapter.detect({ homeDir, platform: 'darwin', env: {}, pathEnv: '' })).resolves.toMatchObject({
       configDirectories: [
         {
           id: 'config-root',
@@ -100,6 +101,7 @@ describe('ClaudeCodeAdapter', () => {
       adapter.detect({
         homeDir,
         platform: 'win32',
+        env: {},
         pathEnv: binDir,
         pathExt: '.CMD',
       }),
@@ -123,7 +125,7 @@ describe('ClaudeCodeAdapter', () => {
     );
 
     const adapter = new ClaudeCodeAdapter();
-    const context = { homeDir, platform: 'win32' as const };
+    const context = { homeDir, platform: 'win32' as const, env: {} };
     const result = await adapter.capture(
       await adapter.discoverFiles(context),
       context,
@@ -164,7 +166,7 @@ describe('ClaudeCodeAdapter', () => {
     );
 
     const adapter = new ClaudeCodeAdapter();
-    const context = { homeDir };
+    const context = { homeDir, platform: 'darwin' as const, env: {} };
     const result = await adapter.capture(
       await adapter.discoverFiles(context),
       context,

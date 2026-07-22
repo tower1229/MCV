@@ -6,7 +6,6 @@ import { applyDeployTransaction, findSymbolicLinkAncestor, type PlannedDeployFil
 
 describe('mcv deploy', () => {
   const originalCwd = process.cwd();
-  const originalEnv = { ...process.env };
   let testRoot: string;
   let repositoryPath: string;
   let homeDir: string;
@@ -49,22 +48,26 @@ describe('mcv deploy', () => {
       }, null, 2)}\n`,
     );
     process.chdir(repositoryPath);
-    process.env.APPDATA = stateRoot;
-    process.env.HOME = stateRoot;
-    process.env.USERPROFILE = stateRoot;
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
-    process.env = { ...originalEnv };
     vi.restoreAllMocks();
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
 
+  const deviceContext = (platform: NodeJS.Platform = 'darwin') => ({
+    homeDir,
+    platform,
+    env: { APPDATA: stateRoot },
+  });
+
+  const windowsHomeDir = () => homeDir.replace(/\//g, '\\');
+
   it('deploys repository configuration with portable paths resolved for this device', async () => {
     await createProgram(
-      { homeDir, platform: 'win32' },
+      deviceContext('win32'),
       {},
       { confirmDeploy: async () => true },
     ).parseAsync(['node', 'mcv', 'deploy']);
@@ -75,7 +78,7 @@ describe('mcv deploy', () => {
       ),
     ).toEqual({
       theme: 'dark',
-      command: path.join(homeDir, 'Tools', 'tool.exe'),
+      command: `${windowsHomeDir()}\\Tools\\tool.exe`,
     });
   });
 
@@ -112,7 +115,7 @@ describe('mcv deploy', () => {
     fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), rules);
 
     await createProgram(
-      { homeDir, platform: 'win32' },
+      deviceContext('win32'),
       {},
       { confirmDeploy: async () => true },
     ).parseAsync(['node', 'mcv', 'deploy']);
@@ -130,7 +133,7 @@ describe('mcv deploy', () => {
     fs.writeFileSync(path.join(skillRoot, 'resources', 'fixture.bin'), resource);
 
     await createProgram(
-      { homeDir, platform: 'win32' },
+      deviceContext('win32'),
       {},
       { confirmDeploy: async () => true },
     ).parseAsync(['node', 'mcv', 'deploy']);
@@ -164,7 +167,7 @@ describe('mcv deploy', () => {
     fs.writeFileSync(path.join(divergentLegacySkill, 'SKILL.md'), '# Legacy TDD\n');
 
     await createProgram(
-      { homeDir, platform: 'win32' },
+      deviceContext('win32'),
     ).parseAsync(['node', 'mcv', 'deploy', '--dry-run']);
     expect(fs.existsSync(path.join(duplicateLegacySkill, 'SKILL.md'))).toBe(true);
     expect(vi.mocked(console.log)).toHaveBeenCalledWith(
@@ -172,7 +175,7 @@ describe('mcv deploy', () => {
     );
 
     await createProgram(
-      { homeDir, platform: 'win32' },
+      deviceContext('win32'),
       {},
       { confirmDeploy: async () => true },
     ).parseAsync(['node', 'mcv', 'deploy', '--prune-managed']);
@@ -182,7 +185,7 @@ describe('mcv deploy', () => {
     expect(fs.readFileSync(path.join(divergentLegacySkill, 'SKILL.md'), 'utf8')).toBe('# Legacy TDD\n');
     expect(fs.readFileSync(path.join(homeDir, '.agents', 'skills', 'grill-me', 'SKILL.md'), 'utf8')).toBe('# Grill Me\n');
 
-    await createProgram().parseAsync(['node', 'mcv', 'restore']);
+    await createProgram(deviceContext('win32')).parseAsync(['node', 'mcv', 'restore']);
     expect(fs.readFileSync(path.join(duplicateLegacySkill, 'SKILL.md'), 'utf8')).toBe('# Grill Me\n');
     expect(fs.readFileSync(path.join(duplicateLegacySkill, 'references', 'questions.md'), 'utf8')).toBe('# Questions\n');
   });
@@ -214,7 +217,7 @@ describe('mcv deploy', () => {
     );
 
     await createProgram(
-      { homeDir, platform: 'win32' },
+      deviceContext('win32'),
       {},
       { confirmDeploy: async () => true },
     ).parseAsync(['node', 'mcv', 'deploy']);
@@ -226,7 +229,7 @@ describe('mcv deploy', () => {
       customPreference: { compactMode: true },
       mcpServers: {
         'local-tools': {
-          command: path.join(homeDir, 'Tools', 'mcp.exe'),
+          command: `${windowsHomeDir()}\\Tools\\mcp.exe`,
           args: ['serve'],
         },
       },
@@ -256,7 +259,7 @@ describe('mcv deploy', () => {
     );
 
     const runDeploy = () => createProgram(
-      { homeDir, platform: 'win32' },
+      deviceContext('win32'),
       {},
       { confirmDeploy: async () => true },
     ).parseAsync(['node', 'mcv', 'deploy']);
@@ -266,7 +269,7 @@ describe('mcv deploy', () => {
     expect(JSON.parse(fs.readFileSync(settingsPath, 'utf8'))).toEqual({
       localOnly: true,
       theme: 'dark',
-      command: path.join(homeDir, 'Tools', 'tool.exe'),
+      command: `${windowsHomeDir()}\\Tools\\tool.exe`,
     });
     expect(JSON.parse(fs.readFileSync(statePath, 'utf8'))).toEqual({
       projects: { local: { trusted: true } },
@@ -302,7 +305,7 @@ describe('mcv deploy', () => {
 
   it('records deployed file hashes as the status baseline', async () => {
     const run = (command: 'deploy' | 'status') => createProgram(
-      { homeDir, platform: 'win32' },
+      deviceContext('win32'),
       {},
       { confirmDeploy: async () => true },
     ).parseAsync(['node', 'mcv', command]);
@@ -326,7 +329,7 @@ describe('mcv deploy', () => {
 
   it('deletes only prior managed inventory when prune is explicitly confirmed', async () => {
     const run = (...args: string[]) => createProgram(
-      { homeDir, platform: 'win32' }, {}, { confirmDeploy: async () => true },
+      deviceContext('win32'), {}, { confirmDeploy: async () => true },
     ).parseAsync(['node', 'mcv', 'deploy', ...args]);
     await run();
     const targetPath = path.join(homeDir, '.claude', 'settings.json');
@@ -334,7 +337,7 @@ describe('mcv deploy', () => {
     fs.rmSync(path.join(repositoryPath, 'ide', 'claude-code', 'native', 'settings.json'));
     await run('--prune-managed');
     expect(fs.existsSync(targetPath)).toBe(false);
-    await createProgram().parseAsync(['node', 'mcv', 'restore']);
+    await createProgram(deviceContext('win32')).parseAsync(['node', 'mcv', 'restore']);
     expect(fs.existsSync(targetPath)).toBe(true);
   });
 
@@ -367,7 +370,7 @@ describe('mcv deploy', () => {
     );
 
     await createProgram(
-      { homeDir, platform: 'darwin' },
+      deviceContext('darwin'),
       {},
       { confirmDeploy: async () => true },
     ).parseAsync(['node', 'mcv', 'deploy']);
@@ -382,8 +385,7 @@ describe('mcv deploy', () => {
   it('gives device variable values precedence over repository defaults', async () => {
     await createProgram(
       {
-        homeDir,
-        platform: 'win32',
+        ...deviceContext('win32'),
         variables: { TOOLS_HOME: 'D:\\本机 工具' },
       },
       {},
@@ -409,7 +411,7 @@ describe('mcv deploy', () => {
     );
 
     await createProgram(
-      { homeDir, platform: 'win32' },
+      deviceContext('win32'),
       {},
       { confirmDeploy: async () => true },
     ).parseAsync(['node', 'mcv', 'deploy']);
@@ -419,7 +421,7 @@ describe('mcv deploy', () => {
         fs.readFileSync(path.join(homeDir, '.claude', 'settings.json'), 'utf8'),
       ),
     ).toEqual({
-      command: `${path.join(homeDir, 'Tools', 'tool')} --url https://host.example/api`,
+      command: `${windowsHomeDir()}\\Tools\\tool --url https://host.example/api`,
     });
   });
 
@@ -451,7 +453,7 @@ describe('mcv deploy', () => {
     );
 
     await createProgram(
-      { homeDir },
+      deviceContext(),
       {},
       { confirmDeploy: async () => true },
     ).parseAsync(['node', 'mcv', 'deploy']);
@@ -485,7 +487,7 @@ describe('mcv deploy', () => {
     );
 
     await createProgram(
-      { homeDir },
+      deviceContext(),
       {},
       { confirmDeploy: async () => true },
     ).parseAsync(['node', 'mcv', 'deploy']);

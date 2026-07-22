@@ -39,8 +39,8 @@ const path = __importStar(require("path"));
 const files_1 = require("../utils/files");
 const objects_1 = require("../utils/objects");
 const state_1 = require("../utils/state");
-function restoreLatestBackup() {
-    const stateDirectory = path.dirname((0, state_1.getStateFilePath)());
+function restoreLatestBackup(context) {
+    const stateDirectory = path.dirname((0, state_1.getStateFilePath)(context));
     const latest = findLatestBackup(path.join(stateDirectory, 'backups'));
     if (!latest)
         throw new Error('No deployment backup found.');
@@ -78,11 +78,11 @@ function restoreLatestBackup() {
         }
         throw error;
     }
-    const state = (0, state_1.readState)();
+    const state = (0, state_1.readState)(context);
     delete state.baselineSnapshot;
     delete state.managedInventory;
     state.lastOperation = { kind: 'restore', time: new Date().toISOString(), success: true };
-    (0, state_1.writeState)(state);
+    (0, state_1.writeState)(context, state);
     console.log(`Current pre-restore state saved to ${restoreBackup}.`);
     console.log(`Restored ${latest.manifest.files.length} file(s) from the latest backup.`);
 }

@@ -23,7 +23,7 @@ describe('GeminiAdapter', () => {
       JSON.stringify({ ui: { theme: 'dark' }, mcpServers: { local: { command: 'server' } } }),
     );
     const adapter = new GeminiAdapter();
-    const context = { homeDir };
+    const context = { homeDir, platform: 'darwin' as const, env: {} };
 
     await expect(adapter.detect(context)).resolves.toMatchObject({
       id: 'gemini',

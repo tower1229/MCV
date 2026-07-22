@@ -127,7 +127,7 @@ class CodexNativeFileHandler {
         const files = [];
         if (fs.existsSync(sourcePath)) {
             const parsed = (0, structured_config_1.parseStructuredObject)(fs.readFileSync(sourcePath, 'utf8'), 'toml', sourcePath);
-            const resolved = (0, variables_1.resolvePortableValue)(parsed, context.variables ?? {}, context.platform ?? process.platform);
+            const resolved = (0, variables_1.resolvePortableValue)(parsed, context.variables ?? {}, context.platform);
             files.push({ targetPath, content: (0, structured_config_1.stringifyStructuredObject)(resolved, 'toml') });
         }
         return { files, write: (file) => (0, files_1.atomicWriteFile)(file.targetPath, file.content) };

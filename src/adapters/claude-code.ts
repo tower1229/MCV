@@ -80,7 +80,7 @@ export class ClaudeCodeAdapter implements IdeAdapter {
     context: DeviceContext,
   ): DeployOperation['files'] {
     const mergedPaths = [
-      path.join((context.env ?? process.env).CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'settings.json'),
+      path.join(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'settings.json'),
       path.join(context.homeDir, '.claude.json'),
     ];
     const otherFiles = [...nativeFiles, ...canonicalFiles].filter(
@@ -112,12 +112,12 @@ export class ClaudeCodeAdapter implements IdeAdapter {
   }
 
   private hasExecutable(context: DeviceContext): boolean {
-    const platform = context.platform ?? process.platform;
-    const pathEnv = context.pathEnv ?? process.env.PATH ?? '';
+    const platform = context.platform;
+    const pathEnv = context.pathEnv ?? context.env.PATH ?? '';
     const delimiter = platform === 'win32' ? ';' : ':';
     const extensions =
       platform === 'win32'
-        ? (context.pathExt ?? process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+        ? (context.pathExt ?? context.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
             .split(';')
             .filter(Boolean)
             .map((extension) => extension.toLowerCase())

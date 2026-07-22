@@ -30,7 +30,7 @@ export function getSkillSources(
   context: DeviceContext,
   enabled: { codex: boolean; claudeCode: boolean; gemini: boolean },
 ): SkillSource[] {
-  const env = context.env ?? {};
+  const env = context.env;
   const codexHome = env.CODEX_HOME || path.join(context.homeDir, '.codex');
   const claudeHome = env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude');
   const geminiHome = path.join(context.homeDir, '.gemini');

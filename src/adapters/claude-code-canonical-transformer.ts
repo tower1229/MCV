@@ -65,7 +65,7 @@ export class ClaudeCodeCanonicalTransformer implements CanonicalTransformer {
     const files: DeployFile[] = [];
     if (source.rules !== undefined) {
       files.push({
-        targetPath: path.join((context.env ?? process.env).CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'CLAUDE.md'),
+        targetPath: path.join(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'CLAUDE.md'),
         content: source.rules,
       });
     }
@@ -73,7 +73,7 @@ export class ClaudeCodeCanonicalTransformer implements CanonicalTransformer {
     for (const skill of source.skills) {
       files.push({
         targetPath: path.join(
-          (context.env ?? process.env).CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'),
+          context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'),
           'skills',
           skill.relativePath,
         ),

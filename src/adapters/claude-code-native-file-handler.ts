@@ -191,7 +191,7 @@ export class ClaudeCodeNativeFileHandler implements NativeFileHandler {
       const resolved = resolvePortableValue(
         parsed,
         context.variables ?? {},
-        context.platform ?? process.platform,
+        context.platform,
       );
       return [{
         targetPath: mapping.targetPath,

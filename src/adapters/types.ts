@@ -1,7 +1,7 @@
 export interface DeviceContext {
   homeDir: string;
-  platform?: NodeJS.Platform;
-  env?: NodeJS.ProcessEnv;
+  platform: NodeJS.Platform;
+  env: NodeJS.ProcessEnv;
   pathEnv?: string;
   pathExt?: string;
   variables?: Record<string, string>;

@@ -12,11 +12,11 @@ export function hasExecutable(
   executable: string,
   context: DeviceContext,
 ): boolean {
-  const platform = context.platform ?? process.platform;
-  const pathEnv = context.pathEnv ?? process.env.PATH ?? '';
+  const platform = context.platform;
+  const pathEnv = context.pathEnv ?? context.env.PATH ?? '';
   const delimiter = platform === 'win32' ? ';' : ':';
   const extensions = platform === 'win32'
-    ? (context.pathExt ?? process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
+    ? (context.pathExt ?? context.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD')
         .split(';')
         .filter(Boolean)
         .map((extension) => extension.toLowerCase())
@@ -40,7 +40,7 @@ export function readCanonicalSource(
   context: DeviceContext,
 ): CanonicalDeploySource {
   const commonRoot = path.join(repositoryPath, 'common');
-  const platformDirectory = (context.platform ?? process.platform) === 'win32' ? 'windows' : 'macos';
+  const platformDirectory = context.platform === 'win32' ? 'windows' : 'macos';
   const overrideRoot = path.join(repositoryPath, 'overrides', platformDirectory, 'common');
   const selectOverride = (name: string): string => {
     const override = path.join(overrideRoot, name);
@@ -59,7 +59,7 @@ export function readCanonicalSource(
     source.mcp = resolvePortableValue(
       yaml.parse(fs.readFileSync(mcpPath, 'utf8')) as unknown,
       context.variables ?? {},
-      context.platform ?? process.platform,
+      context.platform,
     );
   }
   const overridePaths: Record<string, string> = {
@@ -90,7 +90,7 @@ export function repositoryFileForPlatform(
   relativePath: string,
   context: DeviceContext,
 ): string {
-  const platformDirectory = (context.platform ?? process.platform) === 'win32' ? 'windows' : 'macos';
+  const platformDirectory = context.platform === 'win32' ? 'windows' : 'macos';
   const override = path.join(repositoryPath, 'overrides', platformDirectory, ...relativePath.split('/'));
   return fs.existsSync(override) ? override : path.join(repositoryPath, ...relativePath.split('/'));
 }

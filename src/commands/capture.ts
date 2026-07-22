@@ -38,7 +38,7 @@ export async function captureConfigurations(
   dependencies: CaptureDependencies = {},
   options: CaptureOptions = {},
 ): Promise<void> {
-  const repositoryPath = resolveBoundRepository();
+  const repositoryPath = resolveBoundRepository(context);
   const manifest = readManifest(repositoryPath);
   const definitions = createAdapterDefinitions().filter(
     ({ targetId }) => manifest.targets[targetId]?.enabled === true,
@@ -136,9 +136,9 @@ export async function captureConfigurations(
     return;
   }
   applyCaptureTransaction(plan);
-  const state = readState();
+  const state = readState(context);
   state.lastOperation = { kind: 'capture', time: new Date().toISOString(), success: true };
-  writeState(state);
+  writeState(context, state);
   console.log(`Captured ${plan.length} file(s) into ${repositoryPath}.`);
 }
 
@@ -318,7 +318,7 @@ function getStructuredFormat(repositoryPath: string): StructuredFormat | undefin
 }
 
 function resolveManifestVariables(variables: Record<string, unknown> | undefined, context: DeviceContext): Record<string, string> {
-  const platform = context.platform ?? process.platform;
+  const platform = context.platform;
   const key = platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : 'linux';
   return Object.fromEntries(Object.entries(variables ?? {}).flatMap(([name, declaration]) => {
     const value = typeof declaration === 'string' ? declaration : isRecord(declaration) && typeof declaration[key] === 'string' ? declaration[key] : undefined;

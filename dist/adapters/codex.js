@@ -71,7 +71,7 @@ class CodexAdapter {
             this.nativeFileHandler.readCanonical(repositoryPath, context),
         ]);
         const canonicalFiles = await this.canonicalTransformer.deploy(canonicalSource, context);
-        const configPath = path.join((context.env ?? process.env).CODEX_HOME || path.join(context.homeDir, '.codex'), 'config.toml');
+        const configPath = path.join(context.env.CODEX_HOME || path.join(context.homeDir, '.codex'), 'config.toml');
         return {
             files: this.mergeConfig(nativeOperation.files, canonicalFiles, configPath),
             write: nativeOperation.write,
