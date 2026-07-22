@@ -89,6 +89,63 @@ describe('mcv capture', () => {
     expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
   });
 
+  it('prints one structured Result JSON document for --yes', async () => {
+    await createProgram(deviceContext('win32')).parseAsync([
+      'node',
+      'mcv',
+      'capture',
+      '--yes',
+      '--json',
+    ]);
+
+    expect(console.log).toHaveBeenCalledOnce();
+    const result = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
+    expect(result).toMatchObject({
+      schemaVersion: 1,
+      operation: 'capture',
+      status: 'succeeded',
+      data: { appliedChangeIds: [expect.any(String)] },
+      issues: [],
+      nextActions: [],
+    });
+  });
+
+  it('prints only a Result summary for text --yes', async () => {
+    await createProgram(deviceContext('win32')).parseAsync([
+      'node',
+      'mcv',
+      'capture',
+      '--yes',
+    ]);
+
+    const output = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(output).toContain('Captured 1 selected item(s)');
+    expect(output).not.toContain('Capture Plan:');
+  });
+
+  it('blocks --yes when the Plan contains an unselected deletion', async () => {
+    const repositoryRules = path.join(repositoryPath, 'common', 'AGENTS.md');
+    fs.mkdirSync(path.dirname(repositoryRules), { recursive: true });
+    fs.writeFileSync(repositoryRules, '# Keep until reviewed\n');
+
+    await createProgram(deviceContext('win32')).parseAsync([
+      'node',
+      'mcv',
+      'capture',
+      '--yes',
+      '--json',
+    ]);
+
+    expect(console.log).toHaveBeenCalledOnce();
+    const result = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
+    expect(result).toMatchObject({
+      status: 'blocked',
+      issues: [expect.objectContaining({ code: 'capture.nonInteractiveBlocked' })],
+      nextActions: expect.arrayContaining([expect.stringContaining('interactively')]),
+    });
+    expect(fs.readFileSync(repositoryRules, 'utf8')).toBe('# Keep until reviewed\n');
+  });
+
   it('previews only sanitized content and does not write when the user declines', async () => {
     const confirmCapture = vi.fn().mockResolvedValue(false);
 

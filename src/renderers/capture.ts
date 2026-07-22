@@ -1,4 +1,4 @@
-import type { CapturePlan } from '../operations/capture';
+import type { CapturePlan, CaptureResult } from '../operations/capture';
 
 export function renderCapturePlanPlain(plan: CapturePlan): string[] {
   const lines = [`Capture Plan: ${plan.repositoryPath ?? 'not bound'}`];
@@ -34,6 +34,16 @@ export function renderCapturePlanPlain(plan: CapturePlan): string[] {
   }
   for (const action of plan.nextActions) lines.push(`Next: ${action}`);
   return lines;
+}
+
+export function renderCaptureResultPlain(result: CaptureResult): string[] {
+  if (result.status === 'succeeded') {
+    return [`Captured ${result.data?.appliedChangeIds.length ?? 0} selected item(s) into ${result.repositoryPath}.`];
+  }
+  return [
+    ...result.issues.map((issue) => `[${issue.severity}] ${issue.code}: ${issue.message}`),
+    ...result.nextActions.map((action) => `Next: ${action}`),
+  ];
 }
 
 function displayIde(ide: string): string {

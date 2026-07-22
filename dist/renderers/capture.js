@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.renderCapturePlanPlain = renderCapturePlanPlain;
+exports.renderCaptureResultPlain = renderCaptureResultPlain;
 function renderCapturePlanPlain(plan) {
     const lines = [`Capture Plan: ${plan.repositoryPath ?? 'not bound'}`];
     let currentGroup = '';
@@ -31,6 +32,15 @@ function renderCapturePlanPlain(plan) {
     for (const action of plan.nextActions)
         lines.push(`Next: ${action}`);
     return lines;
+}
+function renderCaptureResultPlain(result) {
+    if (result.status === 'succeeded') {
+        return [`Captured ${result.data?.appliedChangeIds.length ?? 0} selected item(s) into ${result.repositoryPath}.`];
+    }
+    return [
+        ...result.issues.map((issue) => `[${issue.severity}] ${issue.code}: ${issue.message}`),
+        ...result.nextActions.map((action) => `Next: ${action}`),
+    ];
 }
 function displayIde(ide) {
     if (ide === 'shared')

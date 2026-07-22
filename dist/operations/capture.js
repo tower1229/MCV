@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createCapturePlan = createCapturePlan;
+exports.applyCapturePlan = applyCapturePlan;
 const crypto = __importStar(require("crypto"));
 const buffer_1 = require("buffer");
 const fs = __importStar(require("fs"));
@@ -47,6 +48,7 @@ const repository_1 = require("../utils/repository");
 const sanitize_1 = require("../utils/sanitize");
 const structured_config_1 = require("../utils/structured-config");
 const contracts_1 = require("./contracts");
+const activeCapturePlans = new WeakMap();
 const EMPTY_SUMMARY = {
     sensitiveFieldCount: 0,
     parameterizedPathCount: 0,
@@ -57,7 +59,10 @@ async function createCapturePlan(context) {
     let repositoryPath = null;
     try {
         repositoryPath = (0, repository_1.resolveBoundRepository)(context);
-        return await buildCapturePlan(context, repositoryPath, operationId);
+        const mutations = new Map();
+        const plan = await buildCapturePlan(context, repositoryPath, operationId, mutations);
+        registerCapturePlan(plan, mutations);
+        return plan;
     }
     catch {
         return {
@@ -84,7 +89,7 @@ async function createCapturePlan(context) {
         };
     }
 }
-async function buildCapturePlan(context, repositoryPath, operationId) {
+async function buildCapturePlan(context, repositoryPath, operationId, mutations) {
     const manifest = (0, repository_1.readManifest)(repositoryPath);
     const definitions = (0, adapters_1.createAdapterDefinitions)().filter(({ targetId }) => manifest.targets[targetId]?.enabled === true);
     if (definitions.length === 0) {
@@ -113,7 +118,7 @@ async function buildCapturePlan(context, repositoryPath, operationId) {
     const captured = await Promise.all(definitions.map(async (definition) => {
         const discovered = await definition.adapter.discoverFiles(captureContext);
         const result = await definition.adapter.capture(discovered, captureContext);
-        return { definition, result };
+        return { definition, discovered, result };
     }));
     const issues = captured.flatMap(({ result }, resultIndex) => result.warnings.map((_warning, warningIndex) => ({
         severity: 'warning',
@@ -147,16 +152,25 @@ async function buildCapturePlan(context, repositoryPath, operationId) {
     });
     const changes = [];
     const plannedRepositoryPaths = new Set();
-    addRulesChange(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths);
-    addMcpChanges(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths);
-    addFileChanges(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths);
-    addSkillChanges(repositoryPath, skills.packages, changes, issues, plannedRepositoryPaths);
-    addRepositoryDeletionChanges(repositoryPath, definitions.map(({ targetId }) => targetId), sourcedFiles, skills.packages, changes, issues, plannedRepositoryPaths);
+    addRulesChange(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths, mutations);
+    addMcpChanges(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths, mutations);
+    addFileChanges(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths, mutations);
+    addSkillChanges(repositoryPath, skills.packages, changes, issues, plannedRepositoryPaths, mutations);
+    addRepositoryDeletionChanges(repositoryPath, definitions.map(({ targetId }) => targetId), sourcedFiles, skills.packages, changes, issues, plannedRepositoryPaths, mutations);
+    const rawSourceHash = hashSourcePaths([
+        ...captured.flatMap(({ discovered }) => discovered.map((file) => file.path)),
+        ...[...skills.packages.values()].flatMap((copies) => copies.flatMap((skill) => skill.files.map((file) => path.join(skill.directory, file.relativePath)))),
+    ]);
+    for (const mutation of mutations.values())
+        mutation.sourceHash = rawSourceHash;
     changes.sort(compareChanges);
-    const preconditions = Object.fromEntries(changes.flatMap((change) => [
-        [`source:${change.id}`, hashText(change.previews.map((preview) => preview.sha256).join('\n'))],
-        [`target:${change.id}`, hashRepositoryPaths(repositoryPath, change.repositoryPaths)],
-    ]));
+    const preconditions = {
+        sourceSnapshot: rawSourceHash,
+        ...Object.fromEntries(changes.flatMap((change) => [
+            [`source:${change.id}`, mutations.get(change.id)?.sourceHash ?? hashText('<missing>')],
+            [`target:${change.id}`, hashRepositoryPaths(repositoryPath, change.repositoryPaths)],
+        ])),
+    };
     const blocked = issues.some((issue) => issue.severity === 'decisionRequired' || issue.severity === 'error');
     return {
         schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
@@ -174,7 +188,358 @@ async function buildCapturePlan(context, repositoryPath, operationId) {
         summary,
     };
 }
-function addRulesChange(repositoryPath, files, changes, issues, plannedRepositoryPaths) {
+async function applyCapturePlan(context, plan, selection, options = {}) {
+    if (plan.status === 'failed')
+        return failedCaptureResult(plan.repositoryPath, plan.error, plan.issues);
+    const active = activeCapturePlans.get(plan);
+    if (!active || active.operationId !== plan.operationId) {
+        return failedCaptureResult(plan.repositoryPath, invalidPlanError());
+    }
+    const selectedIds = [...new Set(selection.changeIds)];
+    const knownIds = new Set(plan.changes.map((change) => change.id));
+    if (selectedIds.some((id) => !knownIds.has(id))) {
+        return failedCaptureResult(plan.repositoryPath, {
+            code: 'capture.invalidSelection',
+            message: 'The Capture selection contains an ID that is not in the active Plan.',
+            nextActions: ['Choose only change IDs from the current Capture Plan.'],
+        });
+    }
+    const selected = new Set(selectedIds);
+    const blocking = captureBlockingIssues(plan, selected, selection, options);
+    if (blocking.length > 0) {
+        return blockedCaptureResult(plan, blocking);
+    }
+    if (!plan.repositoryPath || (0, repository_1.resolveBoundRepository)(context) !== plan.repositoryPath) {
+        activeCapturePlans.delete(plan);
+        return failedCaptureResult(plan.repositoryPath, stalePlanError());
+    }
+    let freshPlan;
+    try {
+        freshPlan = await buildCapturePlan(context, plan.repositoryPath, plan.operationId, new Map());
+    }
+    catch {
+        activeCapturePlans.delete(plan);
+        return failedCaptureResult(plan.repositoryPath, stalePlanError());
+    }
+    if (!sameCaptureSnapshot(plan, freshPlan)) {
+        activeCapturePlans.delete(plan);
+        return failedCaptureResult(plan.repositoryPath, stalePlanError());
+    }
+    const selectedChanges = plan.changes.filter((change) => selected.has(change.id));
+    const selectedMutations = selectedChanges.map((change) => active.mutations.get(change.id));
+    if (selectedMutations.some((mutation) => mutation === undefined)) {
+        return blockedCaptureResult(plan, [{
+                severity: 'decisionRequired',
+                code: 'capture.unresolvedDecision',
+                message: 'The Capture selection does not resolve every required decision.',
+            }]);
+    }
+    try {
+        const applied = applyCaptureTransaction(plan.repositoryPath, selectedMutations, options.moveFile ?? fs.renameSync, options.restoreFile ?? ((targetPath, content) => fs.writeFileSync(targetPath, content)));
+        activeCapturePlans.delete(plan);
+        return {
+            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            operation: 'capture',
+            status: 'succeeded',
+            repositoryPath: plan.repositoryPath,
+            changes: selectedChanges,
+            issues: [],
+            nextActions: [],
+            data: {
+                appliedChangeIds: selectedIds,
+                writtenPaths: applied.writtenPaths,
+                deletedPaths: applied.deletedPaths,
+            },
+        };
+    }
+    catch (error) {
+        activeCapturePlans.delete(plan);
+        if (error instanceof CaptureRollbackError) {
+            return failedCaptureResult(plan.repositoryPath, {
+                code: 'capture.rollbackFailed',
+                message: 'Capture failed and could not fully restore the Repository automatically.',
+                technicalDetails: error.message,
+                nextActions: [`Restore the affected files from ${error.recoveryPath}, then generate a new Capture Plan.`],
+            });
+        }
+        return failedCaptureResult(plan.repositoryPath, {
+            code: 'capture.transactionFailed',
+            message: 'Capture could not commit the selected changes and restored the Repository.',
+            technicalDetails: error instanceof Error ? error.message : String(error),
+            nextActions: ['Check Repository permissions, then generate and review a new Capture Plan.'],
+        });
+    }
+}
+function registerCapturePlan(plan, mutations) {
+    freezeCapturePlan(plan);
+    activeCapturePlans.set(plan, { operationId: plan.operationId, mutations });
+}
+function freezeCapturePlan(plan) {
+    for (const change of plan.changes) {
+        for (const previewItem of change.previews)
+            Object.freeze(previewItem);
+        Object.freeze(change.previews);
+        Object.freeze(change.repositoryPaths);
+        Object.freeze(change);
+    }
+    Object.freeze(plan.changes);
+    for (const issue of plan.issues)
+        Object.freeze(issue);
+    Object.freeze(plan.issues);
+    Object.freeze(plan.nextActions);
+    Object.freeze(plan.preconditions);
+    if (plan.status === 'failed') {
+        Object.freeze(plan.error.nextActions);
+        Object.freeze(plan.error);
+    }
+    Object.freeze(plan.summary);
+    Object.freeze(plan);
+}
+function captureBlockingIssues(plan, selected, selection, options) {
+    if (options.nonInteractive) {
+        const unsafe = plan.issues.some((issue) => issue.severity !== 'notice')
+            || plan.changes.some((change) => change.change === 'delete');
+        return unsafe ? [{
+                severity: 'decisionRequired',
+                code: 'capture.nonInteractiveBlocked',
+                message: 'Non-interactive Capture cannot apply warnings, decisions, errors, or deletions.',
+            }] : [];
+    }
+    const confirmed = new Set(selection.confirmedIssueCodes ?? []);
+    const unconfirmedWarnings = plan.issues.filter((issue) => issue.severity === 'warning' && !confirmed.has(issue.code));
+    if (unconfirmedWarnings.length > 0)
+        return unconfirmedWarnings;
+    const errors = plan.issues.filter((issue) => issue.severity === 'error');
+    if (errors.length > 0)
+        return errors;
+    const conflictChanges = plan.changes.filter((change) => change.change === 'conflict');
+    const groups = new Map();
+    for (const change of conflictChanges) {
+        if (!change.decisionGroupId)
+            return plan.issues.filter((issue) => issue.severity === 'decisionRequired');
+        groups.set(change.decisionGroupId, [...(groups.get(change.decisionGroupId) ?? []), change]);
+    }
+    if ([...groups.values()].some((choices) => choices.filter((choice) => selected.has(choice.id)).length !== 1)) {
+        return plan.issues.filter((issue) => issue.severity === 'decisionRequired');
+    }
+    return [];
+}
+function sameCaptureSnapshot(left, right) {
+    return left.repositoryPath === right.repositoryPath
+        && stableValue(left.preconditions) === stableValue(right.preconditions)
+        && stableValue(left.changes.map((change) => ({
+            id: change.id,
+            change: change.change,
+            repositoryPaths: change.repositoryPaths,
+        }))) === stableValue(right.changes.map((change) => ({
+            id: change.id,
+            change: change.change,
+            repositoryPaths: change.repositoryPaths,
+        })))
+        && stableValue(left.issues.map((issue) => [issue.severity, issue.code]))
+            === stableValue(right.issues.map((issue) => [issue.severity, issue.code]));
+}
+function applyCaptureTransaction(repositoryPath, mutations, moveFile, restoreFile) {
+    const writes = new Map();
+    const deletes = new Set();
+    const mcpMutations = mutations.flatMap((mutation) => mutation.mcp ? [mutation.mcp] : []);
+    for (const mutation of mutations) {
+        for (const write of mutation.writes)
+            writes.set(write.repositoryPath, write.content);
+        for (const deleted of mutation.deletes)
+            deletes.add(deleted);
+    }
+    if (mcpMutations.length > 0) {
+        const registryPath = path.join(repositoryPath, 'common', 'mcp.yaml');
+        const servers = readMcpServers(registryPath);
+        for (const mutation of mcpMutations) {
+            if (mutation.value === undefined)
+                delete servers[mutation.name];
+            else
+                servers[mutation.name] = mutation.value;
+        }
+        writes.set('common/mcp.yaml', Buffer.from(yaml.stringify({ servers })));
+        deletes.delete('common/mcp.yaml');
+    }
+    const affected = new Set([...writes.keys(), ...deletes]);
+    const originals = new Map();
+    const temporaryPaths = [];
+    const createdDirectories = [];
+    for (const repositoryFile of affected) {
+        const target = repositoryTarget(repositoryPath, repositoryFile);
+        originals.set(repositoryFile, fs.existsSync(target) ? fs.readFileSync(target) : undefined);
+    }
+    const recoveryPath = createRecoveryBackup(repositoryPath, originals);
+    try {
+        let sequence = 0;
+        for (const [repositoryFile, content] of writes) {
+            const target = repositoryTarget(repositoryPath, repositoryFile);
+            createParentDirectories(path.dirname(target), repositoryPath, createdDirectories);
+            const temporary = `${target}.mcv-${process.pid}-${sequence += 1}.tmp`;
+            fs.writeFileSync(temporary, content);
+            temporaryPaths.push(temporary);
+        }
+        for (let index = 0; index < temporaryPaths.length; index += 1) {
+            const repositoryFile = [...writes.keys()][index];
+            moveFile(temporaryPaths[index], repositoryTarget(repositoryPath, repositoryFile));
+        }
+        for (const repositoryFile of deletes) {
+            fs.rmSync(repositoryTarget(repositoryPath, repositoryFile), { force: true });
+        }
+    }
+    catch (error) {
+        const rollbackErrors = [];
+        for (const temporary of temporaryPaths) {
+            try {
+                fs.rmSync(temporary, { force: true });
+            }
+            catch (rollbackError) {
+                rollbackErrors.push(errorMessage(rollbackError));
+            }
+        }
+        for (const [repositoryFile, original] of originals) {
+            const target = repositoryTarget(repositoryPath, repositoryFile);
+            try {
+                if (original === undefined)
+                    fs.rmSync(target, { force: true });
+                else {
+                    fs.mkdirSync(path.dirname(target), { recursive: true });
+                    restoreFile(target, original);
+                }
+            }
+            catch (rollbackError) {
+                rollbackErrors.push(`${repositoryFile}: ${errorMessage(rollbackError)}`);
+            }
+        }
+        for (const directory of createdDirectories.reverse()) {
+            try {
+                fs.rmdirSync(directory);
+            }
+            catch { /* directory is not empty */ }
+        }
+        if (rollbackErrors.length > 0) {
+            throw new CaptureRollbackError(recoveryPath, `${errorMessage(error)} Rollback was incomplete: ${rollbackErrors.join('; ')}`);
+        }
+        removeRecoveryBackup(recoveryPath);
+        throw error;
+    }
+    removeRecoveryBackup(recoveryPath);
+    return { writtenPaths: [...writes.keys()], deletedPaths: [...deletes] };
+}
+function removeRecoveryBackup(recoveryPath) {
+    try {
+        fs.rmSync(recoveryPath, { recursive: true, force: true });
+    }
+    catch { /* a complete backup is safe to leave for manual cleanup */ }
+}
+class CaptureRollbackError extends Error {
+    recoveryPath;
+    constructor(recoveryPath, message) {
+        super(message);
+        this.recoveryPath = recoveryPath;
+        this.name = 'CaptureRollbackError';
+    }
+}
+function createRecoveryBackup(repositoryPath, originals) {
+    const recoveryPath = path.join(path.dirname(repositoryPath), `.${path.basename(repositoryPath)}.mcv-capture-${(0, uuid_1.v4)()}`);
+    try {
+        const filesPath = path.join(recoveryPath, 'files');
+        fs.mkdirSync(filesPath, { recursive: true });
+        const manifest = [...originals].map(([repositoryFile, original], index) => {
+            const backupFile = original === undefined ? null : `${index}`;
+            if (backupFile && original !== undefined) {
+                fs.writeFileSync(path.join(filesPath, backupFile), original);
+            }
+            return { repositoryFile, backupFile };
+        });
+        fs.writeFileSync(path.join(recoveryPath, 'manifest.json'), `${JSON.stringify({ repositoryPath, files: manifest }, null, 2)}\n`);
+        return recoveryPath;
+    }
+    catch (error) {
+        fs.rmSync(recoveryPath, { recursive: true, force: true });
+        throw error;
+    }
+}
+function errorMessage(error) {
+    return error instanceof Error ? error.message : String(error);
+}
+function createParentDirectories(directory, repositoryPath, created) {
+    if (fs.existsSync(directory) || directory === repositoryPath)
+        return;
+    createParentDirectories(path.dirname(directory), repositoryPath, created);
+    fs.mkdirSync(directory);
+    created.push(directory);
+}
+function repositoryTarget(repositoryPath, repositoryFile) {
+    return path.join(repositoryPath, ...repositoryFile.split('/'));
+}
+function writeMutation(repositoryPath, content, sourcePaths) {
+    return {
+        writes: [{ repositoryPath, content: toBuffer(content) }],
+        deletes: [],
+        sourceHash: hashSourcePaths(sourcePaths),
+    };
+}
+function deleteMutation(repositoryPaths) {
+    return { writes: [], deletes: [...repositoryPaths], sourceHash: hashText('<missing>') };
+}
+function emptyMutation(sourcePaths) {
+    return { writes: [], deletes: [], sourceHash: hashSourcePaths(sourcePaths) };
+}
+function mcpMutation(name, value, sourcePaths) {
+    return { ...emptyMutation(sourcePaths), mcp: { name, value } };
+}
+function hashSourcePaths(sourcePaths) {
+    const hash = crypto.createHash('sha256');
+    const unique = [...new Set(sourcePaths)].sort();
+    if (unique.length === 0)
+        hash.update('<missing>');
+    for (const sourcePath of unique) {
+        hash.update(sourcePath);
+        hash.update(fs.existsSync(sourcePath) ? fs.readFileSync(sourcePath) : '<missing>');
+    }
+    return hash.digest('hex');
+}
+function invalidPlanError() {
+    return {
+        code: 'operation.invalidPlan',
+        message: 'The Capture Plan is not the active in-process Plan.',
+        nextActions: ['Generate and review a new Capture Plan.'],
+    };
+}
+function stalePlanError() {
+    return {
+        code: 'operation.stalePlan',
+        message: 'Capture source or Repository target state changed after the Plan was generated.',
+        nextActions: ['Generate and review a new Capture Plan.'],
+    };
+}
+function failedCaptureResult(repositoryPath, error, issues = [{ severity: 'error', code: error.code, message: error.message }]) {
+    return {
+        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        operation: 'capture',
+        status: 'failed',
+        repositoryPath,
+        changes: [],
+        issues,
+        nextActions: error.nextActions,
+        error,
+    };
+}
+function blockedCaptureResult(plan, issues) {
+    return {
+        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        operation: 'capture',
+        status: 'blocked',
+        repositoryPath: plan.repositoryPath,
+        changes: [],
+        issues,
+        nextActions: issues.some((issue) => issue.severity === 'warning')
+            ? ['Confirm every warning explicitly before applying the Capture Plan.']
+            : ['Review and resolve the Capture Plan interactively before applying it.'],
+    };
+}
+function addRulesChange(repositoryPath, files, changes, issues, plannedRepositoryPaths, mutations) {
     const candidates = files.filter((file) => file.repositoryPath === 'common/AGENTS.md');
     if (candidates.length === 0)
         return;
@@ -193,10 +558,12 @@ function addRulesChange(repositoryPath, files, changes, issues, plannedRepositor
     }, issues);
     if (!planned || sameOptionalContent(planned.existingContent, planned.finalContent))
         return;
-    changes.push(fileChange('shared', 'shared', 'file', 'rules', 'Canonical Rules', planned, issues));
+    const change = fileChange('shared', 'shared', 'file', 'rules', 'Shared Rules', planned, issues);
+    changes.push(change);
+    mutations.set(change.id, writeMutation(planned.repositoryPath, planned.finalContent, candidates.map((candidate) => candidate.sourcePath)));
     plannedRepositoryPaths.add(planned.repositoryPath);
 }
-function addMcpChanges(repositoryPath, files, changes, issues, plannedRepositoryPaths) {
+function addMcpChanges(repositoryPath, files, changes, issues, plannedRepositoryPaths, mutations) {
     const registryFiles = files.filter((file) => file.repositoryPath === 'common/mcp.yaml' && typeof file.content === 'string');
     const candidatesByName = new Map();
     for (const file of registryFiles) {
@@ -225,7 +592,7 @@ function addMcpChanges(repositoryPath, files, changes, issues, plannedRepository
         const existing = (0, objects_1.isRecord)(existingServers[name]) ? existingServers[name] : undefined;
         if (deviceCandidates.length === 0 && existing) {
             const content = yaml.stringify({ [name]: existing });
-            changes.push({
+            const change = {
                 id: selectionId('mcp', 'shared', name),
                 ide: 'shared',
                 surface: 'shared',
@@ -236,7 +603,9 @@ function addMcpChanges(repositoryPath, files, changes, issues, plannedRepository
                 defaultSelected: false,
                 repositoryPaths: [`common/mcp.yaml#${name}`],
                 previews: [preview(`common/mcp.yaml#${name}`, '', content, issues)],
-            });
+            };
+            changes.push(change);
+            mutations.set(change.id, mcpMutation(name, undefined, []));
             continue;
         }
         const allCandidates = uniqueMcpCandidates([
@@ -248,7 +617,7 @@ function addMcpChanges(repositoryPath, files, changes, issues, plannedRepository
             const decisionGroupId = `capture-decision-${hashText(`mcp\0${name}`).slice(0, 16)}`;
             for (const candidate of allCandidates) {
                 const candidateValue = stableValue(candidate.value);
-                changes.push({
+                const change = {
                     id: selectionId('mcp', 'shared', `${name}\0${candidateValue}`),
                     ide: 'shared',
                     surface: 'shared',
@@ -260,8 +629,29 @@ function addMcpChanges(repositoryPath, files, changes, issues, plannedRepository
                     repositoryPaths: [`common/mcp.yaml#${name}`],
                     previews: [preview(`common/mcp.yaml#${name}`, yaml.stringify({ [name]: candidate.value }), undefined, issues)],
                     decisionGroupId,
-                });
+                    decision: 'candidate',
+                    sourceLabel: sourceLabel(candidate.ide, candidate.sourcePath),
+                };
+                changes.push(change);
+                mutations.set(change.id, mcpMutation(name, candidate.value, deviceCandidates.map((item) => item.sourcePath)));
             }
+            const skip = {
+                id: selectionId('mcp', 'shared', `${name}\0skip`),
+                ide: 'shared',
+                surface: 'shared',
+                itemType: 'mcp',
+                capability: 'mcp',
+                name: `${name} (skip)`,
+                change: 'conflict',
+                defaultSelected: false,
+                repositoryPaths: [`common/mcp.yaml#${name}`],
+                previews: [],
+                decisionGroupId,
+                decision: 'skip',
+                sourceLabel: 'Skip this item',
+            };
+            changes.push(skip);
+            mutations.set(skip.id, emptyMutation(deviceCandidates.map((item) => item.sourcePath)));
             issues.push({
                 severity: 'decisionRequired',
                 code: 'capture.mcpCoreConflict',
@@ -274,7 +664,7 @@ function addMcpChanges(repositoryPath, files, changes, issues, plannedRepository
             continue;
         const before = existing ? yaml.stringify({ [name]: existing }) : undefined;
         const after = yaml.stringify({ [name]: merged });
-        changes.push({
+        const change = {
             id: selectionId('mcp', 'shared', name),
             ide: 'shared',
             surface: 'shared',
@@ -285,12 +675,14 @@ function addMcpChanges(repositoryPath, files, changes, issues, plannedRepository
             defaultSelected: true,
             repositoryPaths: [`common/mcp.yaml#${name}`],
             previews: [preview(`common/mcp.yaml#${name}`, after, before, issues)],
-        });
+        };
+        changes.push(change);
+        mutations.set(change.id, mcpMutation(name, merged, deviceCandidates.map((item) => item.sourcePath)));
     }
     if (names.size > 0)
         plannedRepositoryPaths.add('common/mcp.yaml');
 }
-function addFileChanges(repositoryPath, files, changes, issues, plannedRepositoryPaths) {
+function addFileChanges(repositoryPath, files, changes, issues, plannedRepositoryPaths, mutations) {
     const groups = new Map();
     for (const file of files) {
         if (file.repositoryPath === 'common/AGENTS.md' || file.repositoryPath === 'common/mcp.yaml')
@@ -306,35 +698,66 @@ function addFileChanges(repositoryPath, files, changes, issues, plannedRepositor
                 code: 'capture.managedSourceConflict',
                 message: `Capture source ${safeLabel(repositoryFile)} has conflicting definitions.`,
             });
-            const first = unique[0];
-            changes.push({
-                id: selectionId('file', first.ide, repositoryFile),
-                ide: first.ide,
-                surface: first.surface,
+            const decisionGroupId = `capture-decision-${hashText(`file\0${repositoryFile}`).slice(0, 16)}`;
+            for (const candidate of unique) {
+                const planned = planFile(repositoryPath, candidate, issues);
+                if (!planned)
+                    continue;
+                const change = {
+                    id: selectionId('file', candidate.ide, `${repositoryFile}\0${hashBuffer(toBuffer(candidate.content))}`),
+                    ide: candidate.ide,
+                    surface: candidate.surface,
+                    itemType: repositoryFile.includes('mcp-overrides') ? 'mcp' : 'file',
+                    capability: repositoryFile.includes('mcp-overrides') ? 'mcp' : 'native',
+                    name: path.posix.basename(repositoryFile),
+                    change: 'conflict',
+                    defaultSelected: false,
+                    repositoryPaths: [repositoryFile],
+                    previews: [preview(repositoryFile, planned.finalContent, planned.existingContent, issues)],
+                    decisionGroupId,
+                    decision: 'candidate',
+                    sourceLabel: sourceLabel(candidate.surface, candidate.sourcePath),
+                };
+                changes.push(change);
+                mutations.set(change.id, writeMutation(repositoryFile, planned.finalContent, unique.map((item) => item.sourcePath)));
+            }
+            const skip = {
+                id: selectionId('file', 'shared', `${repositoryFile}\0skip`),
+                ide: unique[0].ide,
+                surface: unique[0].surface,
                 itemType: repositoryFile.includes('mcp-overrides') ? 'mcp' : 'file',
                 capability: repositoryFile.includes('mcp-overrides') ? 'mcp' : 'native',
-                name: path.posix.basename(repositoryFile),
+                name: `${path.posix.basename(repositoryFile)} (skip)`,
                 change: 'conflict',
                 defaultSelected: false,
                 repositoryPaths: [repositoryFile],
-                previews: unique.map((candidate, index) => preview(`${repositoryFile}:candidate-${index + 1}`, candidate.content, undefined, issues)),
-            });
+                previews: [],
+                decisionGroupId,
+                decision: 'skip',
+                sourceLabel: 'Skip this item',
+            };
+            changes.push(skip);
+            mutations.set(skip.id, emptyMutation(unique.map((item) => item.sourcePath)));
             continue;
         }
         const planned = planFile(repositoryPath, unique[0], issues);
         if (!planned || sameOptionalContent(planned.existingContent, planned.finalContent))
             continue;
         const mcpOverride = repositoryFile.includes('mcp-overrides');
-        changes.push(fileChange(planned.ide, planned.surface, mcpOverride ? 'mcp' : 'file', mcpOverride ? 'mcp' : 'native', path.posix.basename(repositoryFile), planned, issues));
+        const change = fileChange(planned.ide, planned.surface, mcpOverride ? 'mcp' : 'file', mcpOverride ? 'mcp' : 'native', path.posix.basename(repositoryFile), planned, issues);
+        changes.push(change);
+        mutations.set(change.id, writeMutation(planned.repositoryPath, planned.finalContent, candidates.map((candidate) => candidate.sourcePath)));
     }
 }
-function addSkillChanges(repositoryPath, packages, changes, issues, plannedRepositoryPaths) {
+function addSkillChanges(repositoryPath, packages, changes, issues, plannedRepositoryPaths, mutations) {
     for (const [name, copies] of packages) {
         const selected = newestSkillCopy(uniqueSkillCopies(copies));
         const previews = [];
         const repositoryPaths = [];
         let changed = false;
         let added = true;
+        const writes = [];
+        const deletes = [];
         for (const file of selected.files) {
             const repositoryFile = path.posix.join('common', 'skills', name, file.relativePath.replace(/\\/g, '/'));
             const targetPath = path.join(repositoryPath, ...repositoryFile.split('/'));
@@ -346,6 +769,7 @@ function addSkillChanges(repositoryPath, packages, changes, issues, plannedRepos
             previews.push(preview(repositoryFile, file.content, existing, issues));
             repositoryPaths.push(repositoryFile);
             plannedRepositoryPaths.add(repositoryFile);
+            writes.push({ repositoryPath: repositoryFile, content: Buffer.from(file.content) });
         }
         const repositorySkillRoot = path.join(repositoryPath, 'common', 'skills', name);
         for (const repositoryFile of listFiles(repositorySkillRoot)) {
@@ -358,10 +782,11 @@ function addSkillChanges(repositoryPath, packages, changes, issues, plannedRepos
             previews.push(preview(relative, '', existing, issues));
             repositoryPaths.push(relative);
             plannedRepositoryPaths.add(relative);
+            deletes.push(relative);
         }
         if (!changed)
             continue;
-        changes.push({
+        const change = {
             id: selectionId('skill', 'shared', name),
             ide: 'shared',
             surface: selected.source.surface,
@@ -372,14 +797,22 @@ function addSkillChanges(repositoryPath, packages, changes, issues, plannedRepos
             defaultSelected: true,
             repositoryPaths: repositoryPaths.sort(),
             previews: previews.sort((left, right) => left.repositoryPath.localeCompare(right.repositoryPath)),
+        };
+        changes.push(change);
+        mutations.set(change.id, {
+            writes,
+            deletes,
+            sourceHash: hashSourcePaths(selected.files.map((file) => path.join(selected.directory, file.relativePath))),
         });
     }
 }
-function addRepositoryDeletionChanges(repositoryPath, enabledTargets, sourcedFiles, packages, changes, issues, plannedRepositoryPaths) {
+function addRepositoryDeletionChanges(repositoryPath, enabledTargets, sourcedFiles, packages, changes, issues, plannedRepositoryPaths, mutations) {
     const repositoryRules = path.join(repositoryPath, 'common', 'AGENTS.md');
     if (fs.existsSync(repositoryRules)
         && !sourcedFiles.some((file) => file.repositoryPath === 'common/AGENTS.md')) {
-        changes.push(deletionFileChange(repositoryPath, 'shared', 'shared', 'file', 'rules', 'Canonical Rules', 'common/AGENTS.md', issues));
+        const change = deletionFileChange(repositoryPath, 'shared', 'shared', 'file', 'rules', 'Shared Rules', 'common/AGENTS.md', issues);
+        changes.push(change);
+        mutations.set(change.id, deleteMutation(change.repositoryPaths));
     }
     const skillsRoot = path.join(repositoryPath, 'common', 'skills');
     if (fs.existsSync(skillsRoot)) {
@@ -388,7 +821,7 @@ function addRepositoryDeletionChanges(repositoryPath, enabledTargets, sourcedFil
                 continue;
             const repositoryPaths = listFiles(path.join(skillsRoot, entry.name))
                 .map((file) => path.relative(repositoryPath, file).replace(/\\/g, '/'));
-            changes.push({
+            const change = {
                 id: selectionId('skill', 'shared', entry.name),
                 ide: 'shared',
                 surface: 'shared',
@@ -399,7 +832,9 @@ function addRepositoryDeletionChanges(repositoryPath, enabledTargets, sourcedFil
                 defaultSelected: false,
                 repositoryPaths,
                 previews: repositoryPaths.map((repositoryFile) => preview(repositoryFile, '', fs.readFileSync(path.join(repositoryPath, ...repositoryFile.split('/'))), issues)),
-            });
+            };
+            changes.push(change);
+            mutations.set(change.id, deleteMutation(repositoryPaths));
         }
     }
     for (const targetId of enabledTargets) {
@@ -409,7 +844,9 @@ function addRepositoryDeletionChanges(repositoryPath, enabledTargets, sourcedFil
             const relative = path.relative(repositoryPath, repositoryFile).replace(/\\/g, '/');
             if (plannedRepositoryPaths.has(relative))
                 continue;
-            changes.push(deletionFileChange(repositoryPath, ide, surfaceName(relative, targetId), 'file', 'native', path.posix.basename(relative), relative, issues));
+            const change = deletionFileChange(repositoryPath, ide, surfaceName(relative, targetId), 'file', 'native', path.posix.basename(relative), relative, issues);
+            changes.push(change);
+            mutations.set(change.id, deleteMutation(change.repositoryPaths));
         }
     }
 }
@@ -681,4 +1118,9 @@ function compareChanges(left, right) {
 }
 function safeLabel(value) {
     return /^[a-zA-Z0-9._/-]+$/.test(value) ? value : '[redacted name]';
+}
+function sourceLabel(surface, sourcePath) {
+    if (surface === 'shared')
+        return 'Repository';
+    return `${surface} / ${safeLabel(path.basename(sourcePath))}`;
 }
