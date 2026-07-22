@@ -30,7 +30,7 @@ TTY 中执行 `mcv` 打开首页；执行任一业务子命令则作为深链接
 16. As an MCV user, I want environment and IDE support shown on Overview, so that missing variables and unavailable surfaces are visible before deployment.
 17. As an MCV user, I want Capture previews to contain only sanitized and parameterized content, so that previewing a change cannot expose raw secrets.
 18. As an MCV user, I want Capture selection grouped by IDE and then by file, Skill, or MCP, so that I can accept only the configuration I intend to store.
-19. As an MCV user, I want managed-source conflicts to require choosing an authoritative source or skipping the item, so that MCV never guesses which configuration is correct.
+19. As an MCV user, I want safe managed-source conflicts resolved deterministically and only ambiguous conflicts to require choosing an authoritative source or skipping the item, so that routine duplicates do not interrupt Capture and unsafe guesses are still prevented.
 20. As an MCV user, I want Repository deletion candidates unselected by default, so that a device-side deletion is not silently propagated.
 21. As an MCV user, I want Deploy selection grouped by IDE and capability, so that I can control Shared Rules, Skills, MCP, and IDE-specific Configuration independently.
 22. As an MCV user, I want a detailed Diff before Apply, so that the content I approve matches the content MCV writes.
@@ -81,6 +81,7 @@ TTY 中执行 `mcv` 打开首页；执行任一业务子命令则作为深链接
 - `--yes` performs Plan generation and Apply in one process and rejects incomplete, ambiguous, destructive, or unsafe execution before the first write.
 - Deletions are never selected by default and are never applied by `--yes`.
 - Capture Diff uses only processed, sanitized, parameterized content. Binary content is represented by metadata rather than dumped to the screen.
+- Capture resolves safe source differences before presenting the Plan: Canonical Rules merge by deduplicated Markdown blocks with existing Repository content first, and conflicting Skill packages select the copy with the newest included-file modification time. Ties are deterministic. Ambiguous MCP core conflicts remain `decisionRequired`.
 - Deploy never exposes a global overwrite switch. Overlay ownership remains authoritative: managed fields may change, Native undeclared fields are preserved, and Local fields remain excluded.
 - Whole-file replacement is supported only for content fully owned by MCV and is labeled explicitly in the preview.
 - Successful partial Deploy updates Baseline Snapshot and managed inventory only for selected and successfully applied items while preserving valid prior state for unselected items.
@@ -145,7 +146,7 @@ TTY 中执行 `mcv` 打开首页；执行任一业务子命令则作为深链接
 
 ## Further Notes
 
-- The current verified baseline is 13 test files and 45 passing tests with TypeScript typecheck passing; implementation must preserve or strengthen this baseline at every phase.
+- The current verified baseline is 14 test files and 49 passing tests with TypeScript typecheck passing; implementation must preserve or strengthen this baseline at every phase.
 - Domain language must distinguish Repository, Baseline Snapshot, Drift, Pending Deployment Change, and Restore Conflict. Internal terms such as Canonical, Adapter, Overlay, and Drift should be rendered as user-facing English such as Shared Configuration, IDE Support, Merge Behavior, and Local Managed Change.
 - A non-Git Repository is a first-class valid state. Documentation may recommend Git, but product UI must not warn, prompt for `git init`, or imply degraded correctness.
 - The ESM decision is recorded separately as an accepted architecture decision because it is a package-wide, difficult-to-reverse trade-off.

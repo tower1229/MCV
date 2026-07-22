@@ -16,6 +16,7 @@ export interface SkillPackage {
   source: SkillSource;
   directory: string;
   hash: string;
+  modifiedAtMs: number;
   files: Array<{ relativePath: string; content: Buffer }>;
   warnings: string[];
 }
@@ -84,6 +85,8 @@ export function collectSkills(sources: SkillSource[]): SkillCollection {
         source,
         directory,
         hash: hash.digest('hex'),
+        modifiedAtMs: Math.max(...files.map((file) =>
+          fs.statSync(path.join(directory, file.relativePath)).mtimeMs)),
         files,
         warnings: packageWarnings,
       };

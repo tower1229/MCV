@@ -210,7 +210,49 @@ describe('mcv capture', () => {
     });
   });
 
-  it('rejects conflicting canonical rules from multiple enabled IDEs', async () => {
+  it('automatically captures the newest complete copy of a conflicting Skill', async () => {
+    fs.writeFileSync(
+      path.join(repositoryPath, 'mcv.yaml'),
+      [
+        'schemaVersion: 2',
+        'repositoryId: test',
+        'initializedAt: test',
+        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+        'capture: { preserveUnknownNativeFields: true }',
+        'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+        'targets:',
+        '  codex:',
+        '    enabled: true',
+        '  gemini:',
+        '    enabled: true',
+        'variables: {}',
+        '',
+      ].join('\n'),
+    );
+    const oldSkill = path.join(homeDir, '.codex', 'skills', 'review');
+    const newSkill = path.join(homeDir, '.gemini', 'config', 'skills', 'review');
+    fs.mkdirSync(oldSkill, { recursive: true });
+    fs.mkdirSync(newSkill, { recursive: true });
+    const oldFile = path.join(oldSkill, 'SKILL.md');
+    const newFile = path.join(newSkill, 'SKILL.md');
+    fs.writeFileSync(oldFile, '---\nname: review\n---\n# Old review\n');
+    fs.writeFileSync(newFile, '---\nname: review\n---\n# New review\n');
+    fs.utimesSync(oldFile, new Date('2026-01-01T00:00:00Z'), new Date('2026-01-01T00:00:00Z'));
+    fs.utimesSync(newFile, new Date('2026-07-01T00:00:00Z'), new Date('2026-07-01T00:00:00Z'));
+    const selectConflict = vi.fn();
+
+    await createProgram(
+      { ...deviceContext(), pathEnv: '' },
+      { confirmCapture: async () => true, selectConflict },
+    ).parseAsync(['node', 'mcv', 'capture']);
+
+    expect(selectConflict).not.toHaveBeenCalled();
+    expect(
+      fs.readFileSync(path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md'), 'utf8'),
+    ).toContain('# New review');
+  });
+
+  it('automatically merges distinct canonical rules from multiple enabled IDEs', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
@@ -232,15 +274,59 @@ describe('mcv capture', () => {
       ].join('\n'),
     );
     fs.mkdirSync(path.join(homeDir, '.codex'), { recursive: true });
-    fs.writeFileSync(path.join(homeDir, '.codex', 'AGENTS.md'), '# Codex rules\n');
-    fs.writeFileSync(path.join(homeDir, '.claude', 'CLAUDE.md'), '# Claude rules\n');
-
-    await expect(createProgram(
-      { ...deviceContext(), pathEnv: '' },
-      { confirmCapture: async () => true },
-    ).parseAsync(['node', 'mcv', 'capture'])).rejects.toThrow(
-      'Conflicting managed captures for common/AGENTS.md',
+    fs.mkdirSync(path.join(homeDir, '.gemini'), { recursive: true });
+    fs.writeFileSync(
+      path.join(homeDir, '.codex', 'AGENTS.md'),
+      '# Personal rules\n\nAlways run tests.\n\nUse TypeScript.\n',
     );
-    expect(fs.existsSync(path.join(repositoryPath, 'common', 'AGENTS.md'))).toBe(false);
+    fs.writeFileSync(
+      path.join(homeDir, '.claude', 'CLAUDE.md'),
+      '# Personal rules\n\nAlways run tests.\n\nPrefer clear names.\n',
+    );
+    fs.writeFileSync(
+      path.join(homeDir, '.gemini', 'GEMINI.md'),
+      '# Personal rules\n\nUse TypeScript.\n\nDocument risks.\n',
+    );
+    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repositoryPath, 'common', 'AGENTS.md'),
+      '# Personal rules\n\nPreserve repository knowledge.\n',
+    );
+    const selectConflict = vi.fn();
+
+    await createProgram(
+      { ...deviceContext(), pathEnv: '' },
+      { confirmCapture: async () => true, selectConflict },
+    ).parseAsync(['node', 'mcv', 'capture']);
+
+    expect(selectConflict).not.toHaveBeenCalled();
+    expect(
+      fs.readFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), 'utf8'),
+    ).toBe(
+      '# Personal rules\n\nPreserve repository knowledge.\n\nAlways run tests.\n\nUse TypeScript.\n\nPrefer clear names.\n\nDocument risks.\n',
+    );
+  });
+
+  it('preserves Repository rules when capturing from a single enabled IDE', async () => {
+    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repositoryPath, 'common', 'AGENTS.md'),
+      '# Personal rules\n\nPreserve repository knowledge.\n',
+    );
+    fs.writeFileSync(
+      path.join(homeDir, '.claude', 'CLAUDE.md'),
+      '# Personal rules\n\nCapture local knowledge.\n',
+    );
+
+    await createProgram(
+      deviceContext(),
+      { confirmCapture: async () => true },
+    ).parseAsync(['node', 'mcv', 'capture']);
+
+    expect(
+      fs.readFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), 'utf8'),
+    ).toBe(
+      '# Personal rules\n\nPreserve repository knowledge.\n\nCapture local knowledge.\n',
+    );
   });
 });

@@ -48,10 +48,12 @@ export function createProgram(
       if (!initialized || !process.stdin.isTTY) return;
       await discoverConfigurations(context);
       const prompt = createInterface({ input: process.stdin, output: process.stdout });
+      let shouldCapture = false;
       try {
         const answer = await prompt.question('Capture discovered configuration now? [Y/n] ');
-        if (!/^(n|no)$/i.test(answer.trim())) await captureConfigurations(context, captureDependencies);
+        shouldCapture = !/^(n|no)$/i.test(answer.trim());
       } finally { prompt.close(); }
+      if (shouldCapture) await captureConfigurations(context, captureDependencies);
     });
 
   program
@@ -106,16 +108,18 @@ export function createProgram(
   program.action(async () => {
     if (!process.stdin.isTTY) { program.outputHelp(); return; }
     const prompt = createInterface({ input: process.stdin, output: process.stdout });
+    let command: string | undefined;
+    let repositoryPath: string | undefined;
     try {
       const answer = await prompt.question('MCV: 1) discover 2) capture 3) deploy 4) status 5) restore 6) bind  Select: ');
       if (answer.trim() === '6') {
-        const repositoryPath = await prompt.question('Repository path (blank to cancel): ');
-        if (repositoryPath.trim()) bind(context, repositoryPath.trim());
-        return;
+        repositoryPath = (await prompt.question('Repository path (blank to cancel): ')).trim();
+      } else {
+        command = ({ '1': 'discover', '2': 'capture', '3': 'deploy', '4': 'status', '5': 'restore' } as Record<string, string>)[answer.trim()];
       }
-      const command = ({ '1': 'discover', '2': 'capture', '3': 'deploy', '4': 'status', '5': 'restore' } as Record<string, string>)[answer.trim()];
-      if (command) await createProgram(context, captureDependencies, deployDependencies).parseAsync(['node', 'mcv', command]);
     } finally { prompt.close(); }
+    if (repositoryPath) bind(context, repositoryPath);
+    else if (command) await createProgram(context, captureDependencies, deployDependencies).parseAsync(['node', 'mcv', command]);
   });
 
   return program;

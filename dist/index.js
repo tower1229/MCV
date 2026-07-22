@@ -70,14 +70,16 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
             return;
         await (0, discover_1.discoverConfigurations)(context);
         const prompt = (0, promises_1.createInterface)({ input: process.stdin, output: process.stdout });
+        let shouldCapture = false;
         try {
             const answer = await prompt.question('Capture discovered configuration now? [Y/n] ');
-            if (!/^(n|no)$/i.test(answer.trim()))
-                await (0, capture_1.captureConfigurations)(context, captureDependencies);
+            shouldCapture = !/^(n|no)$/i.test(answer.trim());
         }
         finally {
             prompt.close();
         }
+        if (shouldCapture)
+            await (0, capture_1.captureConfigurations)(context, captureDependencies);
     });
     program
         .command('capture')
@@ -128,21 +130,24 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
             return;
         }
         const prompt = (0, promises_1.createInterface)({ input: process.stdin, output: process.stdout });
+        let command;
+        let repositoryPath;
         try {
             const answer = await prompt.question('MCV: 1) discover 2) capture 3) deploy 4) status 5) restore 6) bind  Select: ');
             if (answer.trim() === '6') {
-                const repositoryPath = await prompt.question('Repository path (blank to cancel): ');
-                if (repositoryPath.trim())
-                    (0, binding_1.bind)(context, repositoryPath.trim());
-                return;
+                repositoryPath = (await prompt.question('Repository path (blank to cancel): ')).trim();
             }
-            const command = { '1': 'discover', '2': 'capture', '3': 'deploy', '4': 'status', '5': 'restore' }[answer.trim()];
-            if (command)
-                await createProgram(context, captureDependencies, deployDependencies).parseAsync(['node', 'mcv', command]);
+            else {
+                command = { '1': 'discover', '2': 'capture', '3': 'deploy', '4': 'status', '5': 'restore' }[answer.trim()];
+            }
         }
         finally {
             prompt.close();
         }
+        if (repositoryPath)
+            (0, binding_1.bind)(context, repositoryPath);
+        else if (command)
+            await createProgram(context, captureDependencies, deployDependencies).parseAsync(['node', 'mcv', command]);
     });
     return program;
 }

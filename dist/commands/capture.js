@@ -71,25 +71,11 @@ async function captureConfigurations(context, dependencies = {}, options = {}) {
     const skillFiles = [];
     for (const [name, copies] of skillCollection.packages) {
         const unique = uniqueSkillCopies(copies);
-        let selected = unique[0];
-        if (unique.length > 1) {
-            const repositorySkill = `common/skills/${name}`;
-            const candidates = unique.map((skill) => `${skill.source.surface}: ${skill.directory}`);
-            const choice = dependencies.selectConflict
-                ? await dependencies.selectConflict(repositorySkill, candidates)
-                : options.yes || options.dryRun || !process.stdin.isTTY
-                    ? undefined
-                    : await selectConflictInTerminal(repositorySkill, candidates);
-            if (choice === undefined || !unique[choice]) {
-                warnings.push(`Skipped conflicting Skill ${name}; choose an authoritative source interactively.`);
-                continue;
-            }
-            selected = unique[choice];
-        }
+        const selected = newestSkillCopy(unique);
         skillFiles.push(...(0, skills_1.skillPackageToCaptureFiles)(selected));
     }
     const mcpResolvedFiles = await resolveMcpConflicts(repositoryPath, results.flatMap((result) => result.files), dependencies, options, warnings);
-    const adapterFiles = await resolveCanonicalConflicts(mcpResolvedFiles, dependencies, options);
+    const adapterFiles = await resolveCanonicalConflicts(repositoryPath, mcpResolvedFiles, dependencies, options, warnings);
     const plan = buildCapturePlan(repositoryPath, [...adapterFiles, ...skillFiles], warnings);
     if (options.yes && warnings.length > 0) {
         throw new Error('--yes refused because the capture plan contains warnings or skipped conflicts; review it interactively.');
@@ -193,19 +179,37 @@ function stableValue(value) {
         return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableValue(value[key])}`).join(',')}}`;
     return JSON.stringify(value);
 }
-async function resolveCanonicalConflicts(files, dependencies, options) {
+async function resolveCanonicalConflicts(repositoryRoot, files, dependencies, options, warnings) {
     const result = [];
     const groups = new Map();
     for (const file of files)
         groups.set(file.repositoryPath, [...(groups.get(file.repositoryPath) ?? []), file]);
     for (const [repositoryPath, candidates] of groups) {
-        if (repositoryPath === 'common/mcp.yaml' || candidates.length === 1) {
+        if (repositoryPath === 'common/mcp.yaml') {
             result.push(...candidates);
             continue;
         }
-        const unique = candidates.filter((candidate, index) => candidates.findIndex((other) => sameContent(other.content, candidate.content)) === index);
+        const repositoryFile = path.join(repositoryRoot, ...repositoryPath.split('/'));
+        const candidatesWithRepository = repositoryPath === 'common/AGENTS.md' && fs.existsSync(repositoryFile)
+            ? [{
+                    sourcePath: repositoryFile,
+                    repositoryPath,
+                    content: fs.readFileSync(repositoryFile, 'utf8'),
+                    ownership: 'managed',
+                }, ...candidates]
+            : candidates;
+        const unique = candidatesWithRepository.filter((candidate, index) => candidatesWithRepository.findIndex((other) => sameContent(other.content, candidate.content)) === index);
         if (unique.length === 1) {
             result.push(unique[0]);
+            continue;
+        }
+        if (repositoryPath === 'common/AGENTS.md'
+            && unique.every((candidate) => typeof candidate.content === 'string')) {
+            result.push({
+                ...unique[0],
+                sourcePath: unique.map((candidate) => candidate.sourcePath).join(', '),
+                content: mergeCanonicalRules(unique.map((candidate) => candidate.content)),
+            });
             continue;
         }
         const labels = unique.map((candidate) => candidate.sourcePath);
@@ -215,15 +219,35 @@ async function resolveCanonicalConflicts(files, dependencies, options) {
                 ? undefined
                 : await selectConflictInTerminal(repositoryPath, labels);
         if (choice === undefined || !unique[choice]) {
-            throw new Error(`Conflicting managed captures for ${repositoryPath}; choose an authoritative source interactively.`);
+            warnings.push(`Skipped conflicting managed capture ${repositoryPath}; choose an authoritative source interactively.`);
+            continue;
         }
         result.push(unique[choice]);
     }
     return result;
 }
+function mergeCanonicalRules(contents) {
+    const blocks = [];
+    const seen = new Set();
+    for (const content of contents) {
+        for (const block of content.replace(/\r\n?/g, '\n').trim().split(/\n{2,}/)) {
+            const normalized = block.trim();
+            if (!normalized || seen.has(normalized))
+                continue;
+            seen.add(normalized);
+            blocks.push(normalized);
+        }
+    }
+    return `${blocks.join('\n\n')}\n`;
+}
 function uniqueSkillCopies(copies) {
     const seen = new Set();
     return copies.filter((copy) => !seen.has(copy.hash) && seen.add(copy.hash));
+}
+function newestSkillCopy(copies) {
+    return [...copies].sort((left, right) => right.modifiedAtMs - left.modifiedAtMs
+        || left.source.surface.localeCompare(right.source.surface)
+        || left.directory.localeCompare(right.directory))[0];
 }
 function buildCapturePlan(repositoryPath, files, warnings) {
     const planned = new Map();

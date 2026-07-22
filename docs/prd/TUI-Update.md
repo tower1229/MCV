@@ -6,7 +6,7 @@
 
 不建议现在重写 Go，也不建议直接在现有 `captureConfigurations()` / `deployConfigurations()` 外包一层全屏界面。当前安全闭环已经成立，主要问题是操作模块不够“深”：计划生成、输出、询问和执行混在一起，TUI 无法可靠复用。
 
-当前测试基线正常：13 个测试文件、45 项测试全部通过，TypeScript 类型检查通过。
+当前测试基线正常：14 个测试文件、49 项测试全部通过，TypeScript 类型检查通过。
 
 ## 现状判断
 
@@ -263,7 +263,7 @@ Init Apply 只负责创建合法空数据仓库并绑定当前设备。成功后
 扫描 → 处理冲突 → 展示安全计划 → 按文件选择 → 确认 → 写入 → 验证
 ```
 
-需要补齐当前缺失的分层选择：顶层按 IDE 选择，展开后按配置文件、Skill 或 MCP 选择；支持 “Accept all safe changes” 和 “Cancel all changes”，但不做字段级编辑。设备端已删除而仓库仍存在的配置作为删除候选展示，默认不选中。冲突选择继续支持 “Choose authoritative source” 或 “Skip”。
+需要补齐当前缺失的分层选择：顶层按 IDE 选择，展开后按配置文件、Skill 或 MCP 选择；支持 “Accept all safe changes” 和 “Cancel all changes”，但不做字段级编辑。设备端已删除而仓库仍存在的配置作为删除候选展示，默认不选中。Rules 去重合并和最新 Skill 选择属于安全自动决策；无法自动解决的同名 MCP 核心定义冲突继续支持 “Choose authoritative source” 或 “Skip”。
 
 ### Deploy 流程
 

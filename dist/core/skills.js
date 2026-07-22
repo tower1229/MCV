@@ -98,6 +98,7 @@ function collectSkills(sources) {
                 source,
                 directory,
                 hash: hash.digest('hex'),
+                modifiedAtMs: Math.max(...files.map((file) => fs.statSync(path.join(directory, file.relativePath)).mtimeMs)),
                 files,
                 warnings: packageWarnings,
             };

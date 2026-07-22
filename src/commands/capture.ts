@@ -65,21 +65,7 @@ export async function captureConfigurations(
   const skillFiles: CaptureFile[] = [];
   for (const [name, copies] of skillCollection.packages) {
     const unique = uniqueSkillCopies(copies);
-    let selected = unique[0];
-    if (unique.length > 1) {
-      const repositorySkill = `common/skills/${name}`;
-      const candidates = unique.map((skill) => `${skill.source.surface}: ${skill.directory}`);
-      const choice = dependencies.selectConflict
-        ? await dependencies.selectConflict(repositorySkill, candidates)
-        : options.yes || options.dryRun || !process.stdin.isTTY
-          ? undefined
-          : await selectConflictInTerminal(repositorySkill, candidates);
-      if (choice === undefined || !unique[choice]) {
-        warnings.push(`Skipped conflicting Skill ${name}; choose an authoritative source interactively.`);
-        continue;
-      }
-      selected = unique[choice];
-    }
+    const selected = newestSkillCopy(unique);
     skillFiles.push(...skillPackageToCaptureFiles(selected));
   }
   const mcpResolvedFiles = await resolveMcpConflicts(
@@ -90,9 +76,11 @@ export async function captureConfigurations(
     warnings,
   );
   const adapterFiles = await resolveCanonicalConflicts(
+    repositoryPath,
     mcpResolvedFiles,
     dependencies,
     options,
+    warnings,
   );
   const plan = buildCapturePlan(
     repositoryPath,
@@ -201,21 +189,44 @@ function stableValue(value: unknown): string {
 }
 
 async function resolveCanonicalConflicts(
+  repositoryRoot: string,
   files: CaptureFile[],
   dependencies: CaptureDependencies,
   options: CaptureOptions,
+  warnings: string[],
 ): Promise<CaptureFile[]> {
   const result: CaptureFile[] = [];
   const groups = new Map<string, CaptureFile[]>();
   for (const file of files) groups.set(file.repositoryPath, [...(groups.get(file.repositoryPath) ?? []), file]);
   for (const [repositoryPath, candidates] of groups) {
-    if (repositoryPath === 'common/mcp.yaml' || candidates.length === 1) {
+    if (repositoryPath === 'common/mcp.yaml') {
       result.push(...candidates);
       continue;
     }
-    const unique = candidates.filter((candidate, index) => candidates.findIndex((other) => sameContent(other.content, candidate.content)) === index);
+    const repositoryFile = path.join(repositoryRoot, ...repositoryPath.split('/'));
+    const candidatesWithRepository = repositoryPath === 'common/AGENTS.md' && fs.existsSync(repositoryFile)
+      ? [{
+          sourcePath: repositoryFile,
+          repositoryPath,
+          content: fs.readFileSync(repositoryFile, 'utf8'),
+          ownership: 'managed' as const,
+        }, ...candidates]
+      : candidates;
+    const unique = candidatesWithRepository.filter((candidate, index) =>
+      candidatesWithRepository.findIndex((other) => sameContent(other.content, candidate.content)) === index);
     if (unique.length === 1) {
       result.push(unique[0]);
+      continue;
+    }
+    if (
+      repositoryPath === 'common/AGENTS.md'
+      && unique.every((candidate) => typeof candidate.content === 'string')
+    ) {
+      result.push({
+        ...unique[0],
+        sourcePath: unique.map((candidate) => candidate.sourcePath).join(', '),
+        content: mergeCanonicalRules(unique.map((candidate) => candidate.content as string)),
+      });
       continue;
     }
     const labels = unique.map((candidate) => candidate.sourcePath);
@@ -225,16 +236,38 @@ async function resolveCanonicalConflicts(
         ? undefined
         : await selectConflictInTerminal(repositoryPath, labels);
     if (choice === undefined || !unique[choice]) {
-      throw new Error(`Conflicting managed captures for ${repositoryPath}; choose an authoritative source interactively.`);
+      warnings.push(`Skipped conflicting managed capture ${repositoryPath}; choose an authoritative source interactively.`);
+      continue;
     }
     result.push(unique[choice]);
   }
   return result;
 }
 
+function mergeCanonicalRules(contents: string[]): string {
+  const blocks: string[] = [];
+  const seen = new Set<string>();
+  for (const content of contents) {
+    for (const block of content.replace(/\r\n?/g, '\n').trim().split(/\n{2,}/)) {
+      const normalized = block.trim();
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      blocks.push(normalized);
+    }
+  }
+  return `${blocks.join('\n\n')}\n`;
+}
+
 function uniqueSkillCopies(copies: SkillPackage[]): SkillPackage[] {
   const seen = new Set<string>();
   return copies.filter((copy) => !seen.has(copy.hash) && seen.add(copy.hash));
+}
+
+function newestSkillCopy(copies: SkillPackage[]): SkillPackage {
+  return [...copies].sort((left, right) =>
+    right.modifiedAtMs - left.modifiedAtMs
+    || left.source.surface.localeCompare(right.source.surface)
+    || left.directory.localeCompare(right.directory))[0];
 }
 
 function buildCapturePlan(repositoryPath: string, files: CaptureFile[], warnings: string[]): PlannedCaptureFile[] {
