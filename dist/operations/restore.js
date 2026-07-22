@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createRestorePlan = createRestorePlan;
+exports.applyRestorePlan = applyRestorePlan;
 exports.findLatestVerifiedBackup = findLatestVerifiedBackup;
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
@@ -46,6 +47,7 @@ const state_1 = require("../utils/state");
 const contracts_1 = require("./contracts");
 const MISSING_HASH = hashText('<missing>');
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const activeRestorePlans = new WeakMap();
 function createRestorePlan(context) {
     const operationId = (0, uuid_1.v4)();
     const state = (0, state_1.readState)(context);
@@ -58,11 +60,289 @@ function createRestorePlan(context) {
         if (!backup) {
             return freezeRestorePlan(failedRestorePlan(operationId, repositoryPath, 'restore.backupNotFound', 'No complete and verified deployment backup is available.', ['Run a successful Deploy before trying Restore again.']));
         }
-        return freezeRestorePlan(buildRestorePlan(operationId, repositoryPath, backup));
+        const plan = freezeRestorePlan(buildRestorePlan(operationId, repositoryPath, backup));
+        activeRestorePlans.set(plan, { operationId, backupDirectory: backup.directory });
+        return plan;
     }
     catch (error) {
         return freezeRestorePlan(failedRestorePlan(operationId, repositoryPath, 'restore.planFailed', 'The Restore Plan could not be generated safely.', ['Fix the reported local state or Repository problem, then regenerate the Restore Plan.'], errorMessage(error)));
     }
+}
+function applyRestorePlan(context, plan, selection, options = {}) {
+    if (plan.status === 'failed')
+        return failedRestoreResult(plan.repositoryPath, plan.error, plan.issues);
+    const active = activeRestorePlans.get(plan);
+    if (!active || active.operationId !== plan.operationId) {
+        return failedRestoreResult(plan.repositoryPath, invalidPlanError());
+    }
+    const selectedIds = [...new Set(selection.changeIds)];
+    const planIds = plan.changes.map((change) => change.id);
+    if (selectedIds.length !== planIds.length
+        || selectedIds.some((id) => !planIds.includes(id))) {
+        activeRestorePlans.delete(plan);
+        return failedRestoreResult(plan.repositoryPath, {
+            code: 'restore.invalidSelection',
+            message: 'Restore must apply the complete selection from the active Plan.',
+            nextActions: ['Select every change in the current Restore Plan, or generate a new Plan.'],
+        });
+    }
+    if (plan.issues.some((issue) => issue.severity === 'error')) {
+        activeRestorePlans.delete(plan);
+        return blockedRestoreResult(plan, plan.issues);
+    }
+    if (options.nonInteractive && plan.changes.some((change) => change.action === 'delete')) {
+        activeRestorePlans.delete(plan);
+        return blockedRestoreResult(plan, [{
+                severity: 'decisionRequired',
+                code: 'restore.nonInteractiveBlocked',
+                message: 'Non-interactive Restore cannot delete files.',
+            }]);
+    }
+    if (options.signal?.aborted) {
+        activeRestorePlans.delete(plan);
+        return cancelledRestoreResult(plan);
+    }
+    const verifiedBackup = verifyDeployBackup(active.backupDirectory);
+    if (!verifiedBackup || !sameRestoreSnapshot(context, plan, verifiedBackup)) {
+        activeRestorePlans.delete(plan);
+        return failedRestoreResult(plan.repositoryPath, stalePlanError());
+    }
+    let currentStateBackupPath;
+    try {
+        currentStateBackupPath = createCurrentStateBackup(path.dirname((0, state_1.getStateFilePath)(context)), plan, options.copyFile ?? fs.copyFileSync);
+    }
+    catch (error) {
+        activeRestorePlans.delete(plan);
+        return failedRestoreResult(plan.repositoryPath, {
+            code: 'restore.backupFailed',
+            message: 'Restore could not create and verify the current-state backup before writing.',
+            technicalDetails: errorMessage(error),
+            nextActions: ['Check local state storage and target file permissions, then generate a new Restore Plan.'],
+        });
+    }
+    const transactionBackup = verifyDeployBackup(active.backupDirectory);
+    if (!transactionBackup || !sameRestoreSnapshot(context, plan, transactionBackup)) {
+        activeRestorePlans.delete(plan);
+        return failedRestoreResult(plan.repositoryPath, stalePlanError());
+    }
+    let previousState;
+    let statePath;
+    let previousStateContent;
+    try {
+        previousState = (0, state_1.readState)(context);
+        statePath = (0, state_1.getStateFilePath)(context);
+        previousStateContent = fs.existsSync(statePath) ? fs.readFileSync(statePath) : undefined;
+    }
+    catch (error) {
+        activeRestorePlans.delete(plan);
+        return failedRestoreResult(plan.repositoryPath, {
+            code: 'restore.preparationFailed',
+            message: 'Restore could not prepare the device-state transaction before writing.',
+            technicalDetails: errorMessage(error),
+            nextActions: [`The current configuration is saved at ${currentStateBackupPath}; check local state permissions, then generate a new Restore Plan.`],
+        });
+    }
+    const attemptedPaths = new Set();
+    let stateCommitAttempted = false;
+    const writeFile = options.writeFile ?? ((targetPath, content) => (0, files_1.atomicWriteFile)(targetPath, content));
+    const removeFile = options.removeFile ?? ((targetPath) => fs.rmSync(targetPath, { force: true }));
+    try {
+        for (const change of plan.changes) {
+            attemptedPaths.add(change.targetPath);
+            if (change.action === 'delete') {
+                removeFile(change.targetPath);
+                continue;
+            }
+            const source = transactionBackup.manifest.files.find((file) => file.originalPath === change.targetPath);
+            if (!source?.backupPath)
+                throw new Error(`Backup path is missing for ${change.targetPath}.`);
+            const sourcePath = resolveVerifiedBackupFile(transactionBackup.directory, source.backupPath);
+            if (!sourcePath)
+                throw new Error(`Backup file is no longer valid for ${change.targetPath}.`);
+            writeFile(change.targetPath, fs.readFileSync(sourcePath));
+        }
+        const nextState = { ...previousState };
+        delete nextState.baselineSnapshot;
+        delete nextState.managedInventory;
+        nextState.lastOperation = { kind: 'restore', time: new Date().toISOString(), success: true };
+        stateCommitAttempted = true;
+        (options.updateState ?? state_1.writeState)(context, nextState);
+    }
+    catch (error) {
+        const rollbackErrors = rollbackRestoreWrites(currentStateBackupPath, plan.changes, attemptedPaths, removeFile, options.restoreFile ?? ((targetPath, content) => (0, files_1.atomicWriteFile)(targetPath, content)));
+        if (stateCommitAttempted) {
+            try {
+                if (previousStateContent)
+                    (0, files_1.atomicWriteFile)(statePath, previousStateContent);
+                else
+                    fs.rmSync(statePath, { force: true });
+            }
+            catch (rollbackError) {
+                rollbackErrors.push(`device state: ${errorMessage(rollbackError)}`);
+            }
+        }
+        activeRestorePlans.delete(plan);
+        if (rollbackErrors.length > 0) {
+            return failedRestoreResult(plan.repositoryPath, {
+                code: 'restore.rollbackFailed',
+                message: 'Restore failed and could not fully recover the pre-restore state automatically.',
+                technicalDetails: `${errorMessage(error)} Rollback was incomplete: ${rollbackErrors.join('; ')}`,
+                nextActions: [`Recover the affected files from ${currentStateBackupPath}, then generate a new Restore Plan.`],
+            });
+        }
+        return failedRestoreResult(plan.repositoryPath, {
+            code: 'restore.transactionFailed',
+            message: 'Restore could not commit every change and recovered the pre-restore state.',
+            technicalDetails: errorMessage(error),
+            nextActions: ['Check target permissions, then generate and review a new Restore Plan.'],
+        });
+    }
+    activeRestorePlans.delete(plan);
+    return {
+        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        operation: 'restore',
+        status: 'succeeded',
+        repositoryPath: plan.repositoryPath,
+        changes: plan.changes,
+        issues: [],
+        nextActions: [],
+        data: {
+            appliedChangeIds: selectedIds,
+            restoredPaths: plan.changes.filter((change) => change.action === 'restore').map((change) => change.targetPath),
+            deletedPaths: plan.changes.filter((change) => change.action === 'delete').map((change) => change.targetPath),
+            backupPath: currentStateBackupPath,
+        },
+    };
+}
+function sameRestoreSnapshot(context, plan, backup) {
+    try {
+        if ((0, state_1.readState)(context).repositoryPath !== (plan.repositoryPath ?? undefined))
+            return false;
+        if (plan.repositoryPath)
+            (0, repository_1.readManifest)(plan.repositoryPath);
+        if (!plan.backup
+            || plan.backup.id !== path.basename(backup.directory)
+            || plan.backup.createdAt !== backup.manifest.createdAt
+            || plan.preconditions['backup:manifest'] !== backup.manifestHash
+            || plan.changes.length !== backup.manifest.files.length)
+            return false;
+        for (const file of backup.manifest.files) {
+            const action = file.action === 'add' ? 'delete' : 'restore';
+            const id = stableRestoreId(action, file.originalPath);
+            if (!plan.changes.some((change) => change.id === id && change.action === action && change.targetPath === file.originalPath))
+                return false;
+            if (plan.preconditions[`source:${id}`] !== (file.beforeHash ?? MISSING_HASH)
+                || plan.preconditions[`target:${id}`] !== currentFileHash(file.originalPath))
+                return false;
+        }
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+function createCurrentStateBackup(stateDirectory, plan, copyFile) {
+    const root = path.join(stateDirectory, 'restore-backups');
+    fs.mkdirSync(root, { recursive: true });
+    const directory = fs.mkdtempSync(path.join(root, 'before-restore-'));
+    try {
+        const files = [];
+        for (const [index, change] of plan.changes.entries()) {
+            const expectedHash = plan.preconditions[`target:${change.id}`];
+            const actualHash = currentFileHash(change.targetPath);
+            if (actualHash !== expectedHash) {
+                throw new Error(`Restore target changed while its current state was being backed up: ${change.targetPath}`);
+            }
+            if (actualHash === MISSING_HASH) {
+                files.push({ originalPath: change.targetPath, hash: MISSING_HASH });
+                continue;
+            }
+            const backupPath = path.join('files', `${index}-${path.basename(change.targetPath)}`);
+            const destination = path.join(directory, backupPath);
+            fs.mkdirSync(path.dirname(destination), { recursive: true });
+            copyFile(change.targetPath, destination);
+            if ((0, files_1.hashFile)(destination) !== actualHash || currentFileHash(change.targetPath) !== expectedHash) {
+                throw new Error(`Current-state backup verification failed for ${change.targetPath}.`);
+            }
+            files.push({ originalPath: change.targetPath, backupPath, hash: actualHash });
+        }
+        const manifest = {
+            createdAt: new Date().toISOString(),
+            status: 'complete',
+            files,
+        };
+        (0, files_1.atomicWriteFile)(path.join(directory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+        if (!verifyCurrentStateBackup(directory, plan.changes)) {
+            throw new Error('The current-state backup manifest could not be verified.');
+        }
+        return directory;
+    }
+    catch (error) {
+        fs.rmSync(directory, { recursive: true, force: true });
+        throw error;
+    }
+}
+function verifyCurrentStateBackup(directory, changes) {
+    try {
+        const manifestPath = path.join(directory, 'manifest.json');
+        const stats = fs.lstatSync(manifestPath);
+        if (!stats.isFile() || stats.isSymbolicLink())
+            return undefined;
+        const value = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        if (!(0, objects_1.isRecord)(value)
+            || value.status !== 'complete'
+            || typeof value.createdAt !== 'string'
+            || !Number.isFinite(Date.parse(value.createdAt))
+            || !Array.isArray(value.files)
+            || value.files.length !== changes.length)
+            return undefined;
+        const expectedPaths = new Set(changes.map((change) => change.targetPath));
+        const files = [];
+        for (const entry of value.files) {
+            if (!(0, objects_1.isRecord)(entry)
+                || typeof entry.originalPath !== 'string'
+                || !expectedPaths.delete(entry.originalPath)
+                || typeof entry.hash !== 'string'
+                || !SHA256_PATTERN.test(entry.hash))
+                return undefined;
+            if (entry.backupPath === undefined) {
+                if (entry.hash !== MISSING_HASH)
+                    return undefined;
+                files.push({ originalPath: entry.originalPath, hash: entry.hash });
+                continue;
+            }
+            if (typeof entry.backupPath !== 'string')
+                return undefined;
+            const sourcePath = resolveVerifiedBackupFile(directory, entry.backupPath);
+            if (!sourcePath || (0, files_1.hashFile)(sourcePath) !== entry.hash)
+                return undefined;
+            files.push({ originalPath: entry.originalPath, backupPath: entry.backupPath, hash: entry.hash });
+        }
+        return expectedPaths.size === 0
+            ? { createdAt: value.createdAt, status: 'complete', files }
+            : undefined;
+    }
+    catch {
+        return undefined;
+    }
+}
+function rollbackRestoreWrites(backupPath, changes, attemptedPaths, removeFile, restoreFile) {
+    const manifest = verifyCurrentStateBackup(backupPath, changes);
+    if (!manifest)
+        return ['current-state backup verification failed'];
+    const errors = [];
+    for (const entry of manifest.files.filter((file) => attemptedPaths.has(file.originalPath)).reverse()) {
+        try {
+            if (!entry.backupPath)
+                removeFile(entry.originalPath);
+            else
+                restoreFile(entry.originalPath, fs.readFileSync(path.join(backupPath, entry.backupPath)));
+        }
+        catch (error) {
+            errors.push(`${entry.originalPath}: ${errorMessage(error)}`);
+        }
+    }
+    return errors;
 }
 function buildRestorePlan(operationId, repositoryPath, backup) {
     const preconditions = {
@@ -234,6 +514,60 @@ function failedRestorePlan(operationId, repositoryPath, code, message, nextActio
         issues: [{ severity: 'error', code, message }],
         nextActions,
         error,
+    };
+}
+function invalidPlanError() {
+    return {
+        code: 'operation.invalidPlan',
+        message: 'The Restore Plan is not the active in-process Plan.',
+        nextActions: ['Generate and review a new Restore Plan.'],
+    };
+}
+function stalePlanError() {
+    return {
+        code: 'operation.stalePlan',
+        message: 'Restore source or target state changed after the Plan was generated.',
+        nextActions: ['Generate and review a new Restore Plan.'],
+    };
+}
+function failedRestoreResult(repositoryPath, error, issues = [{ severity: 'error', code: error.code, message: error.message }]) {
+    return {
+        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        operation: 'restore',
+        status: 'failed',
+        repositoryPath,
+        changes: [],
+        issues,
+        nextActions: error.nextActions,
+        error,
+    };
+}
+function blockedRestoreResult(plan, issues) {
+    return {
+        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        operation: 'restore',
+        status: 'blocked',
+        repositoryPath: plan.repositoryPath,
+        changes: [],
+        issues,
+        nextActions: issues.some((issue) => issue.code === 'restore.nonInteractiveBlocked')
+            ? ['Run Restore interactively to review and confirm the complete Plan.']
+            : ['Back up or manually resolve every Restore Conflict, then generate a new Restore Plan.'],
+    };
+}
+function cancelledRestoreResult(plan) {
+    return {
+        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        operation: 'restore',
+        status: 'blocked',
+        repositoryPath: plan.repositoryPath,
+        changes: [],
+        issues: [{
+                severity: 'notice',
+                code: 'restore.cancelled',
+                message: 'Restore was cancelled before the write transaction started.',
+            }],
+        nextActions: ['Generate a new Restore Plan when you are ready to continue.'],
     };
 }
 function freezeRestorePlan(plan) {

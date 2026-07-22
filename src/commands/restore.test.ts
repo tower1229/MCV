@@ -17,6 +17,7 @@ describe('mcv restore', () => {
   });
 
   afterEach(() => {
+    process.exitCode = undefined;
     vi.restoreAllMocks();
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
@@ -31,10 +32,9 @@ describe('mcv restore', () => {
     createBackup('latest', '2026-07-19T00:00:00.000Z', 'restored content');
 
     await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
-      .parseAsync(['node', 'mcv', 'restore']);
+      .parseAsync(['node', 'mcv', 'restore', '--yes']);
 
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('restored content');
-    expect(vi.mocked(console.log)).toHaveBeenCalledWith(`[restored] ${targetPath}`);
     expect(vi.mocked(console.log)).toHaveBeenCalledWith('Restored 1 file(s) from the latest backup.');
 
     function createBackup(name: string, createdAt: string, content: string): void {
@@ -84,7 +84,7 @@ describe('mcv restore', () => {
       }));
     }
     await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
-      .parseAsync(['node', 'mcv', 'restore']);
+      .parseAsync(['node', 'mcv', 'restore', '--yes']);
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('safe backup');
   });
 
@@ -99,8 +99,10 @@ describe('mcv restore', () => {
       defaultRepositoryId: 'old-repository-id',
     });
 
-    await expect(createProgram(context).parseAsync(['node', 'mcv', 'restore']))
-      .rejects.toThrow('Repository schema 1 requires migration');
+    await createProgram(context).parseAsync(['node', 'mcv', 'restore', '--yes']);
+
+    expect(process.exitCode).toBe(1);
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain('Restore failed.');
   });
 
   it('prints an English Restore Plan without changing target files', async () => {
@@ -137,6 +139,28 @@ describe('mcv restore', () => {
       changes: [{ action: 'restore', targetPath }],
     });
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('deployed content');
+  });
+
+  it('prints one structured Restore Result JSON document after apply', async () => {
+    const targetPath = path.join(testRoot, 'home', 'settings.json');
+    createCompleteBackup(targetPath, 'deployed content', 'original content');
+
+    await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
+      .parseAsync(['node', 'mcv', 'restore', '--yes', '--json']);
+
+    expect(console.log).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
+      schemaVersion: 1,
+      operation: 'restore',
+      status: 'succeeded',
+      changes: [{ action: 'restore', targetPath }],
+      data: {
+        restoredPaths: [targetPath],
+        deletedPaths: [],
+        backupPath: expect.stringContaining('restore-backups'),
+      },
+    });
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('original content');
   });
 
   function createCompleteBackup(

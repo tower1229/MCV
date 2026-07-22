@@ -2,7 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { describe, expect, it } from 'vitest';
 
 const cliPath = path.join(process.cwd(), 'dist', 'index.js');
@@ -341,6 +341,81 @@ describe('packaged mcv CLI', () => {
       fs.rmSync(isolatedRoot, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform !== 'darwin' || !fs.existsSync('/usr/bin/expect'))('exits 130 when Ctrl+C interrupts Restore before Apply', async () => {
+    const isolatedRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-restore-interrupt-')));
+    const targetPath = path.join(isolatedRoot, 'target', 'settings.json');
+    const deployedContent = 'deployed content';
+    const originalContent = 'original content';
+    const stateRoot = process.platform === 'darwin'
+      ? path.join(isolatedRoot, 'Library', 'Application Support', 'mcv')
+      : path.join(isolatedRoot, '.config', 'mcv');
+    const backupDirectory = path.join(stateRoot, 'backups', 'complete');
+    const digest = (content: string): string =>
+      crypto.createHash('sha256').update(content).digest('hex');
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.mkdirSync(path.join(backupDirectory, 'files'), { recursive: true });
+    fs.writeFileSync(targetPath, deployedContent);
+    fs.writeFileSync(path.join(backupDirectory, 'files', 'settings.json'), originalContent);
+    fs.writeFileSync(path.join(backupDirectory, 'manifest.json'), JSON.stringify({
+      createdAt: '2026-07-19T00:00:00.000Z',
+      status: 'complete',
+      files: [{
+        action: 'modify',
+        originalPath: targetPath,
+        backupPath: 'files/settings.json',
+        beforeHash: digest(originalContent),
+        afterHash: digest(deployedContent),
+      }],
+    }));
+    try {
+      const outcome = await new Promise<{ code: number | null; output: string }>((resolve, reject) => {
+        const child = spawn('/usr/bin/expect', ['-c', [
+          'set timeout 3',
+          'log_user 1',
+          'spawn $env(MCV_TEST_NODE) $env(MCV_TEST_CLI) restore',
+          'expect -exact {Restore every file in this Plan? [y/N] }',
+          'send "\\003"',
+          'expect eof',
+          'set result [wait]',
+          'exit [lindex $result 3]',
+        ].join('\n')], {
+          env: {
+            ...process.env,
+            HOME: isolatedRoot,
+            APPDATA: isolatedRoot,
+            MCV_TEST_NODE: process.execPath,
+            MCV_TEST_CLI: cliPath,
+          },
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        let output = '';
+        const timeout = setTimeout(() => {
+          child.kill('SIGKILL');
+          reject(new Error(`Timed out waiting for Restore prompt. Output: ${output}`));
+        }, 4_000);
+        const collect = (chunk: Buffer): void => {
+          output += chunk.toString('utf8');
+        };
+        child.stdout.on('data', collect);
+        child.stderr.on('data', collect);
+        child.once('error', (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+        child.once('exit', (code) => {
+          clearTimeout(timeout);
+          resolve({ code, output });
+        });
+      });
+
+      expect(outcome).toMatchObject({ code: 130, output: expect.stringContaining('restore.cancelled') });
+      expect(fs.readFileSync(targetPath, 'utf8')).toBe(deployedContent);
+      expect(fs.existsSync(path.join(stateRoot, 'restore-backups'))).toBe(false);
+    } finally {
+      fs.rmSync(isolatedRoot, { recursive: true, force: true });
+    }
+  }, 5_000);
 
   it('rejects Restore JSON without dry-run and exposes no force bypass', () => {
     const invalid = spawnSync(process.execPath, [cliPath, 'restore', '--json'], {

@@ -1,129 +1,98 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.restoreLatestBackup = restoreLatestBackup;
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-const files_1 = require("../utils/files");
-const state_1 = require("../utils/state");
-const repository_1 = require("../utils/repository");
+const promises_1 = require("readline/promises");
 const restore_1 = require("../operations/restore");
 const json_1 = require("../renderers/json");
 const restore_2 = require("../renderers/restore");
-function restoreLatestBackup(context, options = {}) {
+async function restoreLatestBackup(context, dependencies = {}, options = {}) {
+    const reviewPlan = (0, restore_1.createRestorePlan)(context);
     if (options.dryRun) {
-        const plan = (0, restore_1.createRestorePlan)(context);
         if (options.json)
-            console.log((0, json_1.renderJson)(plan));
+            console.log((0, json_1.renderJson)(reviewPlan));
         else
-            for (const line of (0, restore_2.renderRestorePlanPlain)(plan))
+            for (const line of (0, restore_2.renderRestorePlanPlain)(reviewPlan))
                 console.log(line);
-        if (plan.status === 'failed')
+        if (reviewPlan.status === 'failed')
             process.exitCode = 1;
         return;
     }
-    const boundRepositoryPath = (0, state_1.readState)(context).repositoryPath;
-    if (boundRepositoryPath)
-        (0, repository_1.readManifest)(boundRepositoryPath);
-    const stateDirectory = path.dirname((0, state_1.getStateFilePath)(context));
-    const latest = (0, restore_1.findLatestVerifiedBackup)(path.join(stateDirectory, 'backups'));
-    if (!latest)
-        throw new Error('No deployment backup found.');
-    for (const file of latest.manifest.files) {
-        if (!file.afterHash)
-            continue;
-        if (!fs.existsSync(file.originalPath) || (0, files_1.hashFile)(file.originalPath) !== file.afterHash) {
-            throw new Error(`Refusing to restore because the deployed file changed afterwards: ${file.originalPath}`);
-        }
+    if (reviewPlan.status === 'failed') {
+        const result = (0, restore_1.applyRestorePlan)(context, reviewPlan, { changeIds: [] });
+        process.exitCode = 1;
+        if (options.json)
+            console.log((0, json_1.renderJson)(result));
+        else
+            for (const line of (0, restore_2.renderRestoreResultPlain)(result))
+                console.log(line);
+        return;
     }
-    const restoreBackup = backupCurrentState(stateDirectory, latest.manifest.files);
-    const originals = new Map();
+    const cancellation = new AbortController();
+    const handleInterrupt = () => cancellation.abort();
+    process.on('SIGINT', handleInterrupt);
     try {
-        for (const file of latest.manifest.files) {
-            originals.set(file.originalPath, fs.existsSync(file.originalPath) ? fs.readFileSync(file.originalPath) : undefined);
-            const action = file.action ?? 'modify';
-            if (action === 'add') {
-                fs.rmSync(file.originalPath, { force: true });
-                console.log(`[removed] ${file.originalPath}`);
-                continue;
+        if (!options.json && !options.yes) {
+            for (const line of (0, restore_2.renderRestorePlanPlain)(reviewPlan))
+                console.log(line);
+        }
+        if (!options.yes) {
+            if (!process.stdin.isTTY && !dependencies.confirmRestore) {
+                throw new Error('Restore requires an interactive terminal; use --yes only after reviewing --dry-run.');
             }
-            if (!file.backupPath)
-                throw new Error(`Backup path is missing for ${file.originalPath}.`);
-            const sourcePath = resolveBackupPath(latest.directory, file.backupPath);
-            (0, files_1.atomicWriteFile)(file.originalPath, fs.readFileSync(sourcePath));
-            console.log(`[restored] ${file.originalPath}`);
+            let confirmed = false;
+            try {
+                confirmed = await (dependencies.confirmRestore
+                    ? dependencies.confirmRestore()
+                    : confirmInTerminal(cancellation));
+            }
+            catch (error) {
+                if (!cancellation.signal.aborted && !isAbortError(error))
+                    throw error;
+            }
+            if (cancellation.signal.aborted) {
+                const result = (0, restore_1.applyRestorePlan)(context, reviewPlan, {
+                    changeIds: reviewPlan.changes.map((change) => change.id),
+                }, { signal: cancellation.signal });
+                process.exitCode = 130;
+                for (const line of (0, restore_2.renderRestoreResultPlain)(result))
+                    console.log(line);
+                return;
+            }
+            if (!confirmed) {
+                console.log('Restore cancelled; local configuration was not changed.');
+                return;
+            }
         }
+        await new Promise((resolve) => setImmediate(resolve));
+        const result = (0, restore_1.applyRestorePlan)(context, reviewPlan, { changeIds: reviewPlan.changes.map((change) => change.id) }, { signal: cancellation.signal, nonInteractive: options.yes });
+        if (result.issues.some((issue) => issue.code === 'restore.cancelled'))
+            process.exitCode = 130;
+        else if (result.status !== 'succeeded')
+            process.exitCode = result.status === 'blocked' ? 3 : 1;
+        if (options.json)
+            console.log((0, json_1.renderJson)(result));
+        else
+            for (const line of (0, restore_2.renderRestoreResultPlain)(result))
+                console.log(line);
+        await new Promise((resolve) => setImmediate(resolve));
     }
-    catch (error) {
-        for (const [targetPath, content] of originals) {
-            if (content === undefined)
-                fs.rmSync(targetPath, { force: true });
-            else
-                (0, files_1.atomicWriteFile)(targetPath, content);
-        }
-        throw error;
+    finally {
+        process.off('SIGINT', handleInterrupt);
     }
-    const state = (0, state_1.readState)(context);
-    delete state.baselineSnapshot;
-    delete state.managedInventory;
-    state.lastOperation = { kind: 'restore', time: new Date().toISOString(), success: true };
-    (0, state_1.writeState)(context, state);
-    console.log(`Current pre-restore state saved to ${restoreBackup}.`);
-    console.log(`Restored ${latest.manifest.files.length} file(s) from the latest backup.`);
 }
-function backupCurrentState(stateDirectory, files) {
-    const root = path.join(stateDirectory, 'restore-backups');
-    fs.mkdirSync(root, { recursive: true });
-    const directory = fs.mkdtempSync(path.join(root, 'before-restore-'));
-    const entries = files.flatMap((file, index) => {
-        if (!fs.existsSync(file.originalPath))
-            return [];
-        const backupPath = path.join('files', `${index}-${path.basename(file.originalPath)}`);
-        fs.mkdirSync(path.dirname(path.join(directory, backupPath)), { recursive: true });
-        fs.copyFileSync(file.originalPath, path.join(directory, backupPath));
-        return [{ originalPath: file.originalPath, backupPath, hash: (0, files_1.hashFile)(file.originalPath) }];
-    });
-    (0, files_1.atomicWriteTextFile)(path.join(directory, 'manifest.json'), `${JSON.stringify({ createdAt: new Date().toISOString(), files: entries }, null, 2)}\n`);
-    return directory;
+async function confirmInTerminal(cancellation) {
+    const prompt = (0, promises_1.createInterface)({ input: process.stdin, output: process.stdout });
+    const handleInterrupt = () => cancellation.abort();
+    prompt.once('SIGINT', handleInterrupt);
+    try {
+        const answer = await prompt.question('Restore every file in this Plan? [y/N] ', { signal: cancellation.signal });
+        return /^(y|yes)$/i.test(answer.trim());
+    }
+    finally {
+        prompt.off('SIGINT', handleInterrupt);
+        prompt.close();
+    }
 }
-function resolveBackupPath(directory, backupPath) {
-    const sourcePath = path.resolve(directory, backupPath);
-    const relativePath = path.relative(directory, sourcePath);
-    if (relativePath.startsWith('..') || path.isAbsolute(relativePath))
-        throw new Error(`Backup file path escapes its backup directory: ${backupPath}`);
-    if (!fs.existsSync(sourcePath))
-        throw new Error(`Backup file is missing: ${sourcePath}`);
-    return sourcePath;
+function isAbortError(error) {
+    return error instanceof Error && error.name === 'AbortError';
 }

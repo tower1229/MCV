@@ -3,6 +3,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProgram } from '../index';
 import { findSymbolicLinkAncestor } from '../utils/files';
+import { restoreLatestBackup } from './restore';
 
 describe('mcv deploy', () => {
   const originalCwd = process.cwd();
@@ -193,7 +194,10 @@ describe('mcv deploy', () => {
     expect(fs.readFileSync(path.join(divergentLegacySkill, 'SKILL.md'), 'utf8')).toBe('# Legacy TDD\n');
     expect(fs.readFileSync(path.join(homeDir, '.agents', 'skills', 'grill-me', 'SKILL.md'), 'utf8')).toBe('# Grill Me\n');
 
-    await createProgram(deviceContext('win32')).parseAsync(['node', 'mcv', 'restore']);
+    await restoreLatestBackup(
+      deviceContext('win32'),
+      { confirmRestore: async () => true },
+    );
     expect(fs.readFileSync(path.join(duplicateLegacySkill, 'SKILL.md'), 'utf8')).toBe('# Grill Me\n');
     expect(fs.readFileSync(path.join(duplicateLegacySkill, 'references', 'questions.md'), 'utf8')).toBe('# Questions\n');
   });
@@ -350,7 +354,10 @@ describe('mcv deploy', () => {
     fs.rmSync(path.join(repositoryPath, 'common', 'AGENTS.md'));
     await run('--prune-managed');
     expect(fs.existsSync(targetPath)).toBe(false);
-    await createProgram(deviceContext('win32')).parseAsync(['node', 'mcv', 'restore']);
+    await restoreLatestBackup(
+      deviceContext('win32'),
+      { confirmRestore: async () => true },
+    );
     expect(fs.existsSync(targetPath)).toBe(true);
   });
 

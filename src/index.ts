@@ -110,10 +110,11 @@ export function createProgram(
     .command('restore')
     .description('Restore local configuration from the latest deployment backup')
     .option('--dry-run', 'Show the Restore Plan without writing')
-    .option('--json', 'Print one machine-readable Restore Plan')
-    .action((options) => {
+    .option('--yes', 'Restore without prompting after reviewing a dry-run')
+    .option('--json', 'Print one machine-readable Restore Plan or Result')
+    .action(async (options) => {
       validateWriteOutputOptions(restoreCommand, options);
-      restoreLatestBackup(context, options);
+      await restoreLatestBackup(context, {}, options);
     });
 
   const repositoryCommand = program.command('repo')
