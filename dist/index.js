@@ -124,11 +124,14 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         .action(async () => {
         await (0, status_1.showStatus)(context);
     });
-    program
+    const restoreCommand = program
         .command('restore')
         .description('Restore local configuration from the latest deployment backup')
-        .action(() => {
-        (0, restore_1.restoreLatestBackup)(context);
+        .option('--dry-run', 'Show the Restore Plan without writing')
+        .option('--json', 'Print one machine-readable Restore Plan')
+        .action((options) => {
+        validateWriteOutputOptions(restoreCommand, options);
+        (0, restore_1.restoreLatestBackup)(context, options);
     });
     const repositoryCommand = program.command('repo')
         .description('Inspect the current MCV Repository binding')

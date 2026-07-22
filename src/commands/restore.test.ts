@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -86,4 +87,66 @@ describe('mcv restore', () => {
     await expect(createProgram(context).parseAsync(['node', 'mcv', 'restore']))
       .rejects.toThrow('Repository schema 1 requires migration');
   });
+
+  it('prints an English Restore Plan without changing target files', async () => {
+    const targetPath = path.join(testRoot, 'home', 'settings.json');
+    createCompleteBackup(targetPath, 'deployed content', 'original content');
+
+    await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
+      .parseAsync(['node', 'mcv', 'restore', '--dry-run']);
+
+    expect(vi.mocked(console.log).mock.calls.map(([line]) => line)).toEqual(expect.arrayContaining([
+      'Backup time: 2026-07-19T00:00:00.000Z',
+      `  [restore] ${targetPath}`,
+      'Summary: 1 file(s) to restore, 0 file(s) to delete.',
+      expect.stringContaining('Next:'),
+    ]));
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('deployed content');
+    expect(fs.existsSync(path.join(stateRoot, 'mcv', 'restore-backups'))).toBe(false);
+  });
+
+  it('prints one Restore Plan JSON document', async () => {
+    const targetPath = path.join(testRoot, 'home', 'settings.json');
+    createCompleteBackup(targetPath, 'deployed content', 'original content');
+
+    await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
+      .parseAsync(['node', 'mcv', 'restore', '--dry-run', '--json']);
+
+    expect(console.log).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
+      schemaVersion: 1,
+      operation: 'restore',
+      status: 'planned',
+      readyToApply: true,
+      backup: { createdAt: '2026-07-19T00:00:00.000Z' },
+      changes: [{ action: 'restore', targetPath }],
+    });
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('deployed content');
+  });
+
+  function createCompleteBackup(
+    targetPath: string,
+    deployedContent: string,
+    originalContent: string,
+  ): void {
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, deployedContent);
+    const directory = path.join(stateRoot, 'mcv', 'backups', 'complete');
+    const backupPath = path.join('files', 'settings.json');
+    fs.mkdirSync(path.join(directory, 'files'), { recursive: true });
+    fs.writeFileSync(path.join(directory, backupPath), originalContent);
+    const digest = (content: string): string =>
+      crypto.createHash('sha256').update(content).digest('hex');
+    fs.writeFileSync(path.join(directory, 'manifest.json'), JSON.stringify({
+      createdAt: '2026-07-19T00:00:00.000Z',
+      status: 'complete',
+      files: [{
+        action: 'modify',
+        originalPath: targetPath,
+        backupPath,
+        beforeHash: digest(originalContent),
+        afterHash: digest(deployedContent),
+      }],
+    }));
+  }
 });

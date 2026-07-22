@@ -5,6 +5,9 @@ import { isRecord } from '../utils/objects';
 import { getStateFilePath, readState, writeState } from '../utils/state';
 import type { DeviceContext } from '../adapters/types';
 import { readManifest } from '../utils/repository';
+import { createRestorePlan } from '../operations/restore';
+import { renderJson } from '../renderers/json';
+import { renderRestorePlanPlain } from '../renderers/restore';
 
 interface BackupFile {
   action?: 'add' | 'modify' | 'delete';
@@ -16,7 +19,22 @@ interface BackupFile {
 interface BackupManifest { createdAt: string; status?: 'pending' | 'complete' | 'failed'; files: BackupFile[]; }
 interface BackupCandidate { directory: string; manifest: BackupManifest; }
 
-export function restoreLatestBackup(context: DeviceContext): void {
+export interface RestoreOptions {
+  dryRun?: boolean;
+  json?: boolean;
+}
+
+export function restoreLatestBackup(
+  context: DeviceContext,
+  options: RestoreOptions = {},
+): void {
+  if (options.dryRun) {
+    const plan = createRestorePlan(context);
+    if (options.json) console.log(renderJson(plan));
+    else for (const line of renderRestorePlanPlain(plan)) console.log(line);
+    if (plan.status === 'failed') process.exitCode = 1;
+    return;
+  }
   const boundRepositoryPath = readState(context).repositoryPath;
   if (boundRepositoryPath) readManifest(boundRepositoryPath);
   const stateDirectory = path.dirname(getStateFilePath(context));

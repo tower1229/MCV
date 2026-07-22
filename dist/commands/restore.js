@@ -40,7 +40,21 @@ const files_1 = require("../utils/files");
 const objects_1 = require("../utils/objects");
 const state_1 = require("../utils/state");
 const repository_1 = require("../utils/repository");
-function restoreLatestBackup(context) {
+const restore_1 = require("../operations/restore");
+const json_1 = require("../renderers/json");
+const restore_2 = require("../renderers/restore");
+function restoreLatestBackup(context, options = {}) {
+    if (options.dryRun) {
+        const plan = (0, restore_1.createRestorePlan)(context);
+        if (options.json)
+            console.log((0, json_1.renderJson)(plan));
+        else
+            for (const line of (0, restore_2.renderRestorePlanPlain)(plan))
+                console.log(line);
+        if (plan.status === 'failed')
+            process.exitCode = 1;
+        return;
+    }
     const boundRepositoryPath = (0, state_1.readState)(context).repositoryPath;
     if (boundRepositoryPath)
         (0, repository_1.readManifest)(boundRepositoryPath);

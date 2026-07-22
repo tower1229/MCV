@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -282,6 +283,78 @@ describe('packaged mcv CLI', () => {
     } finally {
       fs.rmSync(isolatedRoot, { recursive: true, force: true });
     }
+  });
+
+  it('prints exactly one read-only Restore Plan JSON document', () => {
+    const isolatedRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-restore-')));
+    const targetPath = path.join(isolatedRoot, 'target', 'settings.json');
+    const deployedContent = 'deployed content';
+    const originalContent = 'original content';
+    const stateRoot = process.platform === 'darwin'
+      ? path.join(isolatedRoot, 'Library', 'Application Support', 'mcv')
+      : process.platform === 'win32'
+        ? path.join(isolatedRoot, 'mcv')
+        : path.join(isolatedRoot, '.config', 'mcv');
+    const backupDirectory = path.join(stateRoot, 'backups', 'complete');
+    const backupPath = path.join('files', 'settings.json');
+    const digest = (content: string): string =>
+      crypto.createHash('sha256').update(content).digest('hex');
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.mkdirSync(path.join(backupDirectory, 'files'), { recursive: true });
+    fs.writeFileSync(targetPath, deployedContent);
+    fs.writeFileSync(path.join(backupDirectory, backupPath), originalContent);
+    fs.writeFileSync(path.join(backupDirectory, 'manifest.json'), JSON.stringify({
+      createdAt: '2026-07-19T00:00:00.000Z',
+      status: 'complete',
+      files: [{
+        action: 'modify',
+        originalPath: targetPath,
+        backupPath,
+        beforeHash: digest(originalContent),
+        afterHash: digest(deployedContent),
+      }],
+    }));
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [cliPath, 'restore', '--dry-run', '--json'],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, HOME: isolatedRoot, APPDATA: isolatedRoot },
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
+        schemaVersion: 1,
+        operation: 'restore',
+        status: 'planned',
+        readyToApply: true,
+        backup: { id: 'complete', createdAt: '2026-07-19T00:00:00.000Z' },
+        changes: [expect.objectContaining({ action: 'restore', targetPath })],
+      }));
+      expect(result.stdout).not.toMatch(/\u001b\[/);
+      expect(fs.readFileSync(targetPath, 'utf8')).toBe(deployedContent);
+      expect(fs.existsSync(path.join(stateRoot, 'restore-backups'))).toBe(false);
+    } finally {
+      fs.rmSync(isolatedRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects Restore JSON without dry-run and exposes no force bypass', () => {
+    const invalid = spawnSync(process.execPath, [cliPath, 'restore', '--json'], {
+      encoding: 'utf8',
+    });
+    const help = spawnSync(process.execPath, [cliPath, 'restore', '--help'], {
+      encoding: 'utf8',
+    });
+
+    expect(invalid.status).toBe(2);
+    expect(invalid.stdout).toBe('');
+    expect(invalid.stderr).toContain("option '--json' requires '--dry-run'");
+    expect(help.status).toBe(0);
+    expect(help.stdout).not.toMatch(/force|selection/i);
   });
 
   it('does not echo invalid source content in Capture failure output', () => {

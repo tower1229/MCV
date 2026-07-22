@@ -106,11 +106,14 @@ export function createProgram(
       await showStatus(context);
     });
 
-  program
+  const restoreCommand = program
     .command('restore')
     .description('Restore local configuration from the latest deployment backup')
-    .action(() => {
-      restoreLatestBackup(context);
+    .option('--dry-run', 'Show the Restore Plan without writing')
+    .option('--json', 'Print one machine-readable Restore Plan')
+    .action((options) => {
+      validateWriteOutputOptions(restoreCommand, options);
+      restoreLatestBackup(context, options);
     });
 
   const repositoryCommand = program.command('repo')
