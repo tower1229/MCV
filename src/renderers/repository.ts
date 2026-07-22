@@ -27,6 +27,7 @@ export function renderBindPlain(result: BindResult): string[] {
 }
 
 export function renderUnbindPlain(result: UnbindResult): string[] {
+  if (result.status !== 'succeeded') return appendIssuesAndActions([], result);
   return appendIssuesAndActions(
     ['Removed the MCV Repository binding from this device.'],
     result,

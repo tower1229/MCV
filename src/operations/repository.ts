@@ -2,12 +2,21 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { execFileSync } from 'child_process';
+import { createHash } from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
 import type { DeviceContext } from '../adapters/types';
 import { isRecord } from '../utils/objects';
-import { readManifest, type McvManifest } from '../utils/repository';
-import { readState, writeState } from '../utils/state';
+import {
+  CURRENT_SCHEMA_VERSION,
+  readManifest,
+  type McvManifest,
+} from '../utils/repository';
+import { getStateFilePath, readState, writeState } from '../utils/state';
 import {
   OPERATION_SCHEMA_VERSION,
+  type Issue,
+  type McvError,
+  type Plan,
   type Report,
   type Result,
 } from './contracts';
@@ -37,6 +46,18 @@ export type BindResult = Result<RepositoryBindingData, never> & {
   changes: [];
 };
 
+export interface RepositoryBindingChange {
+  id: 'repository-binding';
+  kind: 'bind' | 'unbind';
+  previousRepositoryPath: string | null;
+  repositoryPath: string | null;
+  repositoryId: string | null;
+}
+
+export type BindPlan = Plan<RepositoryBindingChange> & {
+  operation: 'bind';
+};
+
 export interface RepositoryUnbindData {
   repositoryId: string | null;
   previousRepositoryPath: string | null;
@@ -46,6 +67,12 @@ export type UnbindResult = Result<RepositoryUnbindData, never> & {
   operation: 'unbind';
   changes: [];
 };
+
+export type UnbindPlan = Plan<RepositoryBindingChange> & {
+  operation: 'unbind';
+};
+
+const activeRepositoryPlans = new WeakMap<object, string>();
 
 export function inspectRepository(context: DeviceContext): RepositoryReport {
   const state = readState(context);
@@ -71,18 +98,31 @@ export function inspectRepository(context: DeviceContext): RepositoryReport {
     };
   }
 
-  let inspectedRepositoryId = state.defaultRepositoryId ?? null;
-  let inspectedSchemaVersion: number | null = null;
-  try {
-    const raw = yaml.parse(
-      fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8'),
-    ) as unknown;
-    if (isRecord(raw)) {
-      if (typeof raw.repositoryId === 'string') inspectedRepositoryId = raw.repositoryId;
-      if (typeof raw.schemaVersion === 'number') inspectedSchemaVersion = raw.schemaVersion;
-    }
-  } catch {
-    // Full validation below provides the stable Issue and technical details.
+  const identity = inspectManifestIdentity(repositoryPath);
+  const inspectedRepositoryId = identity.repositoryId ?? state.defaultRepositoryId ?? null;
+  const inspectedSchemaVersion = identity.schemaVersion;
+
+  if (
+    inspectedSchemaVersion !== null
+    && inspectedSchemaVersion !== CURRENT_SCHEMA_VERSION
+  ) {
+    return {
+      schemaVersion: OPERATION_SCHEMA_VERSION,
+      operation: 'repository',
+      status: 'reported',
+      ready: false,
+      repositoryPath,
+      repositoryId: inspectedRepositoryId,
+      repositorySchemaVersion: inspectedSchemaVersion,
+      valid: false,
+      changes: [],
+      issues: [{
+        severity: 'error',
+        code: 'repository.migrationRequired',
+        message: `Repository schema ${inspectedSchemaVersion} requires migration.`,
+      }],
+      nextActions: ['Run `mcv migrate --dry-run` to review the required migration.'],
+    };
   }
 
   let manifest: McvManifest;
@@ -173,11 +213,45 @@ function inspectGitRepository(
   }
 }
 
-export function bindRepository(
+export function createBindPlan(
   context: DeviceContext,
   repositoryPath: string = process.cwd(),
-): BindResult {
+): BindPlan {
   const resolvedPath = path.resolve(repositoryPath);
+  const operationId = uuidv4();
+  const preconditions = {
+    manifest: hashOptionalFile(path.join(resolvedPath, 'mcv.yaml')),
+    state: hashOptionalFile(getStateFilePath(context)),
+  };
+  const identity = inspectManifestIdentity(resolvedPath);
+  if (
+    identity.schemaVersion !== null
+    && identity.schemaVersion !== CURRENT_SCHEMA_VERSION
+  ) {
+    const nextActions = ['Run `mcv migrate --dry-run` to review the required migration.'];
+    const message = `Repository schema ${identity.schemaVersion} requires migration.`;
+    return {
+      schemaVersion: OPERATION_SCHEMA_VERSION,
+      operation: 'bind',
+      status: 'failed',
+      readyToApply: false,
+      operationId,
+      preconditions,
+      repositoryPath: resolvedPath,
+      changes: [],
+      issues: [{
+        severity: 'error',
+        code: 'repository.migrationRequired',
+        message,
+      }],
+      nextActions,
+      error: {
+        code: 'repository.migrationRequired',
+        message,
+        nextActions,
+      },
+    };
+  }
   let manifest: McvManifest;
   try {
     manifest = readManifest(resolvedPath);
@@ -186,6 +260,9 @@ export function bindRepository(
       schemaVersion: OPERATION_SCHEMA_VERSION,
       operation: 'bind',
       status: 'failed',
+      readyToApply: false,
+      operationId,
+      preconditions,
       repositoryPath: resolvedPath,
       changes: [],
       issues: [{
@@ -213,6 +290,9 @@ export function bindRepository(
       schemaVersion: OPERATION_SCHEMA_VERSION,
       operation: 'bind',
       status: 'failed',
+      readyToApply: false,
+      operationId,
+      preconditions,
       repositoryPath: resolvedPath,
       changes: [],
       issues: [{
@@ -229,47 +309,273 @@ export function bindRepository(
     };
   }
 
+  const plan: BindPlan = {
+    schemaVersion: OPERATION_SCHEMA_VERSION,
+    operation: 'bind',
+    status: 'planned',
+    readyToApply: true,
+    operationId,
+    preconditions,
+    repositoryPath: resolvedPath,
+    changes: [{
+      id: 'repository-binding',
+      kind: 'bind',
+      previousRepositoryPath,
+      repositoryPath: resolvedPath,
+      repositoryId: manifest.repositoryId,
+    }],
+    issues: [],
+    nextActions: [],
+  };
+  return registerPlan(plan);
+}
+
+export function applyBindPlan(
+  context: DeviceContext,
+  plan: BindPlan,
+): BindResult {
+  if (plan.status === 'failed') return failedResultFromPlan(plan);
+  const staleError = validateActivePlan(context, plan);
+  if (staleError) return failedBindResult(plan.repositoryPath, staleError);
+
+  const change = plan.changes[0];
+  if (!change?.repositoryPath || !change.repositoryId) {
+    return failedBindResult(plan.repositoryPath, {
+      code: 'operation.invalidPlan',
+      message: 'The Bind Plan does not contain a valid Repository binding change.',
+      nextActions: ['Generate a new Bind Plan.'],
+    });
+  }
+
+  const state = readState(context);
   state.schemaVersion = 2;
-  state.repositoryPath = resolvedPath;
-  state.defaultRepositoryId = manifest.repositoryId;
-  writeState(context, state);
+  state.repositoryPath = change.repositoryPath;
+  state.defaultRepositoryId = change.repositoryId;
+  try {
+    writeState(context, state);
+  } catch (error) {
+    return failedBindResult(plan.repositoryPath, {
+      code: 'repository.stateWriteFailed',
+      message: 'MCV could not write the local Repository binding.',
+      technicalDetails: error instanceof Error ? error.message : String(error),
+      nextActions: ['Check permissions for the MCV local state directory and try again.'],
+    });
+  } finally {
+    activeRepositoryPlans.delete(plan);
+  }
 
   return {
     schemaVersion: OPERATION_SCHEMA_VERSION,
     operation: 'bind',
     status: 'succeeded',
-    repositoryPath: resolvedPath,
+    repositoryPath: change.repositoryPath,
     changes: [],
     issues: [],
     nextActions: [],
     data: {
-      repositoryId: manifest.repositoryId,
-      repositorySchemaVersion: manifest.schemaVersion,
-      previousRepositoryPath,
+      repositoryId: change.repositoryId,
+      repositorySchemaVersion: CURRENT_SCHEMA_VERSION,
+      previousRepositoryPath: change.previousRepositoryPath,
     },
   };
 }
 
-export function unbindRepository(context: DeviceContext): UnbindResult {
+export function bindRepository(
+  context: DeviceContext,
+  repositoryPath: string = process.cwd(),
+): BindResult {
+  return applyBindPlan(context, createBindPlan(context, repositoryPath));
+}
+
+export function createUnbindPlan(context: DeviceContext): UnbindPlan {
   const state = readState(context);
   const previousRepositoryPath = state.repositoryPath ?? null;
   const repositoryId = state.defaultRepositoryId ?? null;
+  const plan: UnbindPlan = {
+    schemaVersion: OPERATION_SCHEMA_VERSION,
+    operation: 'unbind',
+    status: 'planned',
+    readyToApply: true,
+    operationId: uuidv4(),
+    preconditions: { state: hashOptionalFile(getStateFilePath(context)) },
+    repositoryPath: previousRepositoryPath,
+    changes: [{
+      id: 'repository-binding',
+      kind: 'unbind',
+      previousRepositoryPath,
+      repositoryPath: null,
+      repositoryId,
+    }],
+    issues: [],
+    nextActions: [],
+  };
+  return registerPlan(plan);
+}
+
+export function applyUnbindPlan(
+  context: DeviceContext,
+  plan: UnbindPlan,
+): UnbindResult {
+  if (plan.status === 'failed') return failedUnbindResult(plan.repositoryPath, plan.error);
+  const staleError = validateActivePlan(context, plan);
+  if (staleError) return failedUnbindResult(plan.repositoryPath, staleError);
+
+  const change = plan.changes[0];
+  if (!change) {
+    return failedUnbindResult(plan.repositoryPath, {
+      code: 'operation.invalidPlan',
+      message: 'The Unbind Plan does not contain a binding change.',
+      nextActions: ['Generate a new Unbind Plan.'],
+    });
+  }
+
+  const state = readState(context);
 
   delete state.repositoryPath;
   delete state.defaultRepositoryId;
-  writeState(context, state);
+  try {
+    writeState(context, state);
+  } catch (error) {
+    return failedUnbindResult(plan.repositoryPath, {
+      code: 'repository.stateWriteFailed',
+      message: 'MCV could not remove the local Repository binding.',
+      technicalDetails: error instanceof Error ? error.message : String(error),
+      nextActions: ['Check permissions for the MCV local state directory and try again.'],
+    });
+  } finally {
+    activeRepositoryPlans.delete(plan);
+  }
 
   return {
     schemaVersion: OPERATION_SCHEMA_VERSION,
     operation: 'unbind',
     status: 'succeeded',
-    repositoryPath: previousRepositoryPath,
+    repositoryPath: change.previousRepositoryPath,
     changes: [],
     issues: [],
     nextActions: [],
     data: {
-      repositoryId,
-      previousRepositoryPath,
+      repositoryId: change.repositoryId,
+      previousRepositoryPath: change.previousRepositoryPath,
     },
   };
+}
+
+export function unbindRepository(context: DeviceContext): UnbindResult {
+  return applyUnbindPlan(context, createUnbindPlan(context));
+}
+
+function registerPlan<T extends BindPlan | UnbindPlan>(plan: T): T {
+  for (const change of plan.changes) Object.freeze(change);
+  Object.freeze(plan.changes);
+  for (const issue of plan.issues) Object.freeze(issue);
+  Object.freeze(plan.issues);
+  Object.freeze(plan.nextActions);
+  Object.freeze(plan.preconditions);
+  Object.freeze(plan);
+  activeRepositoryPlans.set(plan, plan.operationId);
+  return plan;
+}
+
+function validateActivePlan(
+  context: DeviceContext,
+  plan: BindPlan | UnbindPlan,
+): McvError | undefined {
+  if (activeRepositoryPlans.get(plan) !== plan.operationId) {
+    return {
+      code: 'operation.invalidPlan',
+      message: 'The Repository Plan is not the active in-process Plan.',
+      nextActions: ['Generate a new Repository Plan.'],
+    };
+  }
+
+  const currentStateHash = hashOptionalFile(getStateFilePath(context));
+  const manifestPath = plan.repositoryPath
+    ? path.join(plan.repositoryPath, 'mcv.yaml')
+    : null;
+  const stale = currentStateHash !== plan.preconditions.state
+    || (
+      plan.operation === 'bind'
+      && manifestPath !== null
+      && hashOptionalFile(manifestPath) !== plan.preconditions.manifest
+    );
+  if (!stale) return undefined;
+
+  activeRepositoryPlans.delete(plan);
+  return {
+    code: 'operation.stalePlan',
+    message: 'Repository or local binding state changed after the Plan was generated.',
+    nextActions: ['Generate and review a new Repository Plan.'],
+  };
+}
+
+function failedResultFromPlan(plan: BindPlan): BindResult {
+  const error = plan.status === 'failed'
+    ? plan.error
+    : {
+      code: 'operation.invalidPlan',
+      message: 'The Bind Plan cannot be applied.',
+      nextActions: ['Generate a new Bind Plan.'],
+    };
+  return failedBindResult(plan.repositoryPath, error, plan.issues);
+}
+
+function failedBindResult(
+  repositoryPath: string | null,
+  error: McvError,
+  issues: Issue[] = [{ severity: 'error', code: error.code, message: error.message }],
+): BindResult {
+  return {
+    schemaVersion: OPERATION_SCHEMA_VERSION,
+    operation: 'bind',
+    status: 'failed',
+    repositoryPath,
+    changes: [],
+    issues,
+    nextActions: error.nextActions,
+    error,
+  };
+}
+
+function failedUnbindResult(
+  repositoryPath: string | null,
+  error: McvError,
+): UnbindResult {
+  return {
+    schemaVersion: OPERATION_SCHEMA_VERSION,
+    operation: 'unbind',
+    status: 'failed',
+    repositoryPath,
+    changes: [],
+    issues: [{ severity: 'error', code: error.code, message: error.message }],
+    nextActions: error.nextActions,
+    error,
+  };
+}
+
+function hashOptionalFile(filePath: string): string {
+  try {
+    return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
+    return 'unreadable';
+  }
+}
+
+function inspectManifestIdentity(repositoryPath: string): {
+  repositoryId: string | null;
+  schemaVersion: number | null;
+} {
+  try {
+    const raw = yaml.parse(
+      fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8'),
+    ) as unknown;
+    if (!isRecord(raw)) return { repositoryId: null, schemaVersion: null };
+    return {
+      repositoryId: typeof raw.repositoryId === 'string' ? raw.repositoryId : null,
+      schemaVersion: typeof raw.schemaVersion === 'number' ? raw.schemaVersion : null,
+    };
+  } catch {
+    return { repositoryId: null, schemaVersion: null };
+  }
 }

@@ -14,14 +14,14 @@ function showRepository(context, options = {}) {
     return report;
 }
 function bind(context, repositoryPath, options = {}) {
-    const result = (0, repository_2.bindRepository)(context, repositoryPath);
+    const result = (0, repository_2.applyBindPlan)(context, (0, repository_2.createBindPlan)(context, repositoryPath));
     render(result, options, repository_3.renderBindPlain);
     if (result.status === 'failed')
         process.exitCode = 1;
     return result;
 }
 function unbind(context, options = {}) {
-    const result = (0, repository_2.unbindRepository)(context);
+    const result = (0, repository_2.applyUnbindPlan)(context, (0, repository_2.createUnbindPlan)(context));
     render(result, options, repository_3.renderUnbindPlain);
     return result;
 }

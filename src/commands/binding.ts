@@ -1,9 +1,11 @@
 import { migrateRepository } from '../utils/repository';
 import type { DeviceContext } from '../adapters/types';
 import {
-  bindRepository,
+  applyBindPlan,
+  applyUnbindPlan,
+  createBindPlan,
+  createUnbindPlan,
   inspectRepository,
-  unbindRepository,
   type BindResult,
   type RepositoryReport,
   type UnbindResult,
@@ -17,7 +19,6 @@ import { renderJson } from '../renderers/json';
 
 export interface RepositoryOutputOptions {
   json?: boolean;
-  plain?: boolean;
 }
 
 export function showRepository(
@@ -34,7 +35,7 @@ export function bind(
   repositoryPath?: string,
   options: RepositoryOutputOptions = {},
 ): BindResult {
-  const result = bindRepository(context, repositoryPath);
+  const result = applyBindPlan(context, createBindPlan(context, repositoryPath));
   render(result, options, renderBindPlain);
   if (result.status === 'failed') process.exitCode = 1;
   return result;
@@ -44,7 +45,7 @@ export function unbind(
   context: DeviceContext,
   options: RepositoryOutputOptions = {},
 ): UnbindResult {
-  const result = unbindRepository(context);
+  const result = applyUnbindPlan(context, createUnbindPlan(context));
   render(result, options, renderUnbindPlain);
   return result;
 }

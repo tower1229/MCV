@@ -6,7 +6,15 @@ import { execFileSync } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceContext } from '../adapters/types';
 import { readState, writeState } from '../utils/state';
-import { bindRepository, inspectRepository, unbindRepository } from './repository';
+import {
+  applyBindPlan,
+  applyUnbindPlan,
+  bindRepository,
+  createBindPlan,
+  createUnbindPlan,
+  inspectRepository,
+  unbindRepository,
+} from './repository';
 
 describe('Repository operations', () => {
   const originalCwd = process.cwd();
@@ -260,8 +268,120 @@ describe('Repository operations', () => {
       repositoryId: 'repository-old-schema-id',
       repositorySchemaVersion: 1,
       valid: false,
-      issues: [{ severity: 'error', code: 'repository.invalidManifest' }],
+      issues: [{ severity: 'error', code: 'repository.migrationRequired' }],
+      nextActions: ['Run `mcv migrate --dry-run` to review the required migration.'],
     });
+  });
+
+  it('rejects binding an old schema with a stable migration-required error', () => {
+    const repositoryPath = path.join(testRoot, 'repository-bind-old-schema');
+    fs.mkdirSync(repositoryPath);
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), yaml.stringify({
+      schemaVersion: 1,
+      repositoryId: 'repository-bind-old-schema-id',
+    }));
+
+    const result = bindRepository(context, repositoryPath);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      repositoryPath,
+      error: {
+        code: 'repository.migrationRequired',
+        nextActions: ['Run `mcv migrate --dry-run` to review the required migration.'],
+      },
+    });
+    expect(readState(context)).toEqual({});
+  });
+
+  it('keeps Bind planning read-only and applies only the current in-process Plan', () => {
+    const repositoryPath = createRepository(testRoot, 'repository-bind-plan', 'repository-bind-plan-id');
+
+    const plan = createBindPlan(context, repositoryPath);
+
+    expect(plan).toMatchObject({
+      operation: 'bind',
+      status: 'planned',
+      readyToApply: true,
+      repositoryPath,
+      operationId: expect.any(String),
+      preconditions: {
+        manifest: expect.any(String),
+        state: expect.any(String),
+      },
+      changes: [{
+        id: 'repository-binding',
+        kind: 'bind',
+        previousRepositoryPath: null,
+        repositoryPath,
+        repositoryId: 'repository-bind-plan-id',
+      }],
+    });
+    expect(Object.isFrozen(plan)).toBe(true);
+    expect(Object.isFrozen(plan.changes[0])).toBe(true);
+    expect(readState(context)).toEqual({});
+
+    const result = applyBindPlan(context, plan);
+
+    expect(result).toMatchObject({ status: 'succeeded', operation: 'bind' });
+    expect(readState(context)).toMatchObject({
+      repositoryPath,
+      defaultRepositoryId: 'repository-bind-plan-id',
+    });
+  });
+
+  it('rejects a stale Bind Plan before changing local state', () => {
+    const repositoryPath = createRepository(testRoot, 'repository-stale-plan', 'repository-stale-plan-id');
+    const plan = createBindPlan(context, repositoryPath);
+    writeState(context, { schemaVersion: 2, deviceId: 'changed-after-plan' });
+
+    const result = applyBindPlan(context, plan);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'operation.stalePlan' },
+    });
+    expect(readState(context)).toEqual({ schemaVersion: 2, deviceId: 'changed-after-plan' });
+  });
+
+  it('rejects a Bind Plan when the manifest changes after planning', () => {
+    const repositoryPath = createRepository(testRoot, 'repository-manifest-race', 'repository-manifest-race-id');
+    const plan = createBindPlan(context, repositoryPath);
+    fs.appendFileSync(path.join(repositoryPath, 'mcv.yaml'), '\n# changed after planning\n');
+
+    const result = applyBindPlan(context, plan);
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'operation.stalePlan' },
+    });
+    expect(readState(context)).toEqual({});
+  });
+
+  it('keeps Unbind planning read-only and applies only local binding removal', () => {
+    const repositoryPath = createRepository(testRoot, 'repository-unbind-plan', 'repository-unbind-plan-id');
+    writeState(context, {
+      schemaVersion: 2,
+      deviceId: 'device-id',
+      defaultRepositoryId: 'repository-unbind-plan-id',
+      repositoryPath,
+    });
+
+    const plan = createUnbindPlan(context);
+
+    expect(plan).toMatchObject({
+      operation: 'unbind',
+      status: 'planned',
+      readyToApply: true,
+      repositoryPath,
+      changes: [{ id: 'repository-binding', kind: 'unbind' }],
+    });
+    expect(readState(context)).toHaveProperty('repositoryPath', repositoryPath);
+
+    const result = applyUnbindPlan(context, plan);
+
+    expect(result).toMatchObject({ status: 'succeeded', operation: 'unbind' });
+    expect(readState(context)).toEqual({ schemaVersion: 2, deviceId: 'device-id' });
   });
 });
 
