@@ -15,6 +15,9 @@ import {
   deleteObjectPath,
   type StructuredFormat,
 } from '../utils/structured-config';
+import { createCapturePlan } from '../operations/capture';
+import { renderCapturePlanPlain } from '../renderers/capture';
+import { renderJson } from '../renderers/json';
 
 export interface CaptureOptions {
   dryRun?: boolean;
@@ -38,6 +41,13 @@ export async function captureConfigurations(
   dependencies: CaptureDependencies = {},
   options: CaptureOptions = {},
 ): Promise<void> {
+  if (options.dryRun) {
+    const capturePlan = await createCapturePlan(context);
+    if (options.json) console.log(renderJson(capturePlan));
+    else for (const line of renderCapturePlanPlain(capturePlan)) console.log(line);
+    if (capturePlan.status === 'failed') process.exitCode = 1;
+    return;
+  }
   const repositoryPath = resolveBoundRepository(context);
   const manifest = readManifest(repositoryPath);
   const definitions = createAdapterDefinitions().filter(

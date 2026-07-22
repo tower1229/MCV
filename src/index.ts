@@ -60,7 +60,7 @@ export function createProgram(
       if (shouldCapture) await captureConfigurations(context, captureDependencies);
     });
 
-  program
+  const captureCommand = program
     .command('capture')
     .description('Capture local AI IDE configuration into the MCV repository')
     .option('--dry-run', 'Show the capture plan without writing')
@@ -68,6 +68,7 @@ export function createProgram(
     .option('--yes', 'Apply only safe non-conflicting changes without prompting')
     .option('--verbose', 'Show processed file content in the preview')
     .action(async (options) => {
+      validateWriteOutputOptions(captureCommand, options);
       await captureConfigurations(context, captureDependencies, options);
     });
 

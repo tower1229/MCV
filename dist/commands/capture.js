@@ -45,7 +45,21 @@ const repository_1 = require("../utils/repository");
 const state_1 = require("../utils/state");
 const sanitize_1 = require("../utils/sanitize");
 const structured_config_1 = require("../utils/structured-config");
+const capture_1 = require("../operations/capture");
+const capture_2 = require("../renderers/capture");
+const json_1 = require("../renderers/json");
 async function captureConfigurations(context, dependencies = {}, options = {}) {
+    if (options.dryRun) {
+        const capturePlan = await (0, capture_1.createCapturePlan)(context);
+        if (options.json)
+            console.log((0, json_1.renderJson)(capturePlan));
+        else
+            for (const line of (0, capture_2.renderCapturePlanPlain)(capturePlan))
+                console.log(line);
+        if (capturePlan.status === 'failed')
+            process.exitCode = 1;
+        return;
+    }
     const repositoryPath = (0, repository_1.resolveBoundRepository)(context);
     const manifest = (0, repository_1.readManifest)(repositoryPath);
     const definitions = (0, adapters_1.createAdapterDefinitions)().filter(({ targetId }) => manifest.targets[targetId]?.enabled === true);

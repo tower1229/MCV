@@ -42,6 +42,53 @@ describe('mcv capture', () => {
     env: { APPDATA: stateRoot },
   });
 
+  it('prints one safe Capture Plan JSON document without writing', async () => {
+    await createProgram(deviceContext('win32')).parseAsync([
+      'node',
+      'mcv',
+      'capture',
+      '--dry-run',
+      '--json',
+    ]);
+
+    expect(console.log).toHaveBeenCalledOnce();
+    const plan = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
+    expect(plan).toMatchObject({
+      schemaVersion: 1,
+      operation: 'capture',
+      status: 'planned',
+      readyToApply: true,
+      repositoryPath,
+      changes: [expect.objectContaining({
+        id: expect.any(String),
+        ide: 'claude-code',
+        itemType: 'file',
+        defaultSelected: true,
+      })],
+    });
+    expect(JSON.stringify(plan)).toContain('${env:API_TOKEN}');
+    expect(JSON.stringify(plan)).not.toContain('must-not-leak');
+    expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
+    expect(readFileIfPresent(path.join(stateRoot, 'mcv', 'config.json'))).toBeUndefined();
+  });
+
+  it('prints an English grouped Capture Plan without writing', async () => {
+    await createProgram(deviceContext('win32')).parseAsync([
+      'node',
+      'mcv',
+      'capture',
+      '--dry-run',
+    ]);
+
+    const output = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(output).toContain(`Capture Plan: ${repositoryPath}`);
+    expect(output).toContain('Claude Code / File');
+    expect(output).toContain('[add] settings.json');
+    expect(output).toContain('${env:API_TOKEN}');
+    expect(output).not.toContain('must-not-leak');
+    expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
+  });
+
   it('previews only sanitized content and does not write when the user declines', async () => {
     const confirmCapture = vi.fn().mockResolvedValue(false);
 
@@ -330,3 +377,7 @@ describe('mcv capture', () => {
     );
   });
 });
+
+function readFileIfPresent(filePath: string): string | undefined {
+  return fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : undefined;
+}

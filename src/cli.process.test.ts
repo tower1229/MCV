@@ -178,4 +178,91 @@ describe('packaged mcv CLI', () => {
       fs.rmSync(isolatedRoot, { recursive: true, force: true });
     }
   });
+
+  it('prints exactly one read-only Capture Plan JSON document', () => {
+    const isolatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-capture-'));
+    const repositoryPath = path.join(isolatedRoot, 'repository');
+    const claudeRoot = path.join(isolatedRoot, '.claude');
+    fs.mkdirSync(repositoryPath);
+    const resolvedRepositoryPath = fs.realpathSync(repositoryPath);
+    fs.mkdirSync(claudeRoot);
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 2',
+      'repositoryId: process-capture-id',
+      'initializedAt: 2026-07-22T00:00:00.000Z',
+      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets:',
+      '  claudeCode:',
+      '    enabled: true',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(
+      path.join(claudeRoot, 'settings.json'),
+      JSON.stringify({ theme: 'dark', apiToken: 'process-secret-must-not-leak' }),
+    );
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [cliPath, 'capture', '--dry-run', '--json'],
+        {
+          cwd: repositoryPath,
+          encoding: 'utf8',
+          env: { ...process.env, HOME: isolatedRoot, APPDATA: isolatedRoot },
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
+        schemaVersion: 1,
+        operation: 'capture',
+        status: 'planned',
+        repositoryPath: resolvedRepositoryPath,
+        changes: [expect.objectContaining({
+          id: expect.any(String),
+          ide: 'claude-code',
+          itemType: 'file',
+        })],
+      }));
+      expect(result.stdout).not.toContain('process-secret-must-not-leak');
+      expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
+      expect(fs.existsSync(path.join(isolatedRoot, 'mcv', 'config.json'))).toBe(false);
+    } finally {
+      fs.rmSync(isolatedRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('does not echo invalid source content in Capture failure output', () => {
+    const isolatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-capture-failure-'));
+    const repositoryPath = path.join(isolatedRoot, 'repository');
+    fs.mkdirSync(repositoryPath);
+    fs.writeFileSync(
+      path.join(repositoryPath, 'mcv.yaml'),
+      'schemaVersion: [invalid-log-secret-must-not-leak\n',
+    );
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [cliPath, 'capture', '--dry-run'],
+        {
+          cwd: repositoryPath,
+          encoding: 'utf8',
+          env: { ...process.env, HOME: isolatedRoot, APPDATA: isolatedRoot },
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toContain('capture.planFailed');
+      expect(result.stdout).not.toContain('invalid-log-secret-must-not-leak');
+      expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).toContain(
+        'invalid-log-secret-must-not-leak',
+      );
+    } finally {
+      fs.rmSync(isolatedRoot, { recursive: true, force: true });
+    }
+  });
 });
