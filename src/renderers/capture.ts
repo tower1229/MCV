@@ -1,4 +1,5 @@
 import type { CapturePlan, CaptureResult } from '../operations/capture';
+import { styleIssueSeverity } from './color';
 
 export function renderCapturePlanPlain(plan: CapturePlan): string[] {
   const lines = [`Capture Plan: ${plan.repositoryPath ?? 'not bound'}`];
@@ -30,7 +31,7 @@ export function renderCapturePlanPlain(plan: CapturePlan): string[] {
     `Summary: ${plan.changes.length} item(s), ${plan.summary.sensitiveFieldCount} sensitive field(s) replaced, ${plan.summary.parameterizedPathCount} path(s) parameterized, ${plan.summary.excludedFileCount} file(s) excluded.`,
   );
   for (const issue of plan.issues) {
-    lines.push(`[${issue.severity}] ${issue.code}: ${issue.message}`);
+    lines.push(`[${styleIssueSeverity(issue.severity)}] ${issue.code}: ${issue.message}`);
   }
   for (const action of plan.nextActions) lines.push(`Next: ${action}`);
   return lines;
@@ -41,7 +42,8 @@ export function renderCaptureResultPlain(result: CaptureResult): string[] {
     return [`Captured ${result.data?.appliedChangeIds.length ?? 0} selected item(s) into ${result.repositoryPath}.`];
   }
   return [
-    ...result.issues.map((issue) => `[${issue.severity}] ${issue.code}: ${issue.message}`),
+    ...result.issues.map((issue) =>
+      `[${styleIssueSeverity(issue.severity)}] ${issue.code}: ${issue.message}`),
     ...result.nextActions.map((action) => `Next: ${action}`),
   ];
 }

@@ -13,18 +13,24 @@ function showRepository(context, options = {}) {
     return report;
 }
 function bind(context, repositoryPath, options = {}) {
-    const result = (0, repository_1.applyBindPlan)(context, (0, repository_1.createBindPlan)(context, repositoryPath));
-    render(result, options, repository_2.renderBindPlain);
-    if (result.status === 'failed')
+    const plan = (0, repository_1.createBindPlan)(context, repositoryPath);
+    const contract = options.dryRun || !options.yes
+        ? plan
+        : (0, repository_1.applyBindPlan)(context, plan);
+    render(contract, options, repository_2.renderBindPlain);
+    if (contract.status === 'failed')
         process.exitCode = 1;
-    return result;
+    return contract;
 }
 function unbind(context, options = {}) {
-    const result = (0, repository_1.applyUnbindPlan)(context, (0, repository_1.createUnbindPlan)(context));
-    render(result, options, repository_2.renderUnbindPlain);
-    if (result.status === 'failed')
+    const plan = (0, repository_1.createUnbindPlan)(context);
+    const contract = options.dryRun || !options.yes
+        ? plan
+        : (0, repository_1.applyUnbindPlan)(context, plan);
+    render(contract, options, repository_2.renderUnbindPlain);
+    if (contract.status === 'failed')
         process.exitCode = 1;
-    return result;
+    return contract;
 }
 function migrate(context, repositoryPath, options = {}) {
     const plan = (0, repository_1.createMigrationPlan)(context, repositoryPath);

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.renderDeployPlanPlain = renderDeployPlanPlain;
 exports.renderDeployResultPlain = renderDeployResultPlain;
+const color_1 = require("./color");
 function renderDeployPlanPlain(plan) {
     const lines = [`Deploy Plan: ${plan.repositoryPath ?? 'not bound'}`];
     let currentGroup = '';
@@ -26,7 +27,7 @@ function renderDeployPlanPlain(plan) {
     }
     lines.push(`Summary: ${plan.changes.length} item(s).`);
     for (const issue of plan.issues) {
-        lines.push(`[${issue.severity}] ${issue.code}: ${issue.message}`);
+        lines.push(`[${(0, color_1.styleIssueSeverity)(issue.severity)}] ${issue.code}: ${issue.message}`);
     }
     for (const action of plan.nextActions)
         lines.push(`Next: ${action}`);
@@ -37,8 +38,9 @@ function renderDeployResultPlain(result) {
         return [`Deployed ${result.data?.appliedChangeIds.length ?? 0} selected item(s) from ${result.repositoryPath}.`];
     }
     const lines = [`Deploy ${result.status}.`];
-    for (const issue of result.issues)
-        lines.push(`[${issue.severity}] ${issue.code}: ${issue.message}`);
+    for (const issue of result.issues) {
+        lines.push(`[${(0, color_1.styleIssueSeverity)(issue.severity)}] ${issue.code}: ${issue.message}`);
+    }
     if (result.status === 'failed')
         lines.push(`Error: ${result.error.message}`);
     for (const action of result.nextActions)

@@ -101,7 +101,7 @@ MCV 会显示按 IDE/capability 分组的写入计划并请求确认，只执行
 
 每个选中变化都会在首次写入前备份并验证；写入或本机状态提交失败时，已写入变化会从验证过的备份回滚。成功后只更新实际 Apply 范围的 Baseline Snapshot、managed inventory，以及仅保存在本机、按 IDE/capability 记录的最近 Deploy selection。再次部署相同内容不会创建新备份。
 
-新设备进入 Repository 后执行 `mcv bind`，也可以执行 `mcv bind <path>` 显式指定路径。Bind 只校验 manifest 和 repository ID 并写入本机绑定；不会迁移或修改 Repository。普通命令不会因为当前目录恰好存在另一个 `mcv.yaml` 就越过已有绑定。
+新设备进入 Repository 后先执行 `mcv bind --dry-run` 审阅计划，再执行 `mcv bind --yes`；也可以通过 `mcv bind <path>` 显式指定路径。Bind 只校验 manifest 和 repository ID 并写入本机绑定；不会迁移或修改 Repository。普通命令不会因为当前目录恰好存在另一个 `mcv.yaml` 就越过已有绑定。
 
 `mcv repo --plain` 检查当前绑定路径、Repository ID、schema version 和有效性；`mcv repo --json` 返回同一份结构化 Report。只有检测到 Git Repository 时才附带只读 Git 状态。非 Git Repository 是正常状态，MCV 不执行 Git mutation。
 
@@ -122,8 +122,8 @@ mcv restore
 ```text
 mcv init       通过 --dry-run 预览 Init Plan，使用 --yes 初始化并绑定仓库；支持 --json
 mcv repo       检查当前 Repository 绑定；支持 --plain/--json
-mcv bind [PATH] 绑定当前目录或显式路径，并校验 manifest/repository ID；支持 --json
-mcv unbind     只移除本机绑定；支持 --json
+mcv bind [PATH] 通过 --dry-run 预览绑定计划，使用 --yes 应用；支持 --json
+mcv unbind     通过 --dry-run 预览解除绑定计划，使用 --yes 应用；支持 --json
 mcv migrate    通过 --dry-run 预览 Migration Plan，使用 --yes 备份并迁移；支持 --json
 mcv discover   检测 Codex、Claude Code、Gemini 及已知配置路径；支持 --plain/--json
 mcv capture    预览并收集本机配置到 MCV 仓库

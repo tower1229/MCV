@@ -1,4 +1,5 @@
 import type { DeployPlan, DeployResult } from '../operations/deploy';
+import { styleIssueSeverity } from './color';
 
 export function renderDeployPlanPlain(plan: DeployPlan): string[] {
   const lines = [`Deploy Plan: ${plan.repositoryPath ?? 'not bound'}`];
@@ -24,7 +25,7 @@ export function renderDeployPlanPlain(plan: DeployPlan): string[] {
   }
   lines.push(`Summary: ${plan.changes.length} item(s).`);
   for (const issue of plan.issues) {
-    lines.push(`[${issue.severity}] ${issue.code}: ${issue.message}`);
+    lines.push(`[${styleIssueSeverity(issue.severity)}] ${issue.code}: ${issue.message}`);
   }
   for (const action of plan.nextActions) lines.push(`Next: ${action}`);
   return lines;
@@ -35,7 +36,9 @@ export function renderDeployResultPlain(result: DeployResult): string[] {
     return [`Deployed ${result.data?.appliedChangeIds.length ?? 0} selected item(s) from ${result.repositoryPath}.`];
   }
   const lines = [`Deploy ${result.status}.`];
-  for (const issue of result.issues) lines.push(`[${issue.severity}] ${issue.code}: ${issue.message}`);
+  for (const issue of result.issues) {
+    lines.push(`[${styleIssueSeverity(issue.severity)}] ${issue.code}: ${issue.message}`);
+  }
   if (result.status === 'failed') lines.push(`Error: ${result.error.message}`);
   for (const action of result.nextActions) lines.push(`Next: ${action}`);
   return lines;

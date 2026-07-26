@@ -36,6 +36,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createDefaultDeviceContext = createDefaultDeviceContext;
 exports.createProgram = createProgram;
+exports.runCli = runCli;
 const commander_1 = require("commander");
 const os = __importStar(require("os"));
 const discover_1 = require("./commands/discover");
@@ -149,16 +150,22 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         }
         (0, binding_1.showRepository)(context, options);
     });
-    program.command('bind [path]')
+    const bindCommand = program.command('bind [path]')
         .description('Bind this device to an existing MCV Repository')
-        .addOption(new commander_1.Option('--json', 'Print one machine-readable result'))
+        .option('--dry-run', 'Preview the Repository binding without writing')
+        .option('--yes', 'Bind without prompting after reviewing a dry-run')
+        .addOption(new commander_1.Option('--json', 'Print one machine-readable Plan or Result'))
         .action((repositoryPath, options) => {
+        validateWriteOutputOptions(bindCommand, options);
         (0, binding_1.bind)(context, repositoryPath, options);
     });
-    program.command('unbind')
+    const unbindCommand = program.command('unbind')
         .description('Remove the Repository binding from this device')
-        .addOption(new commander_1.Option('--json', 'Print one machine-readable result'))
+        .option('--dry-run', 'Preview removal of the local Repository binding')
+        .option('--yes', 'Remove the local binding without prompting after reviewing a dry-run')
+        .addOption(new commander_1.Option('--json', 'Print one machine-readable Plan or Result'))
         .action((options) => {
+        validateWriteOutputOptions(unbindCommand, options);
         (0, binding_1.unbind)(context, options);
     });
     const migrateCommand = program.command('migrate [path]').description('Migrate a v1 repository to schema v2')
@@ -210,6 +217,30 @@ function validateWriteOutputOptions(command, options) {
         });
     }
 }
+async function runCli(argv = process.argv) {
+    const program = createProgram();
+    program.exitOverride();
+    for (const command of program.commands)
+        command.exitOverride();
+    try {
+        await program.parseAsync(argv);
+    }
+    catch (error) {
+        if (error instanceof commander_1.CommanderError) {
+            process.exitCode = normalizeCommanderExitCode(error);
+            return;
+        }
+        process.exitCode = 1;
+        console.error(`MCV failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+function normalizeCommanderExitCode(error) {
+    if (error.exitCode === 0)
+        return 0;
+    if (error.exitCode === 2 || error.code.startsWith('mcv.'))
+        return 2;
+    return error.code.startsWith('commander.') ? 2 : 1;
+}
 if (require.main === module) {
-    createProgram().parse();
+    void runCli();
 }

@@ -65,10 +65,23 @@ describe('mcv Repository routes', () => {
     ]);
   });
 
-  it('binds the current directory and unbinds through structured JSON Results', async () => {
+  it('previews and applies Bind and Unbind through structured Plans and Results', async () => {
     process.chdir(repositoryPath);
 
-    await createProgram(context()).parseAsync(['node', 'mcv', 'bind', '--json']);
+    await createProgram(context()).parseAsync(['node', 'mcv', 'bind', '--dry-run', '--json']);
+    const bindPlan = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
+    expect(bindPlan).toMatchObject({
+      schemaVersion: 1,
+      operation: 'bind',
+      status: 'planned',
+      readyToApply: true,
+      repositoryPath: process.cwd(),
+      operationId: expect.any(String),
+    });
+    expect(readState(context())).not.toHaveProperty('repositoryPath');
+
+    vi.mocked(console.log).mockClear();
+    await createProgram(context()).parseAsync(['node', 'mcv', 'bind', '--yes', '--json']);
     const bindResult = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(bindResult).toMatchObject({
       schemaVersion: 1,
@@ -83,7 +96,23 @@ describe('mcv Repository routes', () => {
     });
 
     vi.mocked(console.log).mockClear();
-    await createProgram(context()).parseAsync(['node', 'mcv', 'unbind', '--json']);
+    await createProgram(context()).parseAsync(['node', 'mcv', 'unbind', '--dry-run', '--json']);
+    const unbindPlan = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
+    expect(unbindPlan).toMatchObject({
+      schemaVersion: 1,
+      operation: 'unbind',
+      status: 'planned',
+      readyToApply: true,
+      repositoryPath: process.cwd(),
+      operationId: expect.any(String),
+    });
+    expect(readState(context())).toMatchObject({
+      defaultRepositoryId: 'repository-command-id',
+      repositoryPath: process.cwd(),
+    });
+
+    vi.mocked(console.log).mockClear();
+    await createProgram(context()).parseAsync(['node', 'mcv', 'unbind', '--yes', '--json']);
     const unbindResult = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(unbindResult).toMatchObject({
       schemaVersion: 1,

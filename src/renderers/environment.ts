@@ -1,10 +1,15 @@
 import type { EnvironmentReport } from '../operations/environment';
+import { styleText } from './color';
 
 export function renderEnvironmentPlain(report: EnvironmentReport): string[] {
   return report.environments.flatMap((environment) => [
-    `${environment.name}: ${environment.detected ? 'detected' : 'not detected'}`,
+    `${environment.name}: ${environment.detected
+      ? styleText('detected', 'green')
+      : styleText('not detected', 'dim')}`,
     ...[...environment.configDirectories, ...environment.configFiles].map(
-      (configPath) => `[${configPath.exists ? 'found' : 'missing'}] ${configPath.path}`,
+      (configPath) => `[${configPath.exists
+        ? styleText('found', 'green')
+        : styleText('missing', 'dim')}] ${configPath.path}`,
     ),
   ]);
 }

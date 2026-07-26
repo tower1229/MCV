@@ -7,10 +7,12 @@ import {
   createMigrationPlan,
   createUnbindPlan,
   inspectRepository,
+  type BindPlan,
   type BindResult,
   type MigrationPlan,
   type MigrationResult,
   type RepositoryReport,
+  type UnbindPlan,
   type UnbindResult,
 } from '../operations/repository';
 import {
@@ -22,6 +24,7 @@ import {
 import { renderJson } from '../renderers/json';
 
 export interface RepositoryOutputOptions {
+  dryRun?: boolean;
   json?: boolean;
   yes?: boolean;
 }
@@ -39,21 +42,27 @@ export function bind(
   context: DeviceContext,
   repositoryPath?: string,
   options: RepositoryOutputOptions = {},
-): BindResult {
-  const result = applyBindPlan(context, createBindPlan(context, repositoryPath));
-  render(result, options, renderBindPlain);
-  if (result.status === 'failed') process.exitCode = 1;
-  return result;
+): BindPlan | BindResult {
+  const plan = createBindPlan(context, repositoryPath);
+  const contract = options.dryRun || !options.yes
+    ? plan
+    : applyBindPlan(context, plan);
+  render(contract, options, renderBindPlain);
+  if (contract.status === 'failed') process.exitCode = 1;
+  return contract;
 }
 
 export function unbind(
   context: DeviceContext,
   options: RepositoryOutputOptions = {},
-): UnbindResult {
-  const result = applyUnbindPlan(context, createUnbindPlan(context));
-  render(result, options, renderUnbindPlain);
-  if (result.status === 'failed') process.exitCode = 1;
-  return result;
+): UnbindPlan | UnbindResult {
+  const plan = createUnbindPlan(context);
+  const contract = options.dryRun || !options.yes
+    ? plan
+    : applyUnbindPlan(context, plan);
+  render(contract, options, renderUnbindPlain);
+  if (contract.status === 'failed') process.exitCode = 1;
+  return contract;
 }
 
 export function migrate(
@@ -71,7 +80,7 @@ export function migrate(
   return contract;
 }
 
-function render<T extends RepositoryReport | BindResult | UnbindResult>(
+function render<T extends RepositoryReport | BindPlan | BindResult | UnbindPlan | UnbindResult>(
   contract: T,
   options: RepositoryOutputOptions,
   renderPlain: (value: T) => string[],

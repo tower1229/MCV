@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.renderRestorePlanPlain = renderRestorePlanPlain;
 exports.renderRestoreResultPlain = renderRestoreResultPlain;
+const color_1 = require("./color");
 function renderRestorePlanPlain(plan) {
     const lines = ['Restore Plan: latest complete deployment backup'];
     if (plan.backup)
@@ -13,7 +14,7 @@ function renderRestorePlanPlain(plan) {
     const deleteCount = plan.changes.length - restoreCount;
     lines.push(`Summary: ${restoreCount} file(s) to restore, ${deleteCount} file(s) to delete.`);
     for (const issue of plan.issues) {
-        lines.push(`[${issue.severity}] ${issue.code}: ${issue.message}`);
+        lines.push(`[${(0, color_1.styleIssueSeverity)(issue.severity)}] ${issue.code}: ${issue.message}`);
         if (issue.details) {
             for (const detail of issue.details.split('\n'))
                 lines.push(`  ${detail}`);
@@ -34,7 +35,7 @@ function renderRestoreResultPlain(result) {
     }
     const lines = [`Restore ${result.status}.`];
     for (const issue of result.issues) {
-        lines.push(`[${issue.severity}] ${issue.code}: ${issue.message}`);
+        lines.push(`[${(0, color_1.styleIssueSeverity)(issue.severity)}] ${issue.code}: ${issue.message}`);
         if (issue.details) {
             for (const detail of issue.details.split('\n'))
                 lines.push(`  ${detail}`);

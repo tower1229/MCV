@@ -7,7 +7,28 @@ import { describe, expect, it } from 'vitest';
 
 const cliPath = path.join(process.cwd(), 'dist', 'index.js');
 
+function isolatedEnvironment(homeDir: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    HOME: homeDir,
+    USERPROFILE: homeDir,
+    APPDATA: homeDir,
+    CODEX_HOME: path.join(homeDir, '.codex'),
+    CLAUDE_CONFIG_DIR: path.join(homeDir, '.claude'),
+  };
+}
+
 describe('packaged mcv CLI', () => {
+  it('prints help and succeeds when invoked without arguments outside a TTY', () => {
+    const result = spawnSync(process.execPath, [cliPath], {
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Usage: mcv [options] [command]');
+    expect(result.stderr).toBe('');
+  });
+
   it('prints help successfully through the published bin entry', () => {
     const result = spawnSync(process.execPath, [cliPath, '--help'], {
       encoding: 'utf8',
@@ -15,6 +36,16 @@ describe('packaged mcv CLI', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Usage: mcv [options] [command]');
+    expect(result.stderr).toBe('');
+  });
+
+  it('prints the package version immediately', () => {
+    const result = spawnSync(process.execPath, [cliPath, '--version'], {
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe('0.1.0');
     expect(result.stderr).toBe('');
   });
 
@@ -38,16 +69,23 @@ describe('packaged mcv CLI', () => {
     expect(result.stdout).not.toMatch(/\u001b\[/);
   });
 
-  it('rejects conflicting Environment Report output modes as a usage error', () => {
-    const result = spawnSync(
+  it('rejects conflicting read-only output modes as usage errors', () => {
+    const discoverResult = spawnSync(
       process.execPath,
       [cliPath, 'discover', '--plain', '--json'],
       { encoding: 'utf8' },
     );
+    const statusResult = spawnSync(
+      process.execPath,
+      [cliPath, 'status', '--plain', '--json'],
+      { encoding: 'utf8' },
+    );
 
-    expect(result.status).toBe(2);
-    expect(result.stdout).toBe('');
-    expect(result.stderr).toContain("options '--plain' and '--json' cannot be used together");
+    for (const result of [discoverResult, statusResult]) {
+      expect(result.status).toBe(2);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain("options '--plain' and '--json' cannot be used together");
+    }
   });
 
   it('prints exactly one Repository Report JSON document', () => {
@@ -55,7 +93,7 @@ describe('packaged mcv CLI', () => {
     try {
       const result = spawnSync(process.execPath, [cliPath, 'repo', '--json'], {
         encoding: 'utf8',
-        env: { ...process.env, HOME: isolatedHome, APPDATA: isolatedHome },
+        env: isolatedEnvironment(isolatedHome),
       });
 
       expect(result.status).toBe(0);
@@ -85,10 +123,10 @@ describe('packaged mcv CLI', () => {
     try {
       const result = spawnSync(
         process.execPath,
-        [cliPath, 'bind', invalidRepository, '--json'],
+        [cliPath, 'bind', invalidRepository, '--yes', '--json'],
         {
           encoding: 'utf8',
-          env: { ...process.env, HOME: isolatedRoot, APPDATA: isolatedRoot },
+          env: isolatedEnvironment(isolatedRoot),
         },
       );
 
@@ -106,6 +144,156 @@ describe('packaged mcv CLI', () => {
     }
   });
 
+  it('routes Bind and Unbind through packaged JSON Plans and Results', () => {
+    const isolatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-binding-'));
+    const repositoryPath = path.join(isolatedRoot, 'repository');
+    const statePath = process.platform === 'darwin'
+      ? path.join(isolatedRoot, 'Library', 'Application Support', 'mcv', 'config.json')
+      : process.platform === 'win32'
+        ? path.join(isolatedRoot, 'mcv', 'config.json')
+        : path.join(isolatedRoot, '.config', 'mcv', 'config.json');
+    fs.mkdirSync(repositoryPath);
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 2',
+      'repositoryId: process-binding-id',
+      'initializedAt: 2026-07-22T00:00:00.000Z',
+      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets: {}',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    const invoke = (...args: string[]) => spawnSync(
+      process.execPath,
+      [cliPath, ...args],
+      {
+        encoding: 'utf8',
+        env: isolatedEnvironment(isolatedRoot),
+      },
+    );
+
+    try {
+      const bindPlan = invoke('bind', repositoryPath, '--dry-run', '--json');
+      expect(bindPlan.status).toBe(0);
+      expect(bindPlan.stderr).toBe('');
+      expect(JSON.parse(bindPlan.stdout)).toEqual(expect.objectContaining({
+        operation: 'bind',
+        status: 'planned',
+        readyToApply: true,
+      }));
+      expect(fs.existsSync(statePath)).toBe(false);
+
+      const bindResult = invoke('bind', repositoryPath, '--yes', '--json');
+      expect(bindResult.status).toBe(0);
+      expect(bindResult.stderr).toBe('');
+      expect(JSON.parse(bindResult.stdout)).toEqual(expect.objectContaining({
+        operation: 'bind',
+        status: 'succeeded',
+      }));
+      expect(JSON.parse(fs.readFileSync(statePath, 'utf8'))).toMatchObject({
+        repositoryPath,
+        defaultRepositoryId: 'process-binding-id',
+      });
+
+      const unbindPlan = invoke('unbind', '--dry-run', '--json');
+      expect(unbindPlan.status).toBe(0);
+      expect(unbindPlan.stderr).toBe('');
+      expect(JSON.parse(unbindPlan.stdout)).toEqual(expect.objectContaining({
+        operation: 'unbind',
+        status: 'planned',
+        readyToApply: true,
+      }));
+      expect(JSON.parse(fs.readFileSync(statePath, 'utf8'))).toHaveProperty(
+        'repositoryPath',
+        repositoryPath,
+      );
+
+      const unbindResult = invoke('unbind', '--yes', '--json');
+      expect(unbindResult.status).toBe(0);
+      expect(unbindResult.stderr).toBe('');
+      expect(JSON.parse(unbindResult.stdout)).toEqual(expect.objectContaining({
+        operation: 'unbind',
+        status: 'succeeded',
+      }));
+      expect(JSON.parse(fs.readFileSync(statePath, 'utf8'))).not.toHaveProperty('repositoryPath');
+    } finally {
+      fs.rmSync(isolatedRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects invalid write mode combinations before running the Operation', () => {
+    const conflicting = spawnSync(
+      process.execPath,
+      [cliPath, 'bind', '--dry-run', '--yes'],
+      { encoding: 'utf8' },
+    );
+    const missingMode = spawnSync(
+      process.execPath,
+      [cliPath, 'unbind', '--json'],
+      { encoding: 'utf8' },
+    );
+
+    expect(conflicting.status).toBe(2);
+    expect(conflicting.stdout).toBe('');
+    expect(conflicting.stderr).toContain("options '--dry-run' and '--yes' cannot be used together");
+    expect(missingMode.status).toBe(2);
+    expect(missingMode.stdout).toBe('');
+    expect(missingMode.stderr).toContain("option '--json' requires '--dry-run' or '--yes'");
+  });
+
+  it('uses exit code 2 for unknown commands and options', () => {
+    const unknownCommand = spawnSync(
+      process.execPath,
+      [cliPath, 'unknown-command'],
+      { encoding: 'utf8' },
+    );
+    const unknownOption = spawnSync(
+      process.execPath,
+      [cliPath, 'status', '--unknown-option'],
+      { encoding: 'utf8' },
+    );
+
+    for (const result of [unknownCommand, unknownOption]) {
+      expect(result.status).toBe(2);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toMatch(/unknown option|too many arguments/);
+    }
+  });
+
+  it('uses exit code 3 for a non-interactive human-decision block', () => {
+    const isolatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-blocked-'));
+    const repositoryPath = path.join(isolatedRoot, 'non-empty-repository');
+    fs.mkdirSync(repositoryPath);
+    fs.writeFileSync(path.join(repositoryPath, 'keep.txt'), 'existing content\n');
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [cliPath, 'init', '--yes', '--json'],
+        {
+          cwd: repositoryPath,
+          encoding: 'utf8',
+          env: isolatedEnvironment(isolatedRoot),
+        },
+      );
+
+      expect(result.status).toBe(3);
+      expect(result.stderr).toBe('');
+      expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
+        operation: 'init',
+        status: 'blocked',
+        issues: [expect.objectContaining({
+          severity: 'warning',
+          code: 'repository.initTargetNotEmpty',
+        })],
+      }));
+      expect(result.stdout).not.toMatch(/\u001b\[/);
+      expect(fs.existsSync(path.join(repositoryPath, 'mcv.yaml'))).toBe(false);
+    } finally {
+      fs.rmSync(isolatedRoot, { recursive: true, force: true });
+    }
+  });
+
   it('prints one read-only Init Plan JSON document', () => {
     const isolatedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-init-'));
     const repositoryPath = path.join(isolatedRoot, 'repository');
@@ -118,7 +306,7 @@ describe('packaged mcv CLI', () => {
         {
           cwd: repositoryPath,
           encoding: 'utf8',
-          env: { ...process.env, HOME: isolatedRoot, APPDATA: isolatedRoot },
+          env: isolatedEnvironment(isolatedRoot),
         },
       );
 
@@ -157,7 +345,7 @@ describe('packaged mcv CLI', () => {
         {
           cwd: repositoryPath,
           encoding: 'utf8',
-          env: { ...process.env, HOME: isolatedRoot, APPDATA: isolatedRoot },
+          env: isolatedEnvironment(isolatedRoot),
         },
       );
 
@@ -211,11 +399,14 @@ describe('packaged mcv CLI', () => {
         {
           cwd: repositoryPath,
           encoding: 'utf8',
-          env: { ...process.env, HOME: isolatedRoot, APPDATA: isolatedRoot },
+          env: isolatedEnvironment(isolatedRoot),
         },
       );
 
-      expect(result.status).toBe(0);
+      expect(
+        result.status,
+        `signal=${String(result.signal)} error=${String(result.error)} stderr=${result.stderr}`,
+      ).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
         schemaVersion: 1,
@@ -261,7 +452,7 @@ describe('packaged mcv CLI', () => {
         {
           cwd: repositoryPath,
           encoding: 'utf8',
-          env: { ...process.env, HOME: isolatedRoot, APPDATA: isolatedRoot },
+          env: isolatedEnvironment(isolatedRoot),
         },
       );
 
@@ -320,7 +511,7 @@ describe('packaged mcv CLI', () => {
         [cliPath, 'restore', '--dry-run', '--json'],
         {
           encoding: 'utf8',
-          env: { ...process.env, HOME: isolatedRoot, APPDATA: isolatedRoot },
+          env: isolatedEnvironment(isolatedRoot),
         },
       );
 
@@ -447,7 +638,7 @@ describe('packaged mcv CLI', () => {
         {
           cwd: repositoryPath,
           encoding: 'utf8',
-          env: { ...process.env, HOME: isolatedRoot, APPDATA: isolatedRoot },
+          env: isolatedEnvironment(isolatedRoot),
         },
       );
 

@@ -1,4 +1,5 @@
 import type { StatusReport } from '../operations/status';
+import { styleText } from './color';
 
 export function renderStatusPlain(report: StatusReport): string[] {
   const lines = [
@@ -8,8 +9,8 @@ export function renderStatusPlain(report: StatusReport): string[] {
   ];
   if (report.repository.git) {
     lines.push(report.repository.git.clean
-      ? 'Git: clean'
-      : `Git: ${report.repository.git.uncommittedChanges} uncommitted ${plural(
+      ? `Git: ${styleText('clean', 'green')}`
+      : `Git: ${styleText(String(report.repository.git.uncommittedChanges), 'yellow')} uncommitted ${plural(
         report.repository.git.uncommittedChanges,
         'change',
       )}`);
@@ -20,7 +21,7 @@ export function renderStatusPlain(report: StatusReport): string[] {
   );
   const local = report.postDeployLocalState;
   lines.push(
-    `Post-deploy local state: ${local.unchanged} unchanged, ${local.drift} Drift, ${local.missing} missing`,
+    `Post-deploy local state: ${local.unchanged} unchanged, ${styleText(String(local.drift), local.drift > 0 ? 'yellow' : 'green')} Drift, ${styleText(String(local.missing), local.missing > 0 ? 'red' : 'green')} missing`,
     `Environment: ${report.environment.missingVariables.length} missing ${plural(
       report.environment.missingVariables.length,
       'variable',
@@ -39,7 +40,9 @@ export function renderStatusPlain(report: StatusReport): string[] {
     }
   }
   if (report.lastOperation) {
-    lines.push(`Last operation: ${report.lastOperation.kind} · ${report.lastOperation.success ? 'success' : 'failure'} · ${report.lastOperation.time}`);
+    lines.push(`Last operation: ${report.lastOperation.kind} · ${report.lastOperation.success
+      ? styleText('success', 'green')
+      : styleText('failure', 'red')} · ${report.lastOperation.time}`);
   } else {
     lines.push('Last operation: none');
   }

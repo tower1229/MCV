@@ -1,40 +1,57 @@
 import type {
+  BindPlan,
   BindResult,
   InitPlan,
   InitResult,
   MigrationPlan,
   MigrationResult,
   RepositoryReport,
+  UnbindPlan,
   UnbindResult,
 } from '../operations/repository';
+import { styleIssueSeverity, styleText } from './color';
 
 export function renderRepositoryPlain(report: RepositoryReport): string[] {
   const lines = [
     `Repository: ${report.repositoryPath ?? 'not bound'}`,
     `Repository ID: ${report.repositoryId ?? 'unknown'}`,
     `Schema version: ${report.repositorySchemaVersion ?? 'unknown'}`,
-    `Validity: ${report.valid ? 'valid' : 'invalid'}`,
+    `Validity: ${report.valid ? styleText('valid', 'green') : styleText('invalid', 'red')}`,
   ];
   if (report.git) {
     lines.push(
-      `Git: ${report.git.clean ? 'clean' : 'dirty'}${report.git.branch ? ` (${report.git.branch})` : ''}`,
+      `Git: ${report.git.clean ? styleText('clean', 'green') : styleText('dirty', 'yellow')}${report.git.branch ? ` (${report.git.branch})` : ''}`,
     );
   }
   return appendIssuesAndActions(lines, report);
 }
 
-export function renderBindPlain(result: BindResult): string[] {
-  if (result.status === 'succeeded') {
-    return [`Bound this device to ${result.repositoryPath}.`];
+export function renderBindPlain(contract: BindPlan | BindResult): string[] {
+  if (contract.status === 'planned') {
+    return appendIssuesAndActions([
+      `Bind Plan: ${contract.repositoryPath}`,
+      ...contract.changes.map((change) =>
+        `[${change.kind}] ${change.previousRepositoryPath ?? 'not bound'} -> ${change.repositoryPath}`),
+    ], contract);
   }
-  return appendIssuesAndActions([], result);
+  if (contract.status === 'succeeded') {
+    return [`Bound this device to ${contract.repositoryPath}.`];
+  }
+  return appendIssuesAndActions([], contract);
 }
 
-export function renderUnbindPlain(result: UnbindResult): string[] {
-  if (result.status !== 'succeeded') return appendIssuesAndActions([], result);
+export function renderUnbindPlain(contract: UnbindPlan | UnbindResult): string[] {
+  if (contract.status === 'planned') {
+    return appendIssuesAndActions([
+      `Unbind Plan: ${contract.repositoryPath ?? 'not bound'}`,
+      ...contract.changes.map((change) =>
+        `[${change.kind}] ${change.previousRepositoryPath ?? 'not bound'}`),
+    ], contract);
+  }
+  if (contract.status !== 'succeeded') return appendIssuesAndActions([], contract);
   return appendIssuesAndActions(
     ['Removed the MCV Repository binding from this device.'],
-    result,
+    contract,
   );
 }
 
@@ -75,11 +92,16 @@ export function renderMigrationPlain(contract: MigrationPlan | MigrationResult):
 
 function appendIssuesAndActions(
   lines: string[],
-  contract: Pick<RepositoryReport | InitPlan | InitResult | MigrationPlan | MigrationResult, 'issues' | 'nextActions'>,
+  contract: Pick<
+    RepositoryReport | BindPlan | BindResult | UnbindPlan | UnbindResult
+      | InitPlan | InitResult | MigrationPlan | MigrationResult,
+    'issues' | 'nextActions'
+  >,
 ): string[] {
   return [
     ...lines,
-    ...contract.issues.map((issue) => `[${issue.severity}] ${issue.code}: ${issue.message}`),
+    ...contract.issues.map((issue) =>
+      `[${styleIssueSeverity(issue.severity)}] ${issue.code}: ${issue.message}`),
     ...contract.nextActions.map((action) => `Next: ${action}`),
   ];
 }
