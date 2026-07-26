@@ -1,5 +1,5 @@
-import { createInterface } from 'readline/promises';
 import type { DeviceContext } from '../adapters/types';
+import { askInTerminal, withInterruptsIgnored } from '../cli/prompt';
 import { readState, writeState } from '../utils/state';
 import { applyCapturePlan, createCapturePlan } from '../operations/capture';
 import { renderCapturePlanPlain, renderCaptureResultPlain } from '../renderers/capture';
@@ -13,7 +13,7 @@ export interface CaptureOptions {
 }
 
 export interface CaptureDependencies {
-  confirmCapture?: () => Promise<boolean>;
+  confirmCapture?: () => Promise<boolean | undefined>;
   selectConflict?: (repositoryPath: string, candidates: string[]) => Promise<number | undefined>;
 }
 
@@ -43,6 +43,7 @@ export async function captureConfigurations(
     .filter((change) => change.defaultSelected)
     .map((change) => change.id);
   if (!options.yes) {
+    let interrupted = false;
     const decisionGroups = new Map<string, typeof capturePlan.changes>();
     for (const change of capturePlan.changes) {
       if (!change.decisionGroupId) continue;
@@ -55,12 +56,17 @@ export async function captureConfigurations(
       const canChoose = dependencies.selectConflict !== undefined || process.stdin.isTTY;
       const choose = dependencies.selectConflict
         ?? (canChoose
-          ? (name: string, candidates: string[]) => selectConflictInTerminal(name, candidates)
+          ? async (name: string, candidates: string[]) => {
+              const outcome = await selectConflictInTerminal(name, candidates);
+              interrupted = outcome.interrupted;
+              return outcome.choice;
+            }
           : async () => undefined);
       const choice = await choose(
         choices[0].repositoryPaths[0],
         choices.map((candidate) => candidate.sourceLabel ?? candidate.id),
       );
+      if (interrupted) break;
       if (choice !== undefined && choices[choice]?.decision !== 'skip') {
         changeIds.push(choices[choice].id);
       } else if (canChoose) {
@@ -68,25 +74,36 @@ export async function captureConfigurations(
         if (skip) changeIds.push(skip.id);
       }
     }
+    if (interrupted) {
+      process.exitCode = 130;
+      console.log('Capture interrupted; repository was not changed.');
+      return;
+    }
   }
   if (!options.yes) {
     if (!process.stdin.isTTY && !dependencies.confirmCapture) {
       throw new Error('Capture requires an interactive terminal; use --yes only after reviewing --dry-run.');
     }
     const confirmed = await (dependencies.confirmCapture ?? confirmInTerminal)();
+    if (confirmed === undefined) {
+      process.exitCode = 130;
+      console.log('Capture interrupted; repository was not changed.');
+      return;
+    }
     if (!confirmed) {
       console.log('Capture cancelled; repository was not changed.');
       return;
     }
   }
-  const result = await applyCapturePlan(context, capturePlan, {
-    changeIds,
-    confirmedIssueCodes: options.yes
-      ? []
-      : capturePlan.issues
-        .filter((issue) => issue.severity === 'warning')
-        .map((issue) => issue.code),
-  }, { nonInteractive: options.yes });
+  const result = await withInterruptsIgnored(() =>
+    applyCapturePlan(context, capturePlan, {
+      changeIds,
+      confirmedIssueCodes: options.yes
+        ? []
+        : capturePlan.issues
+          .filter((issue) => issue.severity === 'warning')
+          .map((issue) => issue.code),
+    }, { nonInteractive: options.yes }));
   if (result.status === 'succeeded') {
     const state = readState(context);
     state.lastOperation = { kind: 'capture', time: new Date().toISOString(), success: true };
@@ -98,18 +115,21 @@ export async function captureConfigurations(
   else for (const line of renderCaptureResultPlain(result)) console.log(line);
 }
 
-async function confirmInTerminal(): Promise<boolean> {
-  const prompt = createInterface({ input: process.stdin, output: process.stdout });
-  try { return /^(y|yes)$/i.test((await prompt.question('Write these changes to the repository? [y/N] ')).trim()); }
-  finally { prompt.close(); }
+async function confirmInTerminal(): Promise<boolean | undefined> {
+  const outcome = await askInTerminal('Write these changes to the repository? [y/N] ');
+  return outcome.interrupted ? undefined : /^(y|yes)$/i.test(outcome.answer.trim());
 }
 
-async function selectConflictInTerminal(name: string, candidates: string[]): Promise<number | undefined> {
-  const prompt = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    console.log(`Conflict: ${name}`);
-    candidates.forEach((candidate, index) => console.log(`  ${index + 1}. ${candidate}`));
-    const answer = Number(await prompt.question('Choose authoritative source (blank to skip): '));
-    return Number.isInteger(answer) && answer > 0 && answer <= candidates.length ? answer - 1 : undefined;
-  } finally { prompt.close(); }
+async function selectConflictInTerminal(
+  name: string,
+  candidates: string[],
+): Promise<{ interrupted: boolean; choice?: number }> {
+  console.log(`Conflict: ${name}`);
+  candidates.forEach((candidate, index) => console.log(`  ${index + 1}. ${candidate}`));
+  const outcome = await askInTerminal('Choose authoritative source (blank to skip): ');
+  if (outcome.interrupted) return { interrupted: true };
+  const answer = Number(outcome.answer);
+  return Number.isInteger(answer) && answer > 0 && answer <= candidates.length
+    ? { interrupted: false, choice: answer - 1 }
+    : { interrupted: false };
 }

@@ -27,12 +27,14 @@ describe('mcv capture', () => {
       JSON.stringify({ theme: 'dark', apiToken: 'must-not-leak' }),
     );
     process.chdir(repositoryPath);
+    process.exitCode = undefined;
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
     vi.restoreAllMocks();
+    process.exitCode = undefined;
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
 
@@ -158,6 +160,19 @@ describe('mcv capture', () => {
     expect(preview).toContain('${env:API_TOKEN}');
     expect(preview).not.toContain('must-not-leak');
     expect(confirmCapture).toHaveBeenCalledOnce();
+    expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
+  });
+
+  it('exits 130 without writing when Capture confirmation is interrupted', async () => {
+    await createProgram(
+      deviceContext('win32'),
+      { confirmCapture: async () => undefined },
+    ).parseAsync(['node', 'mcv', 'capture']);
+
+    expect(process.exitCode).toBe(130);
+    expect(console.log).toHaveBeenCalledWith(
+      'Capture interrupted; repository was not changed.',
+    );
     expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
   });
 

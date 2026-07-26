@@ -49,12 +49,14 @@ describe('mcv deploy', () => {
       }, null, 2)}\n`,
     );
     process.chdir(repositoryPath);
+    process.exitCode = undefined;
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
     vi.restoreAllMocks();
+    process.exitCode = undefined;
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
 
@@ -81,6 +83,20 @@ describe('mcv deploy', () => {
       theme: 'dark',
       command: `${windowsHomeDir()}\\Tools\\tool.exe`,
     });
+  });
+
+  it('exits 130 without writing when Deploy confirmation is interrupted', async () => {
+    await createProgram(
+      deviceContext('win32'),
+      {},
+      { confirmDeploy: async () => undefined },
+    ).parseAsync(['node', 'mcv', 'deploy']);
+
+    expect(process.exitCode).toBe(130);
+    expect(console.log).toHaveBeenCalledWith(
+      'Deploy interrupted; local configuration was not changed.',
+    );
+    expect(fs.existsSync(path.join(homeDir, '.claude', 'settings.json'))).toBe(false);
   });
 
   it('prints the same grouped read-only Deploy Plan as English text or one JSON document', async () => {

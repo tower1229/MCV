@@ -3,6 +3,7 @@
 import { Command, CommanderError, Option } from 'commander';
 import * as os from 'os';
 import type { DeviceContext } from './adapters/types';
+import { askInTerminal } from './cli/prompt';
 import { discoverConfigurations } from './commands/discover';
 import {
   captureConfigurations,
@@ -16,7 +17,6 @@ import {
 import { showStatus } from './commands/status';
 import { restoreLatestBackup } from './commands/restore';
 import { bind, migrate, showRepository, unbind } from './commands/binding';
-import { createInterface } from 'readline/promises';
 // package.json is the single version source for both npm and the CLI.
 const packageVersion = (require('../package.json') as { version: string }).version;
 
@@ -46,18 +46,9 @@ export function createProgram(
     .option('--dry-run', 'Preview initialization without writing')
     .option('--yes', 'Initialize without prompting after reviewing a dry-run')
     .option('--json', 'Print one machine-readable Plan or Result')
-    .action(async (options) => {
+    .action((options) => {
       validateWriteOutputOptions(initCommand, options);
-      const result = initRepository(context, process.cwd(), options);
-      if (result.status !== 'succeeded' || !process.stdin.isTTY) return;
-      await discoverConfigurations(context);
-      const prompt = createInterface({ input: process.stdin, output: process.stdout });
-      let shouldCapture = false;
-      try {
-        const answer = await prompt.question('Capture discovered configuration now? [Y/n] ');
-        shouldCapture = !/^(n|no)$/i.test(answer.trim());
-      } finally { prompt.close(); }
-      if (shouldCapture) await captureConfigurations(context, captureDependencies);
+      initRepository(context, process.cwd(), options);
     });
 
   const captureCommand = program
@@ -168,18 +159,28 @@ export function createProgram(
 
   program.action(async () => {
     if (!process.stdin.isTTY) { program.outputHelp(); return; }
-    const prompt = createInterface({ input: process.stdin, output: process.stdout });
     let command: string | undefined;
     let repositoryPath: string | undefined;
-    try {
-      const answer = await prompt.question('MCV: 1) discover 2) capture 3) deploy 4) status 5) restore 6) bind  Select: ');
-      if (answer.trim() === '6') {
-        repositoryPath = (await prompt.question('Repository path (blank to cancel): ')).trim();
-      } else {
-        command = ({ '1': 'discover', '2': 'capture', '3': 'deploy', '4': 'status', '5': 'restore' } as Record<string, string>)[answer.trim()];
+    const menu = await askInTerminal(
+      'MCV: 1) discover 2) capture 3) deploy 4) status 5) restore 6) bind  Select: ',
+    );
+    if (menu.interrupted) {
+      process.exitCode = 130;
+      console.log('MCV interrupted.');
+      return;
+    }
+    if (menu.answer.trim() === '6') {
+      const pathAnswer = await askInTerminal('Repository path (blank to cancel): ');
+      if (pathAnswer.interrupted) {
+        process.exitCode = 130;
+        console.log('MCV interrupted.');
+        return;
       }
-    } finally { prompt.close(); }
-    if (repositoryPath) bind(context, repositoryPath);
+      repositoryPath = pathAnswer.answer.trim();
+    } else {
+      command = ({ '1': 'discover', '2': 'capture', '3': 'deploy', '4': 'status', '5': 'restore' } as Record<string, string>)[menu.answer.trim()];
+    }
+    if (repositoryPath) bind(context, repositoryPath, { yes: true });
     else if (command) await createProgram(context, captureDependencies, deployDependencies).parseAsync(['node', 'mcv', command]);
   });
 

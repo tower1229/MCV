@@ -39,6 +39,7 @@ exports.createProgram = createProgram;
 exports.runCli = runCli;
 const commander_1 = require("commander");
 const os = __importStar(require("os"));
+const prompt_1 = require("./cli/prompt");
 const discover_1 = require("./commands/discover");
 const capture_1 = require("./commands/capture");
 const init_1 = require("./commands/init");
@@ -46,7 +47,6 @@ const deploy_1 = require("./commands/deploy");
 const status_1 = require("./commands/status");
 const restore_1 = require("./commands/restore");
 const binding_1 = require("./commands/binding");
-const promises_1 = require("readline/promises");
 // package.json is the single version source for both npm and the CLI.
 const packageVersion = require('../package.json').version;
 function createDefaultDeviceContext() {
@@ -68,23 +68,9 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         .option('--dry-run', 'Preview initialization without writing')
         .option('--yes', 'Initialize without prompting after reviewing a dry-run')
         .option('--json', 'Print one machine-readable Plan or Result')
-        .action(async (options) => {
+        .action((options) => {
         validateWriteOutputOptions(initCommand, options);
-        const result = (0, init_1.initRepository)(context, process.cwd(), options);
-        if (result.status !== 'succeeded' || !process.stdin.isTTY)
-            return;
-        await (0, discover_1.discoverConfigurations)(context);
-        const prompt = (0, promises_1.createInterface)({ input: process.stdin, output: process.stdout });
-        let shouldCapture = false;
-        try {
-            const answer = await prompt.question('Capture discovered configuration now? [Y/n] ');
-            shouldCapture = !/^(n|no)$/i.test(answer.trim());
-        }
-        finally {
-            prompt.close();
-        }
-        if (shouldCapture)
-            await (0, capture_1.captureConfigurations)(context, captureDependencies);
+        (0, init_1.initRepository)(context, process.cwd(), options);
     });
     const captureCommand = program
         .command('capture')
@@ -181,23 +167,28 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
             program.outputHelp();
             return;
         }
-        const prompt = (0, promises_1.createInterface)({ input: process.stdin, output: process.stdout });
         let command;
         let repositoryPath;
-        try {
-            const answer = await prompt.question('MCV: 1) discover 2) capture 3) deploy 4) status 5) restore 6) bind  Select: ');
-            if (answer.trim() === '6') {
-                repositoryPath = (await prompt.question('Repository path (blank to cancel): ')).trim();
-            }
-            else {
-                command = { '1': 'discover', '2': 'capture', '3': 'deploy', '4': 'status', '5': 'restore' }[answer.trim()];
-            }
+        const menu = await (0, prompt_1.askInTerminal)('MCV: 1) discover 2) capture 3) deploy 4) status 5) restore 6) bind  Select: ');
+        if (menu.interrupted) {
+            process.exitCode = 130;
+            console.log('MCV interrupted.');
+            return;
         }
-        finally {
-            prompt.close();
+        if (menu.answer.trim() === '6') {
+            const pathAnswer = await (0, prompt_1.askInTerminal)('Repository path (blank to cancel): ');
+            if (pathAnswer.interrupted) {
+                process.exitCode = 130;
+                console.log('MCV interrupted.');
+                return;
+            }
+            repositoryPath = pathAnswer.answer.trim();
+        }
+        else {
+            command = { '1': 'discover', '2': 'capture', '3': 'deploy', '4': 'status', '5': 'restore' }[menu.answer.trim()];
         }
         if (repositoryPath)
-            (0, binding_1.bind)(context, repositoryPath);
+            (0, binding_1.bind)(context, repositoryPath, { yes: true });
         else if (command)
             await createProgram(context, captureDependencies, deployDependencies).parseAsync(['node', 'mcv', command]);
     });

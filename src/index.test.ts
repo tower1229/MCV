@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const terminalPrompt = vi.hoisted(() => ({
   question: vi.fn(),
+  once: vi.fn(),
+  off: vi.fn(),
   close: vi.fn(),
 }));
 
@@ -30,6 +32,8 @@ describe('mcv init interaction', () => {
     process.chdir(repositoryPath);
     Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
     terminalPrompt.question.mockReset().mockResolvedValueOnce('y');
+    terminalPrompt.once.mockReset();
+    terminalPrompt.off.mockReset();
     terminalPrompt.close.mockReset();
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
@@ -41,16 +45,17 @@ describe('mcv init interaction', () => {
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
 
-  it('closes the onboarding prompt before capture starts reading terminal input', async () => {
+  it('keeps explicit JSON Init execution one-shot inside a TTY', async () => {
     await createProgram(
       { homeDir, platform: 'darwin', env: {}, pathEnv: '' },
-      {
-        confirmCapture: async () => {
-          expect(terminalPrompt.close).toHaveBeenCalledOnce();
-          return false;
-        },
-      },
-    ).parseAsync(['node', 'mcv', 'init', '--yes']);
+    ).parseAsync(['node', 'mcv', 'init', '--yes', '--json']);
+
+    expect(terminalPrompt.question).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
+      operation: 'init',
+      status: 'succeeded',
+    });
   });
 
   it('closes the main menu prompt before a selected command starts reading terminal input', async () => {

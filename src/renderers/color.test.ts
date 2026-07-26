@@ -20,4 +20,11 @@ describe('plain renderer color detection', () => {
       env: {},
     })).toBe('warning');
   });
+
+  it('does not emit ANSI for a TTY that reports no color capability', () => {
+    expect(styleText('warning', 'yellow', {
+      isTTY: true,
+      env: { TERM: 'dumb' },
+    })).toBe('warning');
+  });
 });

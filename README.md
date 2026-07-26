@@ -52,7 +52,7 @@ cd my-mcv-config
 mcv init
 ```
 
-该命令创建 schema v2 的 `mcv.yaml` 并绑定当前设备。交互终端随后可进入 discover/capture 向导；取消 capture 会保留合法空仓库。MCV 不执行任何 Git 操作。
+该命令创建 schema v2 的 `mcv.yaml` 并绑定当前设备，然后以单次 Result 结束。继续运行 `mcv discover --plain` 和 `mcv capture --dry-run` 检查并审阅本机配置。MCV 不执行任何 Git 操作。
 
 ### 2. 查看可发现的配置
 

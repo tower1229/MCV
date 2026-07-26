@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.styleText = styleText;
 exports.styleIssueSeverity = styleIssueSeverity;
+exports.renderIssuePlain = renderIssuePlain;
 const ANSI_CODES = {
     green: 32,
     yellow: 33,
@@ -12,7 +13,10 @@ const ANSI_CODES = {
 function styleText(text, tone, context = {}) {
     const isTTY = context.isTTY ?? Boolean(process.stdout.isTTY);
     const env = context.env ?? process.env;
-    if (!isTTY || Object.prototype.hasOwnProperty.call(env, 'NO_COLOR'))
+    if (!isTTY
+        || Object.prototype.hasOwnProperty.call(env, 'NO_COLOR')
+        || env.TERM === 'dumb'
+        || env.FORCE_COLOR === '0')
         return text;
     return `\u001b[${ANSI_CODES[tone]}m${text}\u001b[0m`;
 }
@@ -23,4 +27,7 @@ function styleIssueSeverity(severity) {
             ? 'yellow'
             : 'red';
     return styleText(severity, tone);
+}
+function renderIssuePlain(issue) {
+    return `[${styleIssueSeverity(issue.severity)}] ${issue.code}: ${issue.message}`;
 }

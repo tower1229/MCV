@@ -196,6 +196,16 @@ describe('packaged mcv CLI', () => {
         defaultRepositoryId: 'process-binding-id',
       });
 
+      const statusReport = invoke('status', '--json');
+      expect(statusReport.status).toBe(0);
+      expect(statusReport.stderr).toBe('');
+      expect(JSON.parse(statusReport.stdout)).toEqual(expect.objectContaining({
+        operation: 'status',
+        status: 'reported',
+        repositoryPath,
+      }));
+      expect(statusReport.stdout).not.toMatch(/\u001b\[/);
+
       const unbindPlan = invoke('unbind', '--dry-run', '--json');
       expect(unbindPlan.status).toBe(0);
       expect(unbindPlan.stderr).toBe('');
@@ -422,6 +432,24 @@ describe('packaged mcv CLI', () => {
       expect(result.stdout).not.toContain('process-secret-must-not-leak');
       expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
       expect(fs.existsSync(path.join(isolatedRoot, 'mcv', 'config.json'))).toBe(false);
+
+      const applyResult = spawnSync(
+        process.execPath,
+        [cliPath, 'capture', '--yes', '--json'],
+        {
+          cwd: repositoryPath,
+          encoding: 'utf8',
+          env: isolatedEnvironment(isolatedRoot),
+        },
+      );
+      expect(applyResult.status).toBe(0);
+      expect(applyResult.stderr).toBe('');
+      expect(JSON.parse(applyResult.stdout)).toEqual(expect.objectContaining({
+        operation: 'capture',
+        status: 'succeeded',
+        data: expect.objectContaining({ appliedChangeIds: [expect.any(String)] }),
+      }));
+      expect(applyResult.stdout).not.toMatch(/\u001b\[/);
     } finally {
       fs.rmSync(isolatedRoot, { recursive: true, force: true });
     }
@@ -471,6 +499,26 @@ describe('packaged mcv CLI', () => {
         })],
       }));
       expect(fs.existsSync(path.join(isolatedRoot, '.claude', 'CLAUDE.md'))).toBe(false);
+
+      const applyResult = spawnSync(
+        process.execPath,
+        [cliPath, 'deploy', '--yes', '--json'],
+        {
+          cwd: repositoryPath,
+          encoding: 'utf8',
+          env: isolatedEnvironment(isolatedRoot),
+        },
+      );
+      expect(applyResult.status).toBe(0);
+      expect(applyResult.stderr).toBe('');
+      expect(JSON.parse(applyResult.stdout)).toEqual(expect.objectContaining({
+        operation: 'deploy',
+        status: 'succeeded',
+        data: expect.objectContaining({ appliedChangeIds: [expect.any(String)] }),
+      }));
+      expect(applyResult.stdout).not.toMatch(/\u001b\[/);
+      expect(fs.readFileSync(path.join(isolatedRoot, '.claude', 'CLAUDE.md'), 'utf8'))
+        .toBe('# Process rules\n');
     } finally {
       fs.rmSync(isolatedRoot, { recursive: true, force: true });
     }
@@ -528,6 +576,24 @@ describe('packaged mcv CLI', () => {
       expect(result.stdout).not.toMatch(/\u001b\[/);
       expect(fs.readFileSync(targetPath, 'utf8')).toBe(deployedContent);
       expect(fs.existsSync(path.join(stateRoot, 'restore-backups'))).toBe(false);
+
+      const applyResult = spawnSync(
+        process.execPath,
+        [cliPath, 'restore', '--yes', '--json'],
+        {
+          encoding: 'utf8',
+          env: isolatedEnvironment(isolatedRoot),
+        },
+      );
+      expect(applyResult.status).toBe(0);
+      expect(applyResult.stderr).toBe('');
+      expect(JSON.parse(applyResult.stdout)).toEqual(expect.objectContaining({
+        operation: 'restore',
+        status: 'succeeded',
+        data: expect.objectContaining({ appliedChangeIds: [expect.any(String)] }),
+      }));
+      expect(applyResult.stdout).not.toMatch(/\u001b\[/);
+      expect(fs.readFileSync(targetPath, 'utf8')).toBe(originalContent);
     } finally {
       fs.rmSync(isolatedRoot, { recursive: true, force: true });
     }

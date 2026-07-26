@@ -1,5 +1,5 @@
 import type { RestorePlan, RestoreResult } from '../operations/restore';
-import { styleIssueSeverity } from './color';
+import { renderIssuePlain } from './color';
 
 export function renderRestorePlanPlain(plan: RestorePlan): string[] {
   const lines = ['Restore Plan: latest complete deployment backup'];
@@ -11,7 +11,7 @@ export function renderRestorePlanPlain(plan: RestorePlan): string[] {
   const deleteCount = plan.changes.length - restoreCount;
   lines.push(`Summary: ${restoreCount} file(s) to restore, ${deleteCount} file(s) to delete.`);
   for (const issue of plan.issues) {
-    lines.push(`[${styleIssueSeverity(issue.severity)}] ${issue.code}: ${issue.message}`);
+    lines.push(renderIssuePlain(issue));
     if (issue.details) {
       for (const detail of issue.details.split('\n')) lines.push(`  ${detail}`);
     }
@@ -30,7 +30,7 @@ export function renderRestoreResultPlain(result: RestoreResult): string[] {
   }
   const lines = [`Restore ${result.status}.`];
   for (const issue of result.issues) {
-    lines.push(`[${styleIssueSeverity(issue.severity)}] ${issue.code}: ${issue.message}`);
+    lines.push(renderIssuePlain(issue));
     if (issue.details) {
       for (const detail of issue.details.split('\n')) lines.push(`  ${detail}`);
     }

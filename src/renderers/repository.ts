@@ -9,7 +9,7 @@ import type {
   UnbindPlan,
   UnbindResult,
 } from '../operations/repository';
-import { styleIssueSeverity, styleText } from './color';
+import { renderIssuePlain, styleText } from './color';
 
 export function renderRepositoryPlain(report: RepositoryReport): string[] {
   const lines = [
@@ -100,8 +100,7 @@ function appendIssuesAndActions(
 ): string[] {
   return [
     ...lines,
-    ...contract.issues.map((issue) =>
-      `[${styleIssueSeverity(issue.severity)}] ${issue.code}: ${issue.message}`),
+    ...contract.issues.map(renderIssuePlain),
     ...contract.nextActions.map((action) => `Next: ${action}`),
   ];
 }

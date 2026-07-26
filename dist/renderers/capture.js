@@ -28,7 +28,7 @@ function renderCapturePlanPlain(plan) {
     }
     lines.push(`Summary: ${plan.changes.length} item(s), ${plan.summary.sensitiveFieldCount} sensitive field(s) replaced, ${plan.summary.parameterizedPathCount} path(s) parameterized, ${plan.summary.excludedFileCount} file(s) excluded.`);
     for (const issue of plan.issues) {
-        lines.push(`[${(0, color_1.styleIssueSeverity)(issue.severity)}] ${issue.code}: ${issue.message}`);
+        lines.push((0, color_1.renderIssuePlain)(issue));
     }
     for (const action of plan.nextActions)
         lines.push(`Next: ${action}`);
@@ -39,7 +39,7 @@ function renderCaptureResultPlain(result) {
         return [`Captured ${result.data?.appliedChangeIds.length ?? 0} selected item(s) into ${result.repositoryPath}.`];
     }
     return [
-        ...result.issues.map((issue) => `[${(0, color_1.styleIssueSeverity)(issue.severity)}] ${issue.code}: ${issue.message}`),
+        ...result.issues.map(color_1.renderIssuePlain),
         ...result.nextActions.map((action) => `Next: ${action}`),
     ];
 }

@@ -27,7 +27,7 @@ function renderDeployPlanPlain(plan) {
     }
     lines.push(`Summary: ${plan.changes.length} item(s).`);
     for (const issue of plan.issues) {
-        lines.push(`[${(0, color_1.styleIssueSeverity)(issue.severity)}] ${issue.code}: ${issue.message}`);
+        lines.push((0, color_1.renderIssuePlain)(issue));
     }
     for (const action of plan.nextActions)
         lines.push(`Next: ${action}`);
@@ -39,7 +39,7 @@ function renderDeployResultPlain(result) {
     }
     const lines = [`Deploy ${result.status}.`];
     for (const issue of result.issues) {
-        lines.push(`[${(0, color_1.styleIssueSeverity)(issue.severity)}] ${issue.code}: ${issue.message}`);
+        lines.push((0, color_1.renderIssuePlain)(issue));
     }
     if (result.status === 'failed')
         lines.push(`Error: ${result.error.message}`);

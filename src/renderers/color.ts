@@ -1,3 +1,5 @@
+import type { Issue, IssueSeverity } from '../operations/contracts';
+
 export type TextTone = 'green' | 'yellow' | 'red' | 'cyan' | 'dim';
 
 const ANSI_CODES: Record<TextTone, number> = {
@@ -20,12 +22,17 @@ export function styleText(
 ): string {
   const isTTY = context.isTTY ?? Boolean(process.stdout.isTTY);
   const env = context.env ?? process.env;
-  if (!isTTY || Object.prototype.hasOwnProperty.call(env, 'NO_COLOR')) return text;
+  if (
+    !isTTY
+    || Object.prototype.hasOwnProperty.call(env, 'NO_COLOR')
+    || env.TERM === 'dumb'
+    || env.FORCE_COLOR === '0'
+  ) return text;
   return `\u001b[${ANSI_CODES[tone]}m${text}\u001b[0m`;
 }
 
 export function styleIssueSeverity(
-  severity: 'notice' | 'warning' | 'decisionRequired' | 'error',
+  severity: IssueSeverity,
 ): string {
   const tone: TextTone = severity === 'notice'
     ? 'cyan'
@@ -33,4 +40,8 @@ export function styleIssueSeverity(
       ? 'yellow'
       : 'red';
   return styleText(severity, tone);
+}
+
+export function renderIssuePlain(issue: Issue): string {
+  return `[${styleIssueSeverity(issue.severity)}] ${issue.code}: ${issue.message}`;
 }

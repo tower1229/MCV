@@ -79,7 +79,7 @@ function renderMigrationPlain(contract) {
 function appendIssuesAndActions(lines, contract) {
     return [
         ...lines,
-        ...contract.issues.map((issue) => `[${(0, color_1.styleIssueSeverity)(issue.severity)}] ${issue.code}: ${issue.message}`),
+        ...contract.issues.map(color_1.renderIssuePlain),
         ...contract.nextActions.map((action) => `Next: ${action}`),
     ];
 }

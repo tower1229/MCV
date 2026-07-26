@@ -14,7 +14,7 @@ function renderRestorePlanPlain(plan) {
     const deleteCount = plan.changes.length - restoreCount;
     lines.push(`Summary: ${restoreCount} file(s) to restore, ${deleteCount} file(s) to delete.`);
     for (const issue of plan.issues) {
-        lines.push(`[${(0, color_1.styleIssueSeverity)(issue.severity)}] ${issue.code}: ${issue.message}`);
+        lines.push((0, color_1.renderIssuePlain)(issue));
         if (issue.details) {
             for (const detail of issue.details.split('\n'))
                 lines.push(`  ${detail}`);
@@ -35,7 +35,7 @@ function renderRestoreResultPlain(result) {
     }
     const lines = [`Restore ${result.status}.`];
     for (const issue of result.issues) {
-        lines.push(`[${(0, color_1.styleIssueSeverity)(issue.severity)}] ${issue.code}: ${issue.message}`);
+        lines.push((0, color_1.renderIssuePlain)(issue));
         if (issue.details) {
             for (const detail of issue.details.split('\n'))
                 lines.push(`  ${detail}`);

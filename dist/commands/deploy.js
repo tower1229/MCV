@@ -1,8 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deployConfigurations = deployConfigurations;
-const promises_1 = require("readline/promises");
 const adapters_1 = require("../adapters");
+const prompt_1 = require("../cli/prompt");
 const repository_1 = require("../utils/repository");
 const deploy_1 = require("../operations/deploy");
 const deploy_2 = require("../renderers/deploy");
@@ -21,7 +21,7 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
     }
     if (reviewPlan.status !== 'failed' && reviewPlan.changes.length === 0) {
         if (options.json) {
-            const result = await (0, deploy_1.applyDeployPlan)(context, reviewPlan, { changeIds: [] }, { nonInteractive: options.yes });
+            const result = await (0, prompt_1.withInterruptsIgnored)(() => (0, deploy_1.applyDeployPlan)(context, reviewPlan, { changeIds: [] }, { nonInteractive: options.yes }));
             console.log((0, json_1.renderJson)(result));
             if (result.status !== 'succeeded')
                 process.exitCode = result.status === 'blocked' ? 3 : 1;
@@ -43,6 +43,11 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
             throw new Error('Deploy requires an interactive terminal; use --yes only after reviewing --dry-run.');
         }
         const confirmed = await (dependencies.confirmDeploy ?? confirmInTerminal)();
+        if (confirmed === undefined) {
+            process.exitCode = 130;
+            console.log('Deploy interrupted; local configuration was not changed.');
+            return;
+        }
         if (!confirmed) {
             console.log('Deploy cancelled; local configuration was not changed.');
             return;
@@ -54,14 +59,14 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
             .filter((change) => change.defaultSelected
             || (options.pruneManaged === true && change.change === 'delete'))
             .map((change) => change.id);
-    const result = await (0, deploy_1.applyDeployPlan)(context, reviewPlan, {
+    const result = await (0, prompt_1.withInterruptsIgnored)(() => (0, deploy_1.applyDeployPlan)(context, reviewPlan, {
         changeIds: selectedIds,
         confirmedIssueCodes: options.yes
             ? []
             : reviewPlan.issues
                 .filter((issue) => issue.severity === 'warning')
                 .map((issue) => issue.code),
-    }, { nonInteractive: options.yes });
+    }, { nonInteractive: options.yes }));
     if (result.status !== 'succeeded')
         process.exitCode = result.status === 'blocked' ? 3 : 1;
     if (options.json)
@@ -71,12 +76,6 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
             console.log(line);
 }
 async function confirmInTerminal() {
-    const prompt = (0, promises_1.createInterface)({ input: process.stdin, output: process.stdout });
-    try {
-        const answer = await prompt.question('Write these changes to this device? [y/N] ');
-        return /^(y|yes)$/i.test(answer.trim());
-    }
-    finally {
-        prompt.close();
-    }
+    const outcome = await (0, prompt_1.askInTerminal)('Write these changes to this device? [y/N] ');
+    return outcome.interrupted ? undefined : /^(y|yes)$/i.test(outcome.answer.trim());
 }

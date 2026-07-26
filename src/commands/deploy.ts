@@ -1,13 +1,13 @@
-import { createInterface } from 'readline/promises';
 import { createAdapterDefinitions } from '../adapters';
 import type { DeviceContext } from '../adapters/types';
+import { askInTerminal, withInterruptsIgnored } from '../cli/prompt';
 import { readManifest } from '../utils/repository';
 import { applyDeployPlan, createDeployPlan } from '../operations/deploy';
 import { renderDeployPlanPlain, renderDeployResultPlain } from '../renderers/deploy';
 import { renderJson } from '../renderers/json';
 
 export interface DeployDependencies {
-  confirmDeploy?: () => Promise<boolean>;
+  confirmDeploy?: () => Promise<boolean | undefined>;
 }
 
 export interface DeployOptions { dryRun?: boolean; json?: boolean; yes?: boolean; pruneManaged?: boolean; }
@@ -26,7 +26,13 @@ export async function deployConfigurations(
   }
   if (reviewPlan.status !== 'failed' && reviewPlan.changes.length === 0) {
     if (options.json) {
-      const result = await applyDeployPlan(context, reviewPlan, { changeIds: [] }, { nonInteractive: options.yes });
+      const result = await withInterruptsIgnored(() =>
+        applyDeployPlan(
+          context,
+          reviewPlan,
+          { changeIds: [] },
+          { nonInteractive: options.yes },
+        ));
       console.log(renderJson(result));
       if (result.status !== 'succeeded') process.exitCode = result.status === 'blocked' ? 3 : 1;
     } else {
@@ -47,6 +53,11 @@ export async function deployConfigurations(
       throw new Error('Deploy requires an interactive terminal; use --yes only after reviewing --dry-run.');
     }
     const confirmed = await (dependencies.confirmDeploy ?? confirmInTerminal)();
+    if (confirmed === undefined) {
+      process.exitCode = 130;
+      console.log('Deploy interrupted; local configuration was not changed.');
+      return;
+    }
     if (!confirmed) {
       console.log('Deploy cancelled; local configuration was not changed.');
       return;
@@ -58,25 +69,21 @@ export async function deployConfigurations(
       .filter((change) => change.defaultSelected
         || (options.pruneManaged === true && change.change === 'delete'))
       .map((change) => change.id);
-  const result = await applyDeployPlan(context, reviewPlan, {
-    changeIds: selectedIds,
-    confirmedIssueCodes: options.yes
-      ? []
-      : reviewPlan.issues
-        .filter((issue) => issue.severity === 'warning')
-        .map((issue) => issue.code),
-  }, { nonInteractive: options.yes });
+  const result = await withInterruptsIgnored(() =>
+    applyDeployPlan(context, reviewPlan, {
+      changeIds: selectedIds,
+      confirmedIssueCodes: options.yes
+        ? []
+        : reviewPlan.issues
+          .filter((issue) => issue.severity === 'warning')
+          .map((issue) => issue.code),
+    }, { nonInteractive: options.yes }));
   if (result.status !== 'succeeded') process.exitCode = result.status === 'blocked' ? 3 : 1;
   if (options.json) console.log(renderJson(result));
   else for (const line of renderDeployResultPlain(result)) console.log(line);
 }
 
-async function confirmInTerminal(): Promise<boolean> {
-  const prompt = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = await prompt.question('Write these changes to this device? [y/N] ');
-    return /^(y|yes)$/i.test(answer.trim());
-  } finally {
-    prompt.close();
-  }
+async function confirmInTerminal(): Promise<boolean | undefined> {
+  const outcome = await askInTerminal('Write these changes to this device? [y/N] ');
+  return outcome.interrupted ? undefined : /^(y|yes)$/i.test(outcome.answer.trim());
 }
