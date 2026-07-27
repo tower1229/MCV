@@ -123,6 +123,34 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     expectRestoredTerminal(outcome.output);
   });
 
+  it('keeps q and Ctrl+C available while a stale Capture Plan regenerates', async () => {
+    const fixturePath = createRegeneratingCaptureFixture();
+    for (const [input, reason] of [
+      ['q', 'completed'],
+      ['\\003', 'interrupted'],
+    ] as const) {
+      const outcome = await runExpect([
+        'set timeout 5',
+        'log_user 1',
+        'spawn /bin/zsh -f -c {"$MCV_TEST_NODE" "$MCV_TEST_SCRIPT"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+        'expect -exact {Capture · Select Changes}',
+        'send "\\r"',
+        'expect -exact {Capture · Confirm Apply}',
+        'send "\\r"',
+        'expect -exact {Capture · Regenerating}',
+        `send "${input}"`,
+        `expect -exact {OUTCOME:${reason}}`,
+        'expect -exact {EXIT_CODE:0}',
+        'expect eof',
+        'set result [wait]',
+        'exit [lindex $result 3]',
+      ], { MCV_TEST_SCRIPT: fixturePath });
+
+      expect(outcome.code).toBe(0);
+      expectRestoredTerminal(outcome.output);
+    }
+  }, 10_000);
+
   it('labels a direct-route failure with the page that actually failed', async () => {
     const outcome = await runExpect([
       'set timeout 5',
@@ -283,6 +311,62 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       '',
     ].join('\n'));
     return repositoryPath;
+  }
+
+  function createRegeneratingCaptureFixture(): string {
+    const fixturePath = path.join(testRoot, 'regenerating-capture.mjs');
+    const shellModuleUrl = new URL(
+      `file://${path.join(process.cwd(), 'dist', 'tui', 'shell.js')}`,
+    ).href;
+    fs.writeFileSync(fixturePath, [
+      `import { runTuiShell } from ${JSON.stringify(shellModuleUrl)};`,
+      `const plan = ${JSON.stringify({
+        schemaVersion: 1,
+        operation: 'capture',
+        status: 'planned',
+        readyToApply: true,
+        operationId: 'regeneration-test',
+        preconditions: {},
+        repositoryPath: '/tmp/mcv',
+        changes: [],
+        issues: [],
+        nextActions: [],
+        summary: {
+          sensitiveFieldCount: 0,
+          parameterizedPathCount: 0,
+          excludedFileCount: 0,
+        },
+      })};`,
+      `const stale = ${JSON.stringify({
+        schemaVersion: 1,
+        operation: 'capture',
+        status: 'failed',
+        repositoryPath: '/tmp/mcv',
+        changes: [],
+        issues: [],
+        nextActions: ['Regenerate.'],
+        error: {
+          code: 'operation.stalePlan',
+          message: 'Plan stale.',
+          nextActions: ['Regenerate.'],
+        },
+      })};`,
+      'let loadCount = 0;',
+      'const outcome = await runTuiShell(',
+      "  { homeDir: process.env.HOME, platform: process.platform, env: process.env },",
+      "  'capture',",
+      '  {',
+      '    createCapturePlan: async () => {',
+      '      loadCount += 1;',
+      '      return loadCount === 1 ? plan : new Promise(() => {});',
+      '    },',
+      '    applyCapturePlan: async () => stale,',
+      '  },',
+      ');',
+      "process.stdout.write(`OUTCOME:${outcome.reason}\\n`);",
+      '',
+    ].join('\n'));
+    return fixturePath;
   }
 });
 
