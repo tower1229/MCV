@@ -61,9 +61,7 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
     wrapperPath = path.join(testRoot, 'invoke-mcv.ps1');
     fs.writeFileSync(wrapperPath, [
       'param([string]$Node, [string]$Cli, [string]$Route, [string]$ModeProbe)',
-      'Write-Output "WRAPPER_START"',
       'Add-Type -Path $ModeProbe',
-      'Write-Output "MODE_PROBE_LOADED"',
       '$inputHandle = [McvTest.ConsoleMode]::GetStdHandle(-10)',
       '[uint32]$before = 0',
       '[void][McvTest.ConsoleMode]::GetConsoleMode($inputHandle, [ref]$before)',
@@ -96,7 +94,7 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
 
   it('returns 130 on Ctrl+C and restores ConPTY input mode', async () => {
     const outcome = await runConPty('status', [{
-      pattern: 'Overview',
+      pattern: 'Repository',
       input: '\u0003',
       delay: 200,
     }]);
@@ -133,6 +131,7 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
         cwd: process.cwd(),
         env: {
           ...process.env,
+          CI: 'false',
           HOME: testRoot,
           USERPROFILE: testRoot,
           APPDATA: testRoot,
