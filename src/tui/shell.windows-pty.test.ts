@@ -61,7 +61,9 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
     wrapperPath = path.join(testRoot, 'invoke-mcv.ps1');
     fs.writeFileSync(wrapperPath, [
       'param([string]$Node, [string]$Cli, [string]$Route, [string]$ModeProbe)',
+      'Write-Output "WRAPPER_START"',
       'Add-Type -Path $ModeProbe',
+      'Write-Output "MODE_PROBE_LOADED"',
       '$inputHandle = [McvTest.ConsoleMode]::GetStdHandle(-10)',
       '[uint32]$before = 0',
       '[void][McvTest.ConsoleMode]::GetConsoleMode($inputHandle, [ref]$before)',
@@ -113,7 +115,18 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
       const terminal = pty.spawn('powershell.exe', [
         '-NoLogo',
         '-NoProfile',
-        '-NoExit',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        wrapperPath,
+        '-Node',
+        process.execPath,
+        '-Cli',
+        cliPath,
+        '-Route',
+        route,
+        '-ModeProbe',
+        modeProbePath,
       ], {
         cols: 100,
         rows: 30,
@@ -143,19 +156,6 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
         clearTimeout(timeout);
         resolve({ code: exitCode, output });
       });
-      const invocation = [
-        '&',
-        quotePowerShell(wrapperPath),
-        '-Node',
-        quotePowerShell(process.execPath),
-        '-Cli',
-        quotePowerShell(cliPath),
-        '-Route',
-        quotePowerShell(route),
-        '-ModeProbe',
-        quotePowerShell(modeProbePath),
-      ].join(' ');
-      setTimeout(() => terminal.write(`${invocation}\r`), 100);
     });
   }
 });
