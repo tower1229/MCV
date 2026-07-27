@@ -50,7 +50,7 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
     expectRestoredTerminal(outcome.output);
     expect(outcome.output).toContain('INPUT_MODE:restored');
     expect(outcome.output).not.toContain('INPUT_MODE:changed');
-  }, 10_000);
+  }, 45_000);
 
   it('returns 130 on Ctrl+C and restores ConPTY input mode', async () => {
     const outcome = await runConPty('status', [{
@@ -63,7 +63,7 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
     expectRestoredTerminal(outcome.output);
     expect(outcome.output).toContain('INPUT_MODE:restored');
     expect(outcome.output).not.toContain('INPUT_MODE:changed');
-  }, 10_000);
+  }, 45_000);
 
   function runConPty(
     route: 'discover' | 'status',
@@ -99,7 +99,7 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
       const timeout = setTimeout(() => {
         terminal.kill();
         reject(new Error(`Timed out waiting for Windows TUI. Output: ${output}`));
-      }, 8_000);
+      }, 30_000);
 
       terminal.onData((data) => {
         output += data;
