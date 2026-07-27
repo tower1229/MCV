@@ -1,12 +1,90 @@
 import type { EnvironmentReport } from '../operations/environment.js';
+import type { ConfigurationCapability } from '../adapters/types.js';
 import type {
   CaptureChange,
   CapturePlan,
   CaptureResult,
 } from '../operations/capture.js';
+import type {
+  BindPlan,
+  BindResult,
+  InitPlan,
+  InitResult,
+  MigrationPlan,
+  MigrationResult,
+  RepositoryReport,
+  UnbindPlan,
+  UnbindResult,
+} from '../operations/repository.js';
 import type { StatusReport } from '../operations/status.js';
+import type {
+  DeployChange,
+  DeployPlan,
+  DeployResult,
+} from '../operations/deploy.js';
 
-export type ShellRoute = 'overview' | 'environment' | 'capture';
+export type ShellRoute =
+  | 'repository'
+  | 'overview'
+  | 'environment'
+  | 'capture'
+  | 'deploy';
+
+export type RepositoryMenuAction =
+  | 'continue'
+  | 'bind-current'
+  | 'enter-path'
+  | 'init-here'
+  | 'migrate'
+  | 'rebind'
+  | 'unbind';
+
+export type RepositoryOperation = 'bind' | 'init' | 'migrate' | 'unbind';
+export type RepositoryPlan = BindPlan | InitPlan | MigrationPlan | UnbindPlan;
+type RepositoryPlanStep =
+  | { operation: 'bind'; plan: BindPlan }
+  | { operation: 'init'; plan: InitPlan }
+  | { operation: 'migrate'; plan: MigrationPlan }
+  | { operation: 'unbind'; plan: UnbindPlan };
+type RepositoryResultStep =
+  | { operation: 'bind'; result: BindResult }
+  | { operation: 'init'; result: InitResult }
+  | { operation: 'migrate'; result: MigrationResult }
+  | { operation: 'unbind'; result: UnbindResult };
+type RepositoryWorkflowContext = {
+  report: RepositoryReport;
+  currentDirectory: RepositoryReport;
+  resumeRoute: Exclude<ShellRoute, 'repository'>;
+};
+
+export type RepositoryWorkflowState =
+  | {
+    status: 'menu';
+    report: RepositoryReport;
+    currentDirectory: RepositoryReport;
+    cursor: number;
+    actions: RepositoryMenuAction[];
+    resumeRoute: Exclude<ShellRoute, 'repository'>;
+  }
+  | {
+    status: 'path';
+    report: RepositoryReport;
+    currentDirectory: RepositoryReport;
+    value: string;
+    resumeRoute: Exclude<ShellRoute, 'repository'>;
+  }
+  | ({
+    status: 'plan';
+    step: RepositoryPlanStep;
+  } & RepositoryWorkflowContext)
+  | ({
+    status: 'applying';
+    step: RepositoryPlanStep;
+  } & RepositoryWorkflowContext)
+  | ({
+    status: 'result';
+    step: RepositoryResultStep;
+  } & RepositoryWorkflowContext);
 
 interface CaptureSelectionState {
   status: 'selection';
@@ -64,12 +142,71 @@ export type CaptureWorkflowState =
   | CaptureRegeneratingState
   | CaptureResultState;
 
+interface DeploySelectionState {
+  status: 'selection';
+  plan: DeployPlan;
+  cursor: number;
+  selectedIds: string[];
+  advancedExpanded: boolean;
+}
+
+interface DeployDiffState {
+  status: 'diff';
+  plan: DeployPlan;
+  cursor: number;
+  selectedIds: string[];
+  advancedExpanded: boolean;
+  changeId: string;
+}
+
+interface DeployConfirmationState {
+  status: 'confirmation';
+  plan: DeployPlan;
+  selectedIds: string[];
+  confirmedIssueCodes: string[];
+  warningCursor: number;
+  advancedExpanded: boolean;
+}
+
+interface DeployApplyingState {
+  status: 'applying';
+  plan: DeployPlan;
+  selectedIds: string[];
+  confirmedIssueCodes: string[];
+}
+
+interface DeployRegeneratingState {
+  status: 'regenerating';
+}
+
+interface DeployResultState {
+  status: 'result';
+  result: DeployResult;
+}
+
+export type DeployWorkflowState =
+  | DeploySelectionState
+  | DeployDiffState
+  | DeployConfirmationState
+  | DeployApplyingState
+  | DeployRegeneratingState
+  | DeployResultState;
+
+export type LastDeploySelection = Partial<
+  Record<'codex' | 'claude-code' | 'gemini', ConfigurationCapability[]>
+>;
+
 type LoadingPage = {
   route: ShellRoute;
   status: 'loading';
 };
 
 type ReadyPage =
+  | {
+    route: 'repository';
+    status: 'ready';
+    workflow: RepositoryWorkflowState;
+  }
   | {
     route: 'overview';
     status: 'ready';
@@ -84,6 +221,11 @@ type ReadyPage =
     route: 'capture';
     status: 'ready';
     workflow: CaptureWorkflowState;
+  }
+  | {
+    route: 'deploy';
+    status: 'ready';
+    workflow: DeployWorkflowState;
   };
 
 type FailedPage = {
@@ -99,10 +241,27 @@ export interface ShellState {
     environment?: EnvironmentReport;
   };
   captureResult?: CaptureResult;
+  deployResult?: DeployResult;
+  postInitOnboarding: boolean;
+  repositoryResumeRoute: Exclude<ShellRoute, 'repository'>;
   exitReason: 'completed' | 'interrupted' | null;
 }
 
 export type ShellAction =
+  | {
+    type: 'repository.loaded';
+    report: RepositoryReport;
+    currentDirectory: RepositoryReport;
+    resumeRoute: Exclude<ShellRoute, 'repository'>;
+  }
+  | { type: 'repository.move'; delta: number }
+  | { type: 'repository.path'; value: string }
+  | { type: 'repository.enterPath' }
+  | ({ type: 'repository.plan' } & RepositoryPlanStep)
+  | { type: 'repository.apply' }
+  | ({ type: 'repository.applied' } & RepositoryResultStep)
+  | { type: 'repository.back' }
+  | { type: 'onboarding.continue' }
   | { type: 'overview.loaded'; report: StatusReport }
   | { type: 'environment.loaded'; report: EnvironmentReport }
   | { type: 'capture.loaded'; plan: CapturePlan }
@@ -116,6 +275,21 @@ export type ShellAction =
   | { type: 'capture.back' }
   | { type: 'capture.apply' }
   | { type: 'capture.applied'; result: CaptureResult }
+  | {
+    type: 'deploy.loaded';
+    plan: DeployPlan;
+    lastSelection?: LastDeploySelection;
+  }
+  | { type: 'deploy.move'; delta: number }
+  | { type: 'deploy.toggleSelection' }
+  | { type: 'deploy.toggleAdvanced' }
+  | { type: 'deploy.openDiff' }
+  | { type: 'deploy.closeDiff' }
+  | { type: 'deploy.toggleWarning' }
+  | { type: 'deploy.continue' }
+  | { type: 'deploy.back' }
+  | { type: 'deploy.apply' }
+  | { type: 'deploy.applied'; result: DeployResult }
   | { type: 'page.failed'; route: ShellRoute; message: string }
   | { type: 'navigate'; route: ShellRoute }
   | { type: 'exit' }
@@ -125,12 +299,131 @@ export function createInitialShellState(route: ShellRoute): ShellState {
   return {
     page: { route, status: 'loading' },
     reports: {},
+    postInitOnboarding: false,
+    repositoryResumeRoute: route === 'repository' ? 'overview' : route,
     exitReason: null,
   };
 }
 
 export function shellReducer(state: ShellState, action: ShellAction): ShellState {
   switch (action.type) {
+    case 'repository.loaded':
+      return {
+        ...state,
+        repositoryResumeRoute: action.resumeRoute,
+        page: {
+          route: 'repository',
+          status: 'ready',
+          workflow: {
+            status: 'menu',
+            report: action.report,
+            currentDirectory: action.currentDirectory,
+            cursor: 0,
+            actions: repositoryMenuActions(
+              action.report,
+              action.currentDirectory,
+            ),
+            resumeRoute: action.resumeRoute,
+          },
+        },
+      };
+    case 'repository.move':
+      return updateRepositoryWorkflow(state, (workflow) => {
+        if (workflow.status !== 'menu') return workflow;
+        return {
+          ...workflow,
+          cursor: wrapIndex(
+            workflow.cursor + action.delta,
+            workflow.actions.length,
+          ),
+        };
+      });
+    case 'repository.path':
+      return updateRepositoryWorkflow(state, (workflow) =>
+        workflow.status === 'path'
+          ? { ...workflow, value: action.value }
+          : workflow);
+    case 'repository.enterPath':
+      return updateRepositoryWorkflow(state, (workflow) =>
+        workflow.status === 'menu'
+          ? {
+            status: 'path',
+            report: workflow.report,
+            currentDirectory: workflow.currentDirectory,
+            value: '',
+            resumeRoute: workflow.resumeRoute,
+          }
+          : workflow);
+    case 'repository.plan':
+      return updateRepositoryWorkflow(state, (workflow) => ({
+        status: 'plan',
+        step: action,
+        report: workflow.report,
+        currentDirectory: workflow.currentDirectory,
+        resumeRoute: workflow.resumeRoute,
+      }));
+    case 'repository.apply':
+      return updateRepositoryWorkflow(state, (workflow) =>
+        workflow.status === 'plan' && workflow.step.plan.status === 'planned'
+          ? { ...workflow, status: 'applying' }
+          : workflow);
+    case 'repository.applied':
+      if (action.result.status === 'succeeded') {
+        if (action.operation === 'init') {
+          return {
+            ...state,
+            page: { route: 'environment', status: 'loading' },
+            postInitOnboarding: true,
+          };
+        }
+        if (
+          action.operation === 'bind'
+          && state.page.route === 'repository'
+          && state.page.status === 'ready'
+        ) {
+          return {
+            ...state,
+            page: {
+              route: state.page.workflow.resumeRoute,
+              status: 'loading',
+            },
+          };
+        }
+        return {
+          ...state,
+          page: { route: 'repository', status: 'loading' },
+        };
+      }
+      return updateRepositoryWorkflow(state, (workflow) => ({
+        status: 'result',
+        step: action,
+        report: workflow.report,
+        currentDirectory: workflow.currentDirectory,
+        resumeRoute: workflow.resumeRoute,
+      }));
+    case 'repository.back':
+      return updateRepositoryWorkflow(state, (workflow) => ({
+        status: 'menu',
+        report: workflow.report,
+        currentDirectory: workflow.currentDirectory,
+        cursor: 0,
+        actions: repositoryMenuActions(
+          workflow.report,
+          workflow.currentDirectory,
+        ),
+        resumeRoute: workflow.resumeRoute,
+      }));
+    case 'onboarding.continue':
+      if (
+        !state.postInitOnboarding
+        || state.page.route !== 'environment'
+        || state.page.status !== 'ready'
+      ) return state;
+      return {
+        ...state,
+        page: { route: 'capture', status: 'loading' },
+        postInitOnboarding: false,
+      };
     case 'overview.loaded':
       if (state.page.route !== 'overview') return state;
       return {
@@ -237,6 +530,85 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
           },
         },
       };
+    case 'deploy.loaded':
+      if (state.page.route !== 'deploy') return state;
+      if (action.plan.status === 'failed') {
+        return {
+          ...state,
+          page: {
+            route: 'deploy',
+            status: 'failure',
+            message: action.plan.error.message,
+          },
+        };
+      }
+      return {
+        ...state,
+        page: {
+          route: 'deploy',
+          status: 'ready',
+          workflow: {
+            status: 'selection',
+            plan: action.plan,
+            cursor: 0,
+            selectedIds: initialDeploySelection(
+              action.plan,
+              action.lastSelection,
+            ),
+            advancedExpanded: false,
+          },
+        },
+      };
+    case 'deploy.move':
+      return updateDeployWorkflow(state, (workflow) =>
+        moveDeployCursor(workflow, action.delta));
+    case 'deploy.toggleSelection':
+      return updateDeployWorkflow(state, toggleDeploySelection);
+    case 'deploy.toggleAdvanced':
+      return updateDeployWorkflow(state, toggleDeployAdvanced);
+    case 'deploy.openDiff':
+      return updateDeployWorkflow(state, openDeployDiff);
+    case 'deploy.closeDiff':
+      return updateDeployWorkflow(state, closeDeployDiff);
+    case 'deploy.toggleWarning':
+      return updateDeployWorkflow(state, toggleDeployWarning);
+    case 'deploy.continue':
+      return updateDeployWorkflow(state, continueDeployWorkflow);
+    case 'deploy.back':
+      return updateDeployWorkflow(state, backDeployWorkflow);
+    case 'deploy.apply':
+      return updateDeployWorkflow(state, beginDeployApply);
+    case 'deploy.applied':
+      if (
+        state.page.route !== 'deploy'
+        || state.page.status !== 'ready'
+        || state.page.workflow.status !== 'applying'
+      ) return state;
+      if (
+        action.result.status === 'failed'
+        && action.result.error.code === 'operation.stalePlan'
+      ) {
+        return {
+          ...state,
+          page: {
+            route: 'deploy',
+            status: 'ready',
+            workflow: { status: 'regenerating' },
+          },
+        };
+      }
+      return {
+        ...state,
+        deployResult: action.result,
+        page: {
+          route: 'deploy',
+          status: 'ready',
+          workflow: {
+            status: 'result',
+            result: action.result,
+          },
+        },
+      };
     case 'page.failed':
       if (state.page.route !== action.route) return state;
       return {
@@ -250,6 +622,9 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
     case 'navigate':
       return {
         ...state,
+        ...(action.route === 'repository' && state.page.route !== 'repository'
+          ? { repositoryResumeRoute: state.page.route }
+          : {}),
         page: {
           route: action.route,
           status: 'loading',
@@ -258,8 +633,59 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
     case 'exit':
       return { ...state, exitReason: 'completed' };
     case 'cancel':
+      if (
+        state.page.status === 'ready'
+        && (state.page.route === 'capture' || state.page.route === 'deploy')
+        && state.page.workflow.status === 'applying'
+      ) return state;
       return { ...state, exitReason: 'interrupted' };
   }
+}
+
+function updateRepositoryWorkflow(
+  state: ShellState,
+  update: (workflow: RepositoryWorkflowState) => RepositoryWorkflowState,
+): ShellState {
+  if (state.page.route !== 'repository' || state.page.status !== 'ready') {
+    return state;
+  }
+  return {
+    ...state,
+    page: {
+      ...state.page,
+      workflow: update(state.page.workflow),
+    },
+  };
+}
+
+function repositoryMenuActions(
+  report: RepositoryReport,
+  currentDirectory: RepositoryReport,
+): RepositoryMenuAction[] {
+  if (report.valid) return ['continue', 'rebind', 'unbind'];
+  if (
+    report.issues.some((issue) => issue.code === 'repository.migrationRequired')
+  ) {
+    return ['migrate', 'rebind', 'unbind'];
+  }
+  if (
+    report.issues.some((issue) =>
+      issue.code === 'repository.idMismatch'
+      || issue.code === 'repository.invalidManifest')
+    && report.repositoryPath
+  ) {
+    return ['rebind', 'unbind'];
+  }
+  if (currentDirectory.valid) {
+    return ['bind-current', 'enter-path'];
+  }
+  if (
+    currentDirectory.issues.some((issue) =>
+      issue.code === 'repository.migrationRequired')
+  ) {
+    return ['migrate', 'enter-path'];
+  }
+  return ['init-here', 'enter-path'];
 }
 
 function updateCaptureWorkflow(
@@ -267,6 +693,20 @@ function updateCaptureWorkflow(
   update: (workflow: CaptureWorkflowState) => CaptureWorkflowState,
 ): ShellState {
   if (state.page.route !== 'capture' || state.page.status !== 'ready') return state;
+  return {
+    ...state,
+    page: {
+      ...state.page,
+      workflow: update(state.page.workflow),
+    },
+  };
+}
+
+function updateDeployWorkflow(
+  state: ShellState,
+  update: (workflow: DeployWorkflowState) => DeployWorkflowState,
+): ShellState {
+  if (state.page.route !== 'deploy' || state.page.status !== 'ready') return state;
   return {
     ...state,
     page: {
@@ -497,4 +937,173 @@ function toggleId(ids: string[], id: string): string[] {
 function wrapIndex(index: number, length: number): number {
   if (length === 0) return 0;
   return ((index % length) + length) % length;
+}
+
+function initialDeploySelection(
+  plan: DeployPlan,
+  lastSelection?: LastDeploySelection,
+): string[] {
+  return plan.changes
+    .filter((change) => {
+      if (change.group === 'advanced' || change.change === 'delete') return false;
+      if (!lastSelection) return change.defaultSelected;
+      return lastSelection[change.ide]?.includes(change.capability) === true;
+    })
+    .map((change) => change.id);
+}
+
+export function deployVisibleChanges(
+  workflow: Pick<DeploySelectionState, 'plan' | 'advancedExpanded'>,
+): DeployChange[] {
+  return workflow.plan.changes.filter(
+    (change) => change.group === 'standard' || workflow.advancedExpanded,
+  );
+}
+
+export function deployWarnings(plan: DeployPlan) {
+  return plan.issues.filter((issue) => issue.severity === 'warning');
+}
+
+function moveDeployCursor(
+  workflow: DeployWorkflowState,
+  delta: number,
+): DeployWorkflowState {
+  if (workflow.status === 'selection') {
+    return {
+      ...workflow,
+      cursor: wrapIndex(
+        workflow.cursor + delta,
+        deployVisibleChanges(workflow).length,
+      ),
+    };
+  }
+  if (workflow.status === 'confirmation') {
+    return {
+      ...workflow,
+      warningCursor: wrapIndex(
+        workflow.warningCursor + delta,
+        deployWarnings(workflow.plan).length,
+      ),
+    };
+  }
+  return workflow;
+}
+
+function toggleDeploySelection(
+  workflow: DeployWorkflowState,
+): DeployWorkflowState {
+  if (workflow.status !== 'selection') return workflow;
+  const change = deployVisibleChanges(workflow)[workflow.cursor];
+  if (!change) return workflow;
+  return {
+    ...workflow,
+    selectedIds: toggleId(workflow.selectedIds, change.id),
+  };
+}
+
+function toggleDeployAdvanced(
+  workflow: DeployWorkflowState,
+): DeployWorkflowState {
+  if (workflow.status !== 'selection') return workflow;
+  return {
+    ...workflow,
+    cursor: 0,
+    advancedExpanded: !workflow.advancedExpanded,
+  };
+}
+
+function openDeployDiff(
+  workflow: DeployWorkflowState,
+): DeployWorkflowState {
+  if (workflow.status !== 'selection') return workflow;
+  const change = deployVisibleChanges(workflow)[workflow.cursor];
+  if (!change) return workflow;
+  return {
+    status: 'diff',
+    plan: workflow.plan,
+    cursor: workflow.cursor,
+    selectedIds: workflow.selectedIds,
+    advancedExpanded: workflow.advancedExpanded,
+    changeId: change.id,
+  };
+}
+
+function closeDeployDiff(
+  workflow: DeployWorkflowState,
+): DeployWorkflowState {
+  if (workflow.status !== 'diff') return workflow;
+  return {
+    status: 'selection',
+    plan: workflow.plan,
+    cursor: workflow.cursor,
+    selectedIds: workflow.selectedIds,
+    advancedExpanded: workflow.advancedExpanded,
+  };
+}
+
+function toggleDeployWarning(
+  workflow: DeployWorkflowState,
+): DeployWorkflowState {
+  if (workflow.status !== 'confirmation') return workflow;
+  const warning = deployWarnings(workflow.plan)[workflow.warningCursor];
+  if (!warning) return workflow;
+  return {
+    ...workflow,
+    confirmedIssueCodes: toggleId(
+      workflow.confirmedIssueCodes,
+      warning.code,
+    ),
+  };
+}
+
+function continueDeployWorkflow(
+  workflow: DeployWorkflowState,
+): DeployWorkflowState {
+  if (workflow.status !== 'selection') return workflow;
+  if (workflow.plan.issues.some((issue) =>
+    issue.severity === 'decisionRequired' || issue.severity === 'error')) {
+    return workflow;
+  }
+  return {
+    status: 'confirmation',
+    plan: workflow.plan,
+    selectedIds: workflow.selectedIds,
+    confirmedIssueCodes: [],
+    warningCursor: 0,
+    advancedExpanded: workflow.advancedExpanded,
+  };
+}
+
+function backDeployWorkflow(
+  workflow: DeployWorkflowState,
+): DeployWorkflowState {
+  if (workflow.status === 'diff') return closeDeployDiff(workflow);
+  if (workflow.status !== 'confirmation') return workflow;
+  return {
+    status: 'selection',
+    plan: workflow.plan,
+    cursor: 0,
+    selectedIds: workflow.selectedIds,
+    advancedExpanded: workflow.advancedExpanded,
+  };
+}
+
+function beginDeployApply(
+  workflow: DeployWorkflowState,
+): DeployWorkflowState {
+  if (workflow.status !== 'confirmation') return workflow;
+  if (workflow.plan.issues.some((issue) =>
+    issue.severity === 'decisionRequired' || issue.severity === 'error')) {
+    return workflow;
+  }
+  if (!deployWarnings(workflow.plan).every((warning) =>
+    workflow.confirmedIssueCodes.includes(warning.code))) {
+    return workflow;
+  }
+  return {
+    status: 'applying',
+    plan: workflow.plan,
+    selectedIds: workflow.selectedIds,
+    confirmedIssueCodes: workflow.confirmedIssueCodes,
+  };
 }

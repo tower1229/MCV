@@ -61,7 +61,12 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         .option('--prune-managed', 'Delete stale managed files and exact duplicate Skills from the legacy Codex directory')
         .action(async (options) => {
         validateWriteOutputOptions(deployCommand, options);
-        await deployConfigurations(context, deployDependencies, options);
+        if (shouldUseDeployTui(options)) {
+            await runShell(context, 'deploy', true);
+        }
+        else {
+            await deployConfigurations(context, deployDependencies, options);
+        }
     });
     const discoverCommand = program
         .command('discover')
@@ -163,6 +168,13 @@ function shouldUseCaptureTui(options) {
         && !options.yes
         && !options.json);
 }
+function shouldUseDeployTui(options) {
+    return Boolean(process.stdin.isTTY
+        && process.stdout.isTTY
+        && !options.dryRun
+        && !options.yes
+        && !options.json);
+}
 async function runShell(context, route, direct) {
     const outcome = await runTuiShell(context, route);
     reportShellOutcome(outcome, route, direct);
@@ -186,6 +198,19 @@ function reportShellOutcome(outcome, initialRoute, direct) {
             return;
         }
         console.log(outcome.summary ?? 'Capture closed without applying changes.');
+        return;
+    }
+    if (initialRoute === 'deploy') {
+        if (outcome.operationStatus === 'blocked')
+            process.exitCode = 3;
+        else if (outcome.operationStatus === 'failed' || outcome.failureMessage) {
+            process.exitCode = 1;
+        }
+        if (outcome.failureMessage) {
+            console.error(`Deploy failed: ${outcome.failureMessage}`);
+            return;
+        }
+        console.log(outcome.summary ?? 'Deploy closed without applying changes.');
         return;
     }
     if (outcome.failureMessage) {

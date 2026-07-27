@@ -1,0 +1,46 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`TUI Shell view > snapshots Deploy replacement Diff, warning, applying, stale, and failure Result 1`] = `
+{
+  "applying": "MCV
+Deploy · Applying
+
+Applying 2 selected changes transactionally...
+
+Please wait; input is disabled during backup, Apply, and rollback.",
+  "confirmation": "MCV
+Deploy · Confirm Apply
+
+2 selected changes
+Warnings require explicit confirmation:
+> [ ] A target needs explicit review.
+
+Apply disabled: confirm every warning.
+
+↑↓ Move   Space Confirm Warning   Enter Apply   Escape Back   q Quit   Ctrl+C
+Cancel",
+  "diff": "MCV
+Deploy · Diff
+
+Shared Rules · modify
+Apply semantics: Whole-file replacement — replace the complete target file.
+/Users/张涛/.codex/AGENTS.md
+  - old rule
+  + new rule
+
+Escape Back   q Quit   Ctrl+C Cancel",
+  "failure": "MCV
+Deploy · Result
+
+Deploy failed: deploy.transactionFailed
+Next: Generate and review a new Deploy Plan.
+
+Enter Refresh Overview   q Quit",
+  "stale": "MCV
+Deploy · Regenerating
+
+The Deploy Plan became stale. Regenerating a new preview for review...
+
+Please wait.",
+}
+`;

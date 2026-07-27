@@ -18,15 +18,14 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
 
-  it('opens Overview in the alternate screen and restores cursor and input mode', async () => {
+  it('opens Repository onboarding in the alternate screen and restores cursor and input mode', async () => {
     const outcome = await runExpect([
       'set timeout 5',
       'log_user 1',
       'spawn /bin/zsh -f -c {stty rows 24 columns 80; before=$(stty -g); "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; after=$(stty -g); if [[ "$before" == "$after" ]]; then mode=restored; else mode=changed; fi; print -r -- INPUT_MODE:$mode; print -r -- EXIT_CODE:$code; exit $code}',
-      'expect -exact {Overview}',
+      'expect -exact {Repository}',
       'after 200',
-      'send "e"',
-      'expect -exact {Loading Environment Details...}',
+      'expect -exact {Initialize here}',
       'send "q"',
       'expect -exact {INPUT_MODE:restored}',
       'expect -exact {EXIT_CODE:0}',
@@ -45,6 +44,11 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'set timeout 5',
       'log_user 1',
       'spawn /bin/zsh -f -c {cd "$MCV_TEST_REPO"; "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Bind current repository}',
+      'send "\\r"',
+      'expect -exact {Repository · Bind Plan}',
+      'send "\\r"',
+      'expect -exact {Loading Overview...}',
       'expect -exact {Overview}',
       'send "c"',
       'expect -exact {Capture · Select Changes}',
@@ -80,6 +84,186 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     expectRestoredTerminal(deepLink.output);
   }, 10_000);
 
+  it('initializes, discovers, enters Capture, and preserves the Repository when onboarding is cancelled', async () => {
+    const repositoryPath = path.join(testRoot, 'new-repository');
+    fs.mkdirSync(repositoryPath);
+
+    const outcome = await runExpect([
+      'set timeout 7',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {cd "$MCV_TEST_REPO"; "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Initialize here}',
+      'send "\\r"',
+      'expect -exact {Repository · Init Plan}',
+      'send "\\r"',
+      'expect -exact {Environment Details}',
+      'expect -exact {Enter Continue to Capture}',
+      'send "\\r"',
+      'expect -exact {Capture · Select Changes}',
+      'send "\\033"',
+      'expect -exact {Loading Overview...}',
+      'expect -exact {Overview}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: repositoryPath });
+
+    expect(outcome.code).toBe(0);
+    expect(fs.existsSync(path.join(repositoryPath, 'mcv.yaml'))).toBe(true);
+    expect(readBinding()).toMatchObject({
+      repositoryPath: fs.realpathSync(repositoryPath),
+    });
+    expect(outcome.output).not.toMatch(/git init|Git warning/i);
+    expectRestoredTerminal(outcome.output);
+  }, 10_000);
+
+  it('rebinds a moved Repository with the same ID before allowing other writes', async () => {
+    const movedRepository = createCaptureRepository();
+    const missingPath = path.join(testRoot, 'old-location');
+    writeBinding(missingPath, 'tui-capture-test');
+
+    const outcome = await runExpect([
+      'set timeout 7',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {"$MCV_TEST_NODE" "$MCV_TEST_CLI" capture; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Repository writes are blocked}',
+      'expect -exact {Rebind moved Repository}',
+      'send "\\r"',
+      'expect -exact {Enter the path to an existing MCV Repository:}',
+      'send -- $env(MCV_TEST_REPO)',
+      'after 200',
+      'send "\\r"',
+      'expect -exact {Repository · Bind Plan}',
+      'send "\\r"',
+      'expect -exact {Capture · Select Changes}',
+      'send "\\033"',
+      'expect -exact {Overview}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: movedRepository });
+
+    expect(outcome.code).toBe(0);
+    expect(readBinding()).toMatchObject({
+      repositoryPath: movedRepository,
+    });
+    expectRestoredTerminal(outcome.output);
+  }, 10_000);
+
+  it('reviews Migration and Unbind Plans and changes only the intended state', async () => {
+    const repositoryPath = createSchemaOneRepository();
+    writeBinding(repositoryPath, 'tui-migration-test');
+
+    const migration = await runExpect([
+      'set timeout 7',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {"$MCV_TEST_NODE" "$MCV_TEST_CLI" capture; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Review Migration Plan}',
+      'send "\\r"',
+      'expect -exact {Repository · Migrate Plan}',
+      'send "\\r"',
+      'expect -exact {Continue to Capture}',
+      'send "\\r"',
+      'expect -exact {Capture · Select Changes}',
+      'send "\\033"',
+      'expect -exact {Overview}',
+      'send "r"',
+      'expect -exact {Unbind this device}',
+      'send "\\033\\[B"',
+      'after 100',
+      'send "\\033\\[B"',
+      'after 100',
+      'send "\\r"',
+      'expect -exact {This removes only the local binding. Repository files will not be changed.}',
+      'send "\\r"',
+      'expect -exact {Initialize here}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ]);
+
+    expect(migration.code).toBe(0);
+    expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8'))
+      .toContain('schemaVersion: 2');
+    expect(fs.existsSync(path.join(repositoryPath, 'mcv.yaml'))).toBe(true);
+    expect(readBinding()).not.toHaveProperty('repositoryPath');
+    expectRestoredTerminal(migration.output);
+  }, 10_000);
+
+  it('opens the same Deploy workflow from Overview and the deploy deep link', async () => {
+    const repositoryPath = createCaptureRepository();
+    writeBinding(repositoryPath, 'tui-capture-test');
+    const overview = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {cd "$MCV_TEST_REPO"; "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Overview}',
+      'send "d"',
+      'expect -exact {Deploy · Select Changes}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: repositoryPath });
+    const deepLink = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {cd "$MCV_TEST_REPO"; "$MCV_TEST_NODE" "$MCV_TEST_CLI" deploy; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Deploy · Select Changes}',
+      'send "q"',
+      'expect -exact {Deploy closed without applying changes.}',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: repositoryPath });
+
+    expect(overview.code).toBe(0);
+    expect(deepLink.code).toBe(0);
+    expectRestoredTerminal(overview.output);
+    expectRestoredTerminal(deepLink.output);
+  }, 10_000);
+
+  it('keeps Deploy transactional while partial selection fails after warning review', async () => {
+    const fixturePath = createDeployWorkflowFixture();
+    const outcome = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {"$MCV_TEST_NODE" "$MCV_TEST_SCRIPT"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Deploy · Select Changes}',
+      'send " "',
+      'after 100',
+      'send "\\r"',
+      'expect -exact {Deploy · Confirm Apply}',
+      'send " "',
+      'after 100',
+      'send "\\r"',
+      'expect -exact {Deploy · Applying}',
+      'send "q"',
+      'send "\\003"',
+      'expect -exact {Deploy · Result}',
+      'expect -exact {Deploy failed: simulated transaction failure}',
+      'send "q"',
+      'expect -exact {SELECTED:deploy-second}',
+      'expect -exact {OUTCOME:completed}',
+      'expect -exact {STATUS:failed}',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_SCRIPT: fixturePath });
+
+    expect(outcome.code).toBe(0);
+    expectRestoredTerminal(outcome.output);
+  }, 10_000);
+
   it('deep-links discover, navigates back to Overview, and exits cleanly', async () => {
     const outcome = await runExpect([
       'set timeout 5',
@@ -89,7 +273,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'expect -exact {Gemini:}',
       'send "\\033"',
       'after 200',
-      'expect -exact {Loading Overview...}',
+      'expect -exact {Repository}',
       'send "q"',
       'expect -exact {IDEs detected; 0 missing variables.}',
       'expect -exact {INPUT_MODE:restored}',
@@ -152,21 +336,19 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
   }, 10_000);
 
   it('labels a direct-route failure with the page that actually failed', async () => {
+    const fixturePath = createFailingOverviewFixture();
     const outcome = await runExpect([
       'set timeout 5',
       'log_user 1',
-      'spawn /bin/zsh -f -c {"$MCV_TEST_NODE" "$MCV_TEST_CLI" discover; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
-      'expect -exact {Gemini:}',
-      'send "\\033"',
-      'after 200',
-      'expect -exact {Failed: No bound MCV repository found.}',
+      'spawn /bin/zsh -f -c {"$MCV_TEST_NODE" "$MCV_TEST_SCRIPT"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Failed: simulated Overview failure}',
       'send "q"',
-      'expect -exact {Overview failed: No bound MCV repository found.}',
-      'expect -exact {EXIT_CODE:1}',
+      'expect -exact {OUTCOME:simulated Overview failure}',
+      'expect -exact {EXIT_CODE:0}',
       'expect eof',
       'set result [wait]',
       'exit [lindex $result 3]',
-    ]);
+    ], { MCV_TEST_SCRIPT: fixturePath });
 
     expect(outcome.output).toContain('Overview failed:');
     expect(outcome.output).not.toContain('Environment Details failed:');
@@ -183,7 +365,10 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'await runTuiShell(',
       "  { homeDir: process.env.HOME, platform: process.platform, env: process.env },",
       "  'overview',",
-      "  { inspectOverview: () => { throw new Error('simulated uncaught TUI failure'); } },",
+      '  {',
+      `    inspectRepository: () => (${JSON.stringify(validRepositoryReport())}),`,
+      "    inspectOverview: () => { throw new Error('simulated uncaught TUI failure'); },",
+      '  },',
       ');',
       '',
     ].join('\n'));
@@ -313,6 +498,48 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     return repositoryPath;
   }
 
+  function createSchemaOneRepository(): string {
+    const repositoryPath = path.join(testRoot, 'schema-one-repository');
+    fs.mkdirSync(repositoryPath);
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 1',
+      'repositoryId: tui-migration-test',
+      'initializedAt: 2026-07-27T00:00:00.000Z',
+      'targets: {}',
+      '',
+    ].join('\n'));
+    return repositoryPath;
+  }
+
+  function statePath(): string {
+    if (process.platform === 'darwin') {
+      return path.join(
+        testRoot,
+        'Library',
+        'Application Support',
+        'mcv',
+        'config.json',
+      );
+    }
+    if (process.platform === 'win32') {
+      return path.join(testRoot, 'mcv', 'config.json');
+    }
+    return path.join(testRoot, '.config', 'mcv', 'config.json');
+  }
+
+  function writeBinding(repositoryPath: string, repositoryId: string): void {
+    fs.mkdirSync(path.dirname(statePath()), { recursive: true });
+    fs.writeFileSync(statePath(), `${JSON.stringify({
+      schemaVersion: 2,
+      repositoryPath,
+      defaultRepositoryId: repositoryId,
+    }, null, 2)}\n`);
+  }
+
+  function readBinding(): Record<string, unknown> {
+    return JSON.parse(fs.readFileSync(statePath(), 'utf8')) as Record<string, unknown>;
+  }
+
   function createRegeneratingCaptureFixture(): string {
     const fixturePath = path.join(testRoot, 'regenerating-capture.mjs');
     const shellModuleUrl = new URL(
@@ -356,6 +583,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       "  { homeDir: process.env.HOME, platform: process.platform, env: process.env },",
       "  'capture',",
       '  {',
+      `    inspectRepository: () => (${JSON.stringify(validRepositoryReport())}),`,
       '    createCapturePlan: async () => {',
       '      loadCount += 1;',
       '      return loadCount === 1 ? plan : new Promise(() => {});',
@@ -364,6 +592,142 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       '  },',
       ');',
       "process.stdout.write(`OUTCOME:${outcome.reason}\\n`);",
+      '',
+    ].join('\n'));
+    return fixturePath;
+  }
+
+  function createFailingOverviewFixture(): string {
+    const fixturePath = path.join(testRoot, 'failing-overview.mjs');
+    const shellModuleUrl = new URL(
+      `file://${path.join(process.cwd(), 'dist', 'tui', 'shell.js')}`,
+    ).href;
+    fs.writeFileSync(fixturePath, [
+      `import { runTuiShell } from ${JSON.stringify(shellModuleUrl)};`,
+      'const outcome = await runTuiShell(',
+      "  { homeDir: process.env.HOME, platform: process.platform, env: process.env },",
+      "  'overview',",
+      '  {',
+      `    inspectRepository: () => (${JSON.stringify(validRepositoryReport())}),`,
+      "    inspectOverview: async () => { throw new Error('simulated Overview failure'); },",
+      '  },',
+      ');',
+      "process.stdout.write(`Overview failed: ${outcome.failureMessage}\\n`);",
+      "process.stdout.write(`OUTCOME:${outcome.failureMessage}\\n`);",
+      '',
+    ].join('\n'));
+    return fixturePath;
+  }
+
+  function validRepositoryReport(): Record<string, unknown> {
+    return {
+      schemaVersion: 1,
+      operation: 'repository',
+      status: 'reported',
+      ready: true,
+      repositoryPath: '/tmp/mcv',
+      repositoryId: 'test-repository',
+      repositorySchemaVersion: 2,
+      valid: true,
+      changes: [],
+      issues: [],
+      nextActions: [],
+    };
+  }
+
+  function createDeployWorkflowFixture(): string {
+    const fixturePath = path.join(testRoot, 'deploy-workflow.mjs');
+    const shellModuleUrl = new URL(
+      `file://${path.join(process.cwd(), 'dist', 'tui', 'shell.js')}`,
+    ).href;
+    const plan = {
+      schemaVersion: 1,
+      operation: 'deploy',
+      status: 'planned',
+      readyToApply: true,
+      operationId: 'deploy-pty',
+      preconditions: {},
+      repositoryPath: '/tmp/mcv',
+      changes: [
+        {
+          id: 'deploy-first',
+          ide: 'codex',
+          capability: 'rules',
+          name: 'Shared Rules',
+          targetPath: '/tmp/AGENTS.md',
+          change: 'modify',
+          defaultSelected: true,
+          group: 'standard',
+          strategy: 'replace-entire-file',
+          preview: {
+            targetPath: '/tmp/AGENTS.md',
+            kind: 'text',
+            bytes: 10,
+            sha256: 'a'.repeat(64),
+            diff: '- old\\n+ new',
+          },
+        },
+        {
+          id: 'deploy-second',
+          ide: 'codex',
+          capability: 'mcp',
+          name: 'MCP',
+          targetPath: '/tmp/config.toml',
+          change: 'modify',
+          defaultSelected: true,
+          group: 'standard',
+          strategy: 'managed-merge',
+          preview: {
+            targetPath: '/tmp/config.toml',
+            kind: 'text',
+            bytes: 10,
+            sha256: 'b'.repeat(64),
+            diff: '- old\\n+ new',
+          },
+        },
+      ],
+      issues: [{
+        severity: 'warning',
+        code: 'deploy.warning',
+        message: 'Review the target before Apply.',
+      }],
+      nextActions: [],
+    };
+    const failed = {
+      schemaVersion: 1,
+      operation: 'deploy',
+      status: 'failed',
+      repositoryPath: '/tmp/mcv',
+      changes: [],
+      issues: [],
+      nextActions: ['Generate a new Deploy Plan.'],
+      error: {
+        code: 'deploy.transactionFailed',
+        message: 'simulated transaction failure',
+        nextActions: ['Generate a new Deploy Plan.'],
+      },
+    };
+    fs.writeFileSync(fixturePath, [
+      `import { runTuiShell } from ${JSON.stringify(shellModuleUrl)};`,
+      `const plan = ${JSON.stringify(plan)};`,
+      `const failed = ${JSON.stringify(failed)};`,
+      'let selected = [];',
+      'const outcome = await runTuiShell(',
+      "  { homeDir: process.env.HOME, platform: process.platform, env: process.env },",
+      "  'deploy',",
+      '  {',
+      '    inspectRepository: () => ({ valid: true }),',
+      '    createDeployPlan: async () => plan,',
+      '    applyDeployPlan: async (_context, _plan, selection) => {',
+      '      selected = selection.changeIds;',
+      '      await new Promise((resolve) => setTimeout(resolve, 300));',
+      '      return failed;',
+      '    },',
+      '  },',
+      ');',
+      "process.stdout.write(`SELECTED:${selected.join(',')}\\n`);",
+      "process.stdout.write(`OUTCOME:${outcome.reason}\\n`);",
+      "process.stdout.write(`STATUS:${outcome.operationStatus}\\n`);",
       '',
     ].join('\n'));
     return fixturePath;

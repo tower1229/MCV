@@ -1,6 +1,7 @@
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
 import type { CapturePlan, CaptureResult } from '../operations/capture.js';
+import type { DeployPlan, DeployResult } from '../operations/deploy.js';
 import { ShellView } from './shell-view.js';
 import {
   createInitialShellState,
@@ -18,7 +19,7 @@ describe('TUI Shell view', () => {
 
       Loading Overview...
 
-      c Capture   e Environment Details   q Quit   Ctrl+C Cancel"
+      c Capture   d Deploy   e Environment Details   q Quit   Ctrl+C Cancel"
     `);
   });
 
@@ -179,7 +180,7 @@ describe('TUI Shell view', () => {
         Gemini: disabled, not detected
       Last operation: deploy · failure
 
-      c Capture   e Environment Details   q Quit   Ctrl+C Cancel",
+      c Capture   d Deploy   e Environment Details   r Repository   q Quit   Ctrl+C Cancel",
         "narrow44": "MCV
       Overview
 
@@ -197,14 +198,14 @@ describe('TUI Shell view', () => {
         Gemini: disabled, not detected
       Last operation: deploy · failure
 
-      c Capture   e Environment Details   q Quit
-       Ctrl+C Cancel",
+      c Capture   d Deploy   e Environment Details
+         r Repository   q Quit   Ctrl+C Cancel",
         "noColorFailure": "MCV
       Overview
 
       Failed: Repository unavailable.
 
-      c Capture   e Environment Details   q Quit   Ctrl+C Cancel",
+      c Capture   d Deploy   e Environment Details   q Quit   Ctrl+C Cancel",
         "windows120": "MCV
       Environment Details
 
@@ -379,7 +380,151 @@ describe('TUI Shell view', () => {
     `);
     expect(Object.values(rendered).join('')).not.toMatch(/\u001b\[/);
   });
+
+  it('snapshots grouped Deploy selection with collapsed advanced cleanup', () => {
+    const state = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan: deployPlan(),
+      lastSelection: { codex: ['mcp'] },
+    });
+
+    expect(renderToString(<ShellView state={state} />, { columns: 72 }))
+      .toMatchInlineSnapshot(`
+        "MCV
+        Deploy · Select Changes
+
+        Repository: /Users/张涛/Configuration Repository
+        3 changes · 1 selected
+
+        Codex / Shared Rules
+        > [ ] [modify] Shared Rules
+        Codex / MCP
+          [x] [modify] MCP
+
+        Advanced Cleanup: collapsed (1 deletion, none selected)
+
+        ↑↓ Move   Space Select   d Diff   a Advanced Cleanup   Enter Continue
+        q Quit   Ctrl+C Cancel"
+      `);
+  });
+
+  it('snapshots Deploy replacement Diff, warning, applying, stale, and failure Result', () => {
+    const loaded = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan: deployPlan(),
+    });
+    const diff = shellReducer(loaded, { type: 'deploy.openDiff' });
+    const confirmation = shellReducer(loaded, { type: 'deploy.continue' });
+    const confirmed = shellReducer(confirmation, { type: 'deploy.toggleWarning' });
+    const applying = shellReducer(confirmed, { type: 'deploy.apply' });
+    const stale = shellReducer(applying, {
+      type: 'deploy.applied',
+      result: failedDeployResult('operation.stalePlan'),
+    });
+    const failure = shellReducer(applying, {
+      type: 'deploy.applied',
+      result: failedDeployResult('deploy.transactionFailed'),
+    });
+
+    expect({
+      diff: renderToString(<ShellView state={diff} />, { columns: 80 }),
+      confirmation: renderToString(<ShellView state={confirmation} />, { columns: 80 }),
+      applying: renderToString(<ShellView state={applying} />, { columns: 80 }),
+      stale: renderToString(<ShellView state={stale} />, { columns: 80 }),
+      failure: renderToString(<ShellView state={failure} />, { columns: 80 }),
+    }).toMatchSnapshot();
+  });
 });
+
+function deployPlan(): DeployPlan {
+  return {
+    schemaVersion: 1,
+    operation: 'deploy',
+    status: 'planned',
+    readyToApply: true,
+    operationId: 'deploy-view',
+    preconditions: {},
+    repositoryPath: '/Users/张涛/Configuration Repository',
+    changes: [
+      {
+        id: 'deploy-rules',
+        ide: 'codex',
+        capability: 'rules',
+        name: 'Shared Rules',
+        targetPath: '/Users/张涛/.codex/AGENTS.md',
+        change: 'modify',
+        defaultSelected: true,
+        group: 'standard',
+        strategy: 'replace-entire-file',
+        preview: {
+          targetPath: '/Users/张涛/.codex/AGENTS.md',
+          kind: 'text',
+          bytes: 20,
+          sha256: 'a'.repeat(64),
+          diff: '- old rule\n+ new rule',
+        },
+      },
+      {
+        id: 'deploy-mcp',
+        ide: 'codex',
+        capability: 'mcp',
+        name: 'MCP',
+        targetPath: '/Users/张涛/.codex/config.toml',
+        change: 'modify',
+        defaultSelected: true,
+        group: 'standard',
+        strategy: 'managed-merge',
+        preview: {
+          targetPath: '/Users/张涛/.codex/config.toml',
+          kind: 'text',
+          bytes: 30,
+          sha256: 'b'.repeat(64),
+          diff: '- old mcp\n+ new mcp',
+        },
+      },
+      {
+        id: 'deploy-delete',
+        ide: 'codex',
+        capability: 'skills',
+        name: '旧 Skill',
+        targetPath: '/Users/张涛/.codex/skills/旧/SKILL.md',
+        change: 'delete',
+        defaultSelected: false,
+        group: 'advanced',
+        strategy: 'replace-entire-file',
+        preview: {
+          targetPath: '/Users/张涛/.codex/skills/旧/SKILL.md',
+          kind: 'binary',
+          bytes: 42,
+          sha256: 'c'.repeat(64),
+        },
+      },
+    ],
+    issues: [{
+      severity: 'warning',
+      code: 'deploy.warning',
+      message: 'A target needs explicit review.',
+    }],
+    nextActions: [],
+  };
+}
+
+function failedDeployResult(code: string): DeployResult {
+  return {
+    schemaVersion: 1,
+    operation: 'deploy',
+    status: 'failed',
+    repositoryPath: '/Users/张涛/Configuration Repository',
+    changes: [],
+    issues: [],
+    nextActions: ['Generate and review a new Deploy Plan.'],
+    error: {
+      code,
+      message: code,
+      nextActions: ['Generate and review a new Deploy Plan.'],
+    },
+  };
+}
 
 function capturePlan(
   changeCount: number,

@@ -85,7 +85,11 @@ export function createProgram(
     .option('--prune-managed', 'Delete stale managed files and exact duplicate Skills from the legacy Codex directory')
     .action(async (options) => {
       validateWriteOutputOptions(deployCommand, options);
-      await deployConfigurations(context, deployDependencies, options);
+      if (shouldUseDeployTui(options)) {
+        await runShell(context, 'deploy', true);
+      } else {
+        await deployConfigurations(context, deployDependencies, options);
+      }
     });
 
   const discoverCommand = program
@@ -210,9 +214,21 @@ function shouldUseCaptureTui(
   );
 }
 
+function shouldUseDeployTui(
+  options: { dryRun?: boolean; yes?: boolean; json?: boolean },
+): boolean {
+  return Boolean(
+    process.stdin.isTTY
+    && process.stdout.isTTY
+    && !options.dryRun
+    && !options.yes
+    && !options.json,
+  );
+}
+
 async function runShell(
   context: DeviceContext,
-  route: 'overview' | 'environment' | 'capture',
+  route: 'overview' | 'environment' | 'capture' | 'deploy',
   direct: boolean,
 ): Promise<void> {
   const outcome = await runTuiShell(context, route);
@@ -221,7 +237,7 @@ async function runShell(
 
 function reportShellOutcome(
   outcome: ShellOutcome,
-  initialRoute: 'overview' | 'environment' | 'capture',
+  initialRoute: 'overview' | 'environment' | 'capture' | 'deploy',
   direct: boolean,
 ): void {
   if (outcome.reason === 'interrupted') {
@@ -240,6 +256,18 @@ function reportShellOutcome(
       return;
     }
     console.log(outcome.summary ?? 'Capture closed without applying changes.');
+    return;
+  }
+  if (initialRoute === 'deploy') {
+    if (outcome.operationStatus === 'blocked') process.exitCode = 3;
+    else if (outcome.operationStatus === 'failed' || outcome.failureMessage) {
+      process.exitCode = 1;
+    }
+    if (outcome.failureMessage) {
+      console.error(`Deploy failed: ${outcome.failureMessage}`);
+      return;
+    }
+    console.log(outcome.summary ?? 'Deploy closed without applying changes.');
     return;
   }
   if (outcome.failureMessage) {

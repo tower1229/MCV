@@ -42,7 +42,7 @@ MCV 仓库中的配置分为：
 
 ## 快速开始
 
-在完整 TTY 中直接运行 `mcv` 会进入统一的 Ink Shell，并异步打开只读 Overview。Overview 中按 `c` 或 `Enter` 进入 Capture，`mcv capture` deep-link 到同一可选择 workflow；`mcv status` deep-link 到 Overview，`mcv discover` deep-link 到 Environment Details。Environment Details 中按 `Escape` 返回 Overview，任一非 Apply 页面按 `q` 正常退出，按 `Ctrl+C` 以 130 退出。direct subcommand 正常关闭后会在主屏留下对应摘要。Shell 使用 alternate screen，退出、失败、中断和异常后都会恢复主屏、光标和输入模式。
+在完整 TTY 中直接运行 `mcv` 会进入统一的 Ink Shell，并异步打开只读 Overview。Overview 中按 `c` 或 `Enter` 进入 Capture、按 `d` 进入 Deploy；`mcv capture` 与 `mcv deploy` deep-link 到各自的同一可选择 workflow，`mcv status` deep-link 到 Overview，`mcv discover` deep-link 到 Environment Details。Environment Details 中按 `Escape` 返回 Overview；除 Repository 路径输入页需要保留完整文本输入外，任一非 Apply 页面按 `q` 正常退出，按 `Ctrl+C` 以 130 退出。direct subcommand 正常关闭后会在主屏留下对应摘要。Shell 使用 alternate screen，退出、失败、中断和异常后都会恢复主屏、光标和输入模式。
 
 非 TTY 的无参数调用仍立即输出 help。显式使用 `status --plain`、`status --json`、`discover --plain`、`discover --json`、`capture --dry-run`、`capture --yes` 或 `capture --json` 时始终执行一次性协议，不进入 alternate screen。
 
@@ -105,9 +105,13 @@ MCV 会显示按 IDE/capability 分组的写入计划并请求确认，只执行
 
 每个选中变化都会在首次写入前备份并验证；写入或本机状态提交失败时，已写入变化会从验证过的备份回滚。成功后只更新实际 Apply 范围的 Baseline Snapshot、managed inventory，以及仅保存在本机、按 IDE/capability 记录的最近 Deploy selection。再次部署相同内容不会创建新备份。
 
+Deploy TTY workflow 会复用最近一次成功的 IDE/capability selection；Diff 明确标注 managed merge 或 whole-file replacement。删除候选只在默认折叠的 Advanced Cleanup 中显示且默认不选。Apply 或 rollback 期间输入被禁用；Plan 过期时必须重新生成并重新审阅。结果页按 `Enter` 返回刷新后的 Overview，按 `q` 退出。
+
 新设备进入 Repository 后先执行 `mcv bind --dry-run` 审阅计划，再执行 `mcv bind --yes`；也可以通过 `mcv bind <path>` 显式指定路径。Bind 只校验 manifest 和 repository ID 并写入本机绑定；不会迁移或修改 Repository。普通命令不会因为当前目录恰好存在另一个 `mcv.yaml` 就越过已有绑定。
 
 `mcv repo --plain` 检查当前绑定路径、Repository ID、schema version 和有效性；`mcv repo --json` 返回同一份结构化 Report。只有检测到 Git Repository 时才附带只读 Git 状态。非 Git Repository 是正常状态，MCV 不执行 Git mutation。
+
+在 TTY 中直接运行 `mcv` 时，未绑定设备会先进入 Repository onboarding：当前目录是有效 Repository 时优先审阅 Bind Plan，否则可选择在当前目录 Init 或输入已有 Repository 路径。绑定路径失效、Repository ID 不匹配或 schema 需要迁移时，Capture/Deploy 会被阻断，必须先在 Repository 页面完成 Rebind、Unbind 或 Migration Plan。Init 成功后依次进入 Environment discovery 与 Capture；从 Capture 退出不会删除已创建的 `mcv.yaml` 或本机绑定。
 
 ### 5. 检查漂移与恢复
 
