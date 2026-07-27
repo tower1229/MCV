@@ -289,6 +289,55 @@ export function shellReducer(state, action) {
                     },
                 },
             };
+        case 'restore.loaded':
+            if (state.page.route !== 'restore')
+                return state;
+            return {
+                ...state,
+                page: {
+                    route: 'restore',
+                    status: 'ready',
+                    workflow: {
+                        status: 'review',
+                        plan: action.plan,
+                    },
+                },
+            };
+        case 'restore.apply':
+            return updateRestoreWorkflow(state, (workflow) => workflow.status === 'review'
+                && workflow.plan.status === 'planned'
+                && workflow.plan.readyToApply
+                && !workflow.plan.issues.some((issue) => issue.severity === 'error')
+                ? { status: 'applying', plan: workflow.plan }
+                : workflow);
+        case 'restore.applied':
+            if (state.page.route !== 'restore'
+                || state.page.status !== 'ready'
+                || state.page.workflow.status !== 'applying')
+                return state;
+            if (action.result.status === 'failed'
+                && action.result.error.code === 'operation.stalePlan') {
+                return {
+                    ...state,
+                    page: {
+                        route: 'restore',
+                        status: 'ready',
+                        workflow: { status: 'regenerating' },
+                    },
+                };
+            }
+            return {
+                ...state,
+                restoreResult: action.result,
+                page: {
+                    route: 'restore',
+                    status: 'ready',
+                    workflow: {
+                        status: 'result',
+                        result: action.result,
+                    },
+                },
+            };
         case 'page.failed':
             if (state.page.route !== action.route)
                 return state;
@@ -315,7 +364,9 @@ export function shellReducer(state, action) {
             return { ...state, exitReason: 'completed' };
         case 'cancel':
             if (state.page.status === 'ready'
-                && (state.page.route === 'capture' || state.page.route === 'deploy')
+                && (state.page.route === 'capture'
+                    || state.page.route === 'deploy'
+                    || state.page.route === 'restore')
                 && state.page.workflow.status === 'applying')
                 return state;
             return { ...state, exitReason: 'interrupted' };
@@ -366,6 +417,18 @@ function updateCaptureWorkflow(state, update) {
 function updateDeployWorkflow(state, update) {
     if (state.page.route !== 'deploy' || state.page.status !== 'ready')
         return state;
+    return {
+        ...state,
+        page: {
+            ...state.page,
+            workflow: update(state.page.workflow),
+        },
+    };
+}
+function updateRestoreWorkflow(state, update) {
+    if (state.page.route !== 'restore' || state.page.status !== 'ready') {
+        return state;
+    }
     return {
         ...state,
         page: {

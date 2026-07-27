@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CapturePlan, CaptureResult } from '../operations/capture.js';
 import type { DeployPlan, DeployResult } from '../operations/deploy.js';
+import type { RestorePlan, RestoreResult } from '../operations/restore.js';
 import type {
   BindPlan,
   BindResult,
@@ -487,6 +488,88 @@ describe('TUI Shell reducer', () => {
     expect(cancelled.exitReason).toBeNull();
     expectDeployStatus(cancelled, 'applying');
   });
+
+  it('keeps no-backup and Restore Conflict Plans reviewable but disables Apply', () => {
+    const noBackup = shellReducer(createInitialShellState('restore'), {
+      type: 'restore.loaded',
+      plan: restorePlan({
+        status: 'failed',
+        readyToApply: false,
+        backup: null,
+        changes: [],
+        issues: [{
+          severity: 'error',
+          code: 'restore.backupNotFound',
+          message: 'No complete and verified deployment backup is available.',
+        }],
+        nextActions: ['Run a successful Deploy before trying Restore again.'],
+        error: {
+          code: 'restore.backupNotFound',
+          message: 'No complete and verified deployment backup is available.',
+          nextActions: ['Run a successful Deploy before trying Restore again.'],
+        },
+      } as unknown as RestorePlan),
+    });
+    const conflict = shellReducer(createInitialShellState('restore'), {
+      type: 'restore.loaded',
+      plan: restorePlan({
+        readyToApply: false,
+        issues: [{
+          severity: 'error',
+          code: 'restore.conflict',
+          message: 'Restore would overwrite files that changed after the deployment.',
+          details: '/tmp/settings.json',
+        }],
+      }),
+    });
+
+    expectRestoreStatus(noBackup, 'review');
+    expectRestoreStatus(conflict, 'review');
+    expectRestoreStatus(
+      shellReducer(noBackup, { type: 'restore.apply' }),
+      'review',
+    );
+    expectRestoreStatus(
+      shellReducer(conflict, { type: 'restore.apply' }),
+      'review',
+    );
+  });
+
+  it('applies a complete Restore Plan, ignores cancellation, and records success', () => {
+    const loaded = shellReducer(createInitialShellState('restore'), {
+      type: 'restore.loaded',
+      plan: restorePlan(),
+    });
+    const applying = shellReducer(loaded, { type: 'restore.apply' });
+    const cancelled = shellReducer(applying, { type: 'cancel' });
+    const result = shellReducer(cancelled, {
+      type: 'restore.applied',
+      result: restoreResult('succeeded'),
+    });
+
+    expectRestoreStatus(applying, 'applying');
+    expect(cancelled.exitReason).toBeNull();
+    expectRestoreStatus(cancelled, 'applying');
+    expectRestoreStatus(result, 'result');
+    expect(result.restoreResult?.status).toBe('succeeded');
+  });
+
+  it('regenerates a stale Restore Plan and preserves rollback failure Results', () => {
+    const loaded = shellReducer(createInitialShellState('restore'), {
+      type: 'restore.loaded',
+      plan: restorePlan(),
+    });
+    const applying = shellReducer(loaded, { type: 'restore.apply' });
+
+    expectRestoreStatus(shellReducer(applying, {
+      type: 'restore.applied',
+      result: restoreResult('failed', 'operation.stalePlan'),
+    }), 'regenerating');
+    expectRestoreStatus(shellReducer(applying, {
+      type: 'restore.applied',
+      result: restoreResult('failed', 'restore.rollbackFailed'),
+    }), 'result');
+  });
 });
 
 function expectCaptureStatus(
@@ -506,6 +589,17 @@ function expectDeployStatus(
 ): void {
   expect(state.page).toMatchObject({
     route: 'deploy',
+    status: 'ready',
+    workflow: { status },
+  });
+}
+
+function expectRestoreStatus(
+  state: ReturnType<typeof createInitialShellState>,
+  status: string,
+): void {
+  expect(state.page).toMatchObject({
+    route: 'restore',
     status: 'ready',
     workflow: { status },
   });
@@ -600,6 +694,76 @@ function deployResult(code: string): DeployResult {
       code,
       message: code,
       nextActions: ['Regenerate.'],
+    },
+  };
+}
+
+function restorePlan(
+  override: Partial<RestorePlan> = {},
+): RestorePlan {
+  return {
+    schemaVersion: 1,
+    operation: 'restore',
+    status: 'planned',
+    readyToApply: true,
+    operationId: 'restore-operation',
+    preconditions: {},
+    repositoryPath: '/tmp/mcv',
+    backup: {
+      id: 'deploy-20260727',
+      createdAt: '2026-07-27T08:30:00.000Z',
+    },
+    changes: [
+      {
+        id: 'restore-settings',
+        action: 'restore',
+        targetPath: '/tmp/settings.json',
+      },
+      {
+        id: 'restore-added',
+        action: 'delete',
+        targetPath: '/tmp/added.json',
+      },
+    ],
+    issues: [],
+    nextActions: [],
+    ...override,
+  } as RestorePlan;
+}
+
+function restoreResult(
+  status: 'succeeded' | 'failed',
+  code = 'restore.transactionFailed',
+): RestoreResult {
+  if (status === 'succeeded') {
+    return {
+      schemaVersion: 1,
+      operation: 'restore',
+      status: 'succeeded',
+      repositoryPath: '/tmp/mcv',
+      changes: restorePlan().changes,
+      issues: [],
+      nextActions: [],
+      data: {
+        appliedChangeIds: ['restore-settings', 'restore-added'],
+        restoredPaths: ['/tmp/settings.json'],
+        deletedPaths: ['/tmp/added.json'],
+        backupPath: '/tmp/restore-backups/before-restore-success',
+      },
+    };
+  }
+  return {
+    schemaVersion: 1,
+    operation: 'restore',
+    status: 'failed',
+    repositoryPath: '/tmp/mcv',
+    changes: [],
+    issues: [],
+    nextActions: ['Generate a new Restore Plan.'],
+    error: {
+      code,
+      message: code,
+      nextActions: ['Generate a new Restore Plan.'],
     },
   };
 }

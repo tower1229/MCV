@@ -22,13 +22,18 @@ import type {
   DeployPlan,
   DeployResult,
 } from '../operations/deploy.js';
+import type {
+  RestorePlan,
+  RestoreResult,
+} from '../operations/restore.js';
 
 export type ShellRoute =
   | 'repository'
   | 'overview'
   | 'environment'
   | 'capture'
-  | 'deploy';
+  | 'deploy'
+  | 'restore';
 
 export type RepositoryMenuAction =
   | 'continue'
@@ -192,6 +197,23 @@ export type DeployWorkflowState =
   | DeployRegeneratingState
   | DeployResultState;
 
+export type RestoreWorkflowState =
+  | {
+    status: 'review';
+    plan: RestorePlan;
+  }
+  | {
+    status: 'applying';
+    plan: RestorePlan;
+  }
+  | {
+    status: 'regenerating';
+  }
+  | {
+    status: 'result';
+    result: RestoreResult;
+  };
+
 export type LastDeploySelection = Partial<
   Record<'codex' | 'claude-code' | 'gemini', ConfigurationCapability[]>
 >;
@@ -226,6 +248,11 @@ type ReadyPage =
     route: 'deploy';
     status: 'ready';
     workflow: DeployWorkflowState;
+  }
+  | {
+    route: 'restore';
+    status: 'ready';
+    workflow: RestoreWorkflowState;
   };
 
 type FailedPage = {
@@ -242,6 +269,7 @@ export interface ShellState {
   };
   captureResult?: CaptureResult;
   deployResult?: DeployResult;
+  restoreResult?: RestoreResult;
   postInitOnboarding: boolean;
   repositoryResumeRoute: Exclude<ShellRoute, 'repository'>;
   exitReason: 'completed' | 'interrupted' | null;
@@ -290,6 +318,9 @@ export type ShellAction =
   | { type: 'deploy.back' }
   | { type: 'deploy.apply' }
   | { type: 'deploy.applied'; result: DeployResult }
+  | { type: 'restore.loaded'; plan: RestorePlan }
+  | { type: 'restore.apply' }
+  | { type: 'restore.applied'; result: RestoreResult }
   | { type: 'page.failed'; route: ShellRoute; message: string }
   | { type: 'navigate'; route: ShellRoute }
   | { type: 'exit' }
@@ -609,6 +640,58 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
           },
         },
       };
+    case 'restore.loaded':
+      if (state.page.route !== 'restore') return state;
+      return {
+        ...state,
+        page: {
+          route: 'restore',
+          status: 'ready',
+          workflow: {
+            status: 'review',
+            plan: action.plan,
+          },
+        },
+      };
+    case 'restore.apply':
+      return updateRestoreWorkflow(state, (workflow) =>
+        workflow.status === 'review'
+          && workflow.plan.status === 'planned'
+          && workflow.plan.readyToApply
+          && !workflow.plan.issues.some((issue) => issue.severity === 'error')
+          ? { status: 'applying', plan: workflow.plan }
+          : workflow);
+    case 'restore.applied':
+      if (
+        state.page.route !== 'restore'
+        || state.page.status !== 'ready'
+        || state.page.workflow.status !== 'applying'
+      ) return state;
+      if (
+        action.result.status === 'failed'
+        && action.result.error.code === 'operation.stalePlan'
+      ) {
+        return {
+          ...state,
+          page: {
+            route: 'restore',
+            status: 'ready',
+            workflow: { status: 'regenerating' },
+          },
+        };
+      }
+      return {
+        ...state,
+        restoreResult: action.result,
+        page: {
+          route: 'restore',
+          status: 'ready',
+          workflow: {
+            status: 'result',
+            result: action.result,
+          },
+        },
+      };
     case 'page.failed':
       if (state.page.route !== action.route) return state;
       return {
@@ -635,7 +718,11 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
     case 'cancel':
       if (
         state.page.status === 'ready'
-        && (state.page.route === 'capture' || state.page.route === 'deploy')
+        && (
+          state.page.route === 'capture'
+          || state.page.route === 'deploy'
+          || state.page.route === 'restore'
+        )
         && state.page.workflow.status === 'applying'
       ) return state;
       return { ...state, exitReason: 'interrupted' };
@@ -707,6 +794,22 @@ function updateDeployWorkflow(
   update: (workflow: DeployWorkflowState) => DeployWorkflowState,
 ): ShellState {
   if (state.page.route !== 'deploy' || state.page.status !== 'ready') return state;
+  return {
+    ...state,
+    page: {
+      ...state.page,
+      workflow: update(state.page.workflow),
+    },
+  };
+}
+
+function updateRestoreWorkflow(
+  state: ShellState,
+  update: (workflow: RestoreWorkflowState) => RestoreWorkflowState,
+): ShellState {
+  if (state.page.route !== 'restore' || state.page.status !== 'ready') {
+    return state;
+  }
   return {
     ...state,
     page: {

@@ -45,7 +45,7 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         .option('--verbose', 'Show processed file content in the preview')
         .action(async (options) => {
         validateWriteOutputOptions(captureCommand, options);
-        if (shouldUseCaptureTui(options)) {
+        if (shouldUseWriteTui(options)) {
             await runShell(context, 'capture', true);
         }
         else {
@@ -61,7 +61,7 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         .option('--prune-managed', 'Delete stale managed files and exact duplicate Skills from the legacy Codex directory')
         .action(async (options) => {
         validateWriteOutputOptions(deployCommand, options);
-        if (shouldUseDeployTui(options)) {
+        if (shouldUseWriteTui(options)) {
             await runShell(context, 'deploy', true);
         }
         else {
@@ -108,7 +108,12 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         .option('--json', 'Print one machine-readable Restore Plan or Result')
         .action(async (options) => {
         validateWriteOutputOptions(restoreCommand, options);
-        await restoreLatestBackup(context, {}, options);
+        if (shouldUseWriteTui(options)) {
+            await runShell(context, 'restore', true);
+        }
+        else {
+            await restoreLatestBackup(context, {}, options);
+        }
     });
     const repositoryCommand = program.command('repo')
         .description('Inspect the current MCV Repository binding')
@@ -161,14 +166,7 @@ function shouldUseReadOnlyTui(options) {
         && !options.plain
         && !options.json);
 }
-function shouldUseCaptureTui(options) {
-    return Boolean(process.stdin.isTTY
-        && process.stdout.isTTY
-        && !options.dryRun
-        && !options.yes
-        && !options.json);
-}
-function shouldUseDeployTui(options) {
+function shouldUseWriteTui(options) {
     return Boolean(process.stdin.isTTY
         && process.stdout.isTTY
         && !options.dryRun
@@ -211,6 +209,19 @@ function reportShellOutcome(outcome, initialRoute, direct) {
             return;
         }
         console.log(outcome.summary ?? 'Deploy closed without applying changes.');
+        return;
+    }
+    if (initialRoute === 'restore') {
+        if (outcome.operationStatus === 'blocked')
+            process.exitCode = 3;
+        else if (outcome.operationStatus === 'failed' || outcome.failureMessage) {
+            process.exitCode = 1;
+        }
+        if (outcome.failureMessage) {
+            console.error(`Restore failed: ${outcome.failureMessage}`);
+            return;
+        }
+        console.log(outcome.summary ?? 'Restore closed without applying changes.');
         return;
     }
     if (outcome.failureMessage) {

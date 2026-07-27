@@ -2,6 +2,7 @@ import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
 import type { CapturePlan, CaptureResult } from '../operations/capture.js';
 import type { DeployPlan, DeployResult } from '../operations/deploy.js';
+import type { RestorePlan, RestoreResult } from '../operations/restore.js';
 import { ShellView } from './shell-view.js';
 import {
   createInitialShellState,
@@ -19,7 +20,8 @@ describe('TUI Shell view', () => {
 
       Loading Overview...
 
-      c Capture   d Deploy   e Environment Details   q Quit   Ctrl+C Cancel"
+      c Capture   d Deploy   s Restore   e Environment Details   q Quit   Ctrl+C
+      Cancel"
     `);
   });
 
@@ -180,7 +182,7 @@ describe('TUI Shell view', () => {
         Gemini: disabled, not detected
       Last operation: deploy · failure
 
-      c Capture   d Deploy   e Environment Details   r Repository   q Quit   Ctrl+C Cancel",
+      c Capture   d Deploy   s Restore   e Environment Details   r Repository   q Quit   Ctrl+C Cancel",
         "narrow44": "MCV
       Overview
 
@@ -198,14 +200,16 @@ describe('TUI Shell view', () => {
         Gemini: disabled, not detected
       Last operation: deploy · failure
 
-      c Capture   d Deploy   e Environment Details
-         r Repository   q Quit   Ctrl+C Cancel",
+      c Capture   d Deploy   s Restore   e
+      Environment Details   r Repository   q Quit
+        Ctrl+C Cancel",
         "noColorFailure": "MCV
       Overview
 
       Failed: Repository unavailable.
 
-      c Capture   d Deploy   e Environment Details   q Quit   Ctrl+C Cancel",
+      c Capture   d Deploy   s Restore   e Environment Details   q Quit   Ctrl+C
+      Cancel",
         "windows120": "MCV
       Environment Details
 
@@ -434,6 +438,84 @@ describe('TUI Shell view', () => {
       failure: renderToString(<ShellView state={failure} />, { columns: 80 }),
     }).toMatchSnapshot();
   });
+
+  it('snapshots Restore no-backup, conflict, review, applying, stale, success, and rollback failure', () => {
+    const noBackup = shellReducer(createInitialShellState('restore'), {
+      type: 'restore.loaded',
+      plan: restorePlan({
+        status: 'failed',
+        readyToApply: false,
+        backup: null,
+        changes: [],
+        issues: [{
+          severity: 'error',
+          code: 'restore.backupNotFound',
+          message: 'No complete and verified deployment backup is available.',
+        }],
+        nextActions: ['Run a successful Deploy before trying Restore again.'],
+        error: {
+          code: 'restore.backupNotFound',
+          message: 'No complete and verified deployment backup is available.',
+          nextActions: ['Run a successful Deploy before trying Restore again.'],
+        },
+      } as unknown as RestorePlan),
+    });
+    const conflict = shellReducer(createInitialShellState('restore'), {
+      type: 'restore.loaded',
+      plan: restorePlan({
+        readyToApply: false,
+        issues: [{
+          severity: 'error',
+          code: 'restore.conflict',
+          message: 'Restore would overwrite files that changed after the deployment.',
+          details: '/Users/张涛/.codex/config.toml',
+        }],
+        nextActions: ['Back up or manually resolve every Restore Conflict, then generate a new Restore Plan.'],
+      }),
+    });
+    const review = shellReducer(createInitialShellState('restore'), {
+      type: 'restore.loaded',
+      plan: restorePlan(),
+    });
+    const applying = shellReducer(review, { type: 'restore.apply' });
+    const stale = shellReducer(applying, {
+      type: 'restore.applied',
+      result: restoreResult('operation.stalePlan'),
+    });
+    const success = shellReducer(applying, {
+      type: 'restore.applied',
+      result: successfulRestoreResult(),
+    });
+    const rollbackFailure = shellReducer(applying, {
+      type: 'restore.applied',
+      result: restoreResult('restore.rollbackFailed'),
+    });
+
+    const rendered = {
+      noBackup: renderToString(<ShellView state={noBackup} />, { columns: 80 }),
+      conflict: renderToString(<ShellView state={conflict} />, { columns: 80 }),
+      review: renderToString(<ShellView state={review} />, { columns: 80 }),
+      applying: renderToString(<ShellView state={applying} />, { columns: 80 }),
+      stale: renderToString(<ShellView state={stale} />, { columns: 80 }),
+      success: renderToString(<ShellView state={success} />, { columns: 80 }),
+      rollbackFailure: renderToString(<ShellView state={rollbackFailure} />, { columns: 80 }),
+    };
+
+    expect(rendered.noBackup).toContain('No complete and verified deployment backup');
+    expect(rendered.noBackup).toContain('Apply disabled');
+    expect(rendered.conflict).toContain('Restore Conflict');
+    expect(rendered.conflict).toContain('/Users/张涛/.codex/config.toml');
+    expect(rendered.conflict).not.toContain('force');
+    expect(rendered.review).toContain('Backup time: 2026-07-27T08:30:00.000Z');
+    expect(rendered.review).toContain('1 file(s) to write, 1 file(s) to delete');
+    expect(rendered.applying).toContain('input is disabled during backup, Apply, and rollback');
+    expect(rendered.stale).toContain('Regenerating');
+    expect(rendered.success).toContain('Restore succeeded');
+    expect(rendered.rollbackFailure).toContain('restore.rollbackFailed');
+    expect(rendered.success).toContain('Enter Refresh Overview');
+    expect(rendered.rollbackFailure).toContain('q Quit');
+    expect(rendered).toMatchSnapshot();
+  });
 });
 
 function deployPlan(): DeployPlan {
@@ -506,6 +588,74 @@ function deployPlan(): DeployPlan {
       message: 'A target needs explicit review.',
     }],
     nextActions: [],
+  };
+}
+
+function restorePlan(
+  override: Partial<RestorePlan> = {},
+): RestorePlan {
+  return {
+    schemaVersion: 1,
+    operation: 'restore',
+    status: 'planned',
+    readyToApply: true,
+    operationId: 'restore-view',
+    preconditions: {},
+    repositoryPath: '/Users/张涛/Configuration Repository',
+    backup: {
+      id: 'deploy-20260727',
+      createdAt: '2026-07-27T08:30:00.000Z',
+    },
+    changes: [
+      {
+        id: 'restore-settings',
+        action: 'restore',
+        targetPath: '/Users/张涛/.codex/config.toml',
+      },
+      {
+        id: 'restore-added',
+        action: 'delete',
+        targetPath: '/Users/张涛/.codex/added.toml',
+      },
+    ],
+    issues: [],
+    nextActions: [],
+    ...override,
+  } as RestorePlan;
+}
+
+function successfulRestoreResult(): RestoreResult {
+  return {
+    schemaVersion: 1,
+    operation: 'restore',
+    status: 'succeeded',
+    repositoryPath: '/Users/张涛/Configuration Repository',
+    changes: restorePlan().changes,
+    issues: [],
+    nextActions: [],
+    data: {
+      appliedChangeIds: ['restore-settings', 'restore-added'],
+      restoredPaths: ['/Users/张涛/.codex/config.toml'],
+      deletedPaths: ['/Users/张涛/.codex/added.toml'],
+      backupPath: '/Users/张涛/.mcv/restore-backups/before-restore-success',
+    },
+  };
+}
+
+function restoreResult(code: string): RestoreResult {
+  return {
+    schemaVersion: 1,
+    operation: 'restore',
+    status: 'failed',
+    repositoryPath: '/Users/张涛/Configuration Repository',
+    changes: [],
+    issues: [],
+    nextActions: ['Generate a new Restore Plan.'],
+    error: {
+      code,
+      message: code,
+      nextActions: ['Generate a new Restore Plan.'],
+    },
   };
 }
 

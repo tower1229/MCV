@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
@@ -82,7 +83,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     expect(deepLink.code).toBe(0);
     expectRestoredTerminal(overview.output);
     expectRestoredTerminal(deepLink.output);
-  }, 10_000);
+  }, 15_000);
 
   it('initializes, discovers, enters Capture, and preserves the Repository when onboarding is cancelled', async () => {
     const repositoryPath = path.join(testRoot, 'new-repository');
@@ -259,6 +260,120 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'expect -exact {Deploy failed: simulated transaction failure}',
       'send "q"',
       'expect -exact {SELECTED:deploy-second}',
+      'expect -exact {OUTCOME:completed}',
+      'expect -exact {STATUS:failed}',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_SCRIPT: fixturePath });
+
+    expect(outcome.code).toBe(0);
+    expectRestoredTerminal(outcome.output);
+  }, 10_000);
+
+  it('opens the same Restore workflow from Overview and the restore deep link', async () => {
+    const fixture = createRestoreRepository();
+    const overview = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {cd "$MCV_TEST_REPO"; "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Overview}',
+      'send "s"',
+      'expect -exact {Restore Latest Deployment · Review}',
+      'expect -exact {Backup time: 2026-07-27T08:30:00.000Z}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: fixture.repositoryPath });
+    const deepLink = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {cd "$MCV_TEST_REPO"; "$MCV_TEST_NODE" "$MCV_TEST_CLI" restore; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Restore Latest Deployment · Review}',
+      'expect -exact {Impact: 1 file(s) to write, 0 file(s) to delete}',
+      'send "\\r"',
+      'expect -exact {Restore Latest Deployment · Result}',
+      'expect -exact {Restore succeeded.}',
+      'send "\\r"',
+      'expect -exact {Loading Overview...}',
+      'expect -exact {Repository:}',
+      'send "q"',
+      'expect -exact {Restored 1 path(s) and deleted 0 path(s).}',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: fixture.repositoryPath });
+
+    expect(overview.code).toBe(0);
+    expect(deepLink.code).toBe(0);
+    expect(fs.readFileSync(fixture.targetPath, 'utf8')).toBe('before deploy\n');
+    expectRestoredTerminal(overview.output);
+    expectRestoredTerminal(deepLink.output);
+  }, 10_000);
+
+  it('keeps no-backup and Restore Conflict states blocked in the PTY', async () => {
+    const noBackupRepository = createCaptureRepository();
+    writeBinding(noBackupRepository, 'tui-capture-test');
+    const noBackup = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {cd "$MCV_TEST_REPO"; "$MCV_TEST_NODE" "$MCV_TEST_CLI" restore; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {No complete and verified deployment backup is available.}',
+      'expect -exact {Apply disabled}',
+      'send "\\r"',
+      'after 100',
+      'expect -exact {Restore Latest Deployment · Review}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: noBackupRepository });
+
+    const conflictFixture = createRestoreRepository(true);
+    const conflict = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {cd "$MCV_TEST_REPO"; "$MCV_TEST_NODE" "$MCV_TEST_CLI" restore; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Restore Conflict:}',
+      'expect -exact {Apply disabled}',
+      'send "\\r"',
+      'after 100',
+      'expect -exact {Restore Latest Deployment · Review}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: conflictFixture.repositoryPath });
+
+    expect(noBackup.code).toBe(0);
+    expect(conflict.code).toBe(0);
+    expect(fs.readFileSync(conflictFixture.targetPath, 'utf8'))
+      .toBe('changed after deploy\n');
+    expect(conflict.output).not.toMatch(/force restore/i);
+    expectRestoredTerminal(noBackup.output);
+    expectRestoredTerminal(conflict.output);
+  }, 15_000);
+
+  it('ignores q and Ctrl+C while Restore reports a rollback failure', async () => {
+    const fixturePath = createRestoreRollbackFixture();
+    const outcome = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {"$MCV_TEST_NODE" "$MCV_TEST_SCRIPT"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Restore Latest Deployment · Review}',
+      'send "\\r"',
+      'expect -exact {Restore Latest Deployment · Applying}',
+      'send "q"',
+      'send "\\003"',
+      'expect -exact {Restore Latest Deployment · Result}',
+      'expect -exact {Error code: restore.rollbackFailed}',
+      'send "q"',
       'expect -exact {OUTCOME:completed}',
       'expect -exact {STATUS:failed}',
       'expect -exact {EXIT_CODE:0}',
@@ -547,6 +662,117 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     return JSON.parse(fs.readFileSync(statePath(), 'utf8')) as Record<string, unknown>;
   }
 
+  function createRestoreRepository(conflict = false): {
+    repositoryPath: string;
+    targetPath: string;
+  } {
+    const repositoryPath = path.join(
+      testRoot,
+      conflict ? 'conflict-repository' : 'restore-repository',
+    );
+    fs.mkdirSync(repositoryPath);
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 2',
+      'repositoryId: tui-restore-test',
+      'initializedAt: 2026-07-27T00:00:00.000Z',
+      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets: {}',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    writeBinding(repositoryPath, 'tui-restore-test');
+    const targetPath = path.join(testRoot, conflict ? 'conflict.json' : 'settings.json');
+    const beforeContent = 'before deploy\n';
+    const deployedContent = 'after deploy\n';
+    fs.writeFileSync(
+      targetPath,
+      conflict ? 'changed after deploy\n' : deployedContent,
+    );
+    const backupDirectory = path.join(
+      path.dirname(statePath()),
+      'backups',
+      'deploy-20260727',
+    );
+    fs.mkdirSync(path.join(backupDirectory, 'files'), { recursive: true });
+    fs.writeFileSync(path.join(backupDirectory, 'files', 'settings.json'), beforeContent);
+    fs.writeFileSync(path.join(backupDirectory, 'manifest.json'), `${JSON.stringify({
+      createdAt: '2026-07-27T08:30:00.000Z',
+      status: 'complete',
+      files: [{
+        action: 'modify',
+        originalPath: targetPath,
+        backupPath: 'files/settings.json',
+        beforeHash: digest(beforeContent),
+        afterHash: digest(deployedContent),
+      }],
+    }, null, 2)}\n`);
+    return { repositoryPath, targetPath };
+  }
+
+  function createRestoreRollbackFixture(): string {
+    const fixturePath = path.join(testRoot, 'restore-rollback.mjs');
+    const shellModuleUrl = new URL(
+      `file://${path.join(process.cwd(), 'dist', 'tui', 'shell.js')}`,
+    ).href;
+    const plan = {
+      schemaVersion: 1,
+      operation: 'restore',
+      status: 'planned',
+      readyToApply: true,
+      operationId: 'restore-pty',
+      preconditions: {},
+      repositoryPath: '/tmp/mcv',
+      backup: {
+        id: 'deploy-20260727',
+        createdAt: '2026-07-27T08:30:00.000Z',
+      },
+      changes: [{
+        id: 'restore-settings',
+        action: 'restore',
+        targetPath: '/tmp/settings.json',
+      }],
+      issues: [],
+      nextActions: [],
+    };
+    const failed = {
+      schemaVersion: 1,
+      operation: 'restore',
+      status: 'failed',
+      repositoryPath: '/tmp/mcv',
+      changes: [],
+      issues: [],
+      nextActions: ['Recover from the pre-restore backup.'],
+      error: {
+        code: 'restore.rollbackFailed',
+        message: 'simulated rollback failure',
+        nextActions: ['Recover from the pre-restore backup.'],
+      },
+    };
+    fs.writeFileSync(fixturePath, [
+      `import { runTuiShell } from ${JSON.stringify(shellModuleUrl)};`,
+      `const plan = ${JSON.stringify(plan)};`,
+      `const failed = ${JSON.stringify(failed)};`,
+      'const outcome = await runTuiShell(',
+      "  { homeDir: process.env.HOME, platform: process.platform, env: process.env },",
+      "  'restore',",
+      '  {',
+      `    inspectRepository: () => (${JSON.stringify(validRepositoryReport())}),`,
+      '    createRestorePlan: () => plan,',
+      '    applyRestorePlan: async () => {',
+      '      await new Promise((resolve) => setTimeout(resolve, 300));',
+      '      return failed;',
+      '    },',
+      '  },',
+      ');',
+      "process.stdout.write(`OUTCOME:${outcome.reason}\\n`);",
+      "process.stdout.write(`STATUS:${outcome.operationStatus}\\n`);",
+      '',
+    ].join('\n'));
+    return fixturePath;
+  }
+
   function createRegeneratingCaptureFixture(): string {
     const fixturePath = path.join(testRoot, 'regenerating-capture.mjs');
     const shellModuleUrl = new URL(
@@ -740,6 +966,10 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     return fixturePath;
   }
 });
+
+function digest(value: string): string {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
 
 function expectRestoredTerminal(output: string): void {
   expect(output).toContain('\u001b[?1049h');

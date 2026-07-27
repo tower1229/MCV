@@ -42,7 +42,7 @@ MCV 仓库中的配置分为：
 
 ## 快速开始
 
-在完整 TTY 中直接运行 `mcv` 会进入统一的 Ink Shell，并异步打开只读 Overview。Overview 中按 `c` 或 `Enter` 进入 Capture、按 `d` 进入 Deploy；`mcv capture` 与 `mcv deploy` deep-link 到各自的同一可选择 workflow，`mcv status` deep-link 到 Overview，`mcv discover` deep-link 到 Environment Details。Environment Details 中按 `Escape` 返回 Overview；除 Repository 路径输入页需要保留完整文本输入外，任一非 Apply 页面按 `q` 正常退出，按 `Ctrl+C` 以 130 退出。direct subcommand 正常关闭后会在主屏留下对应摘要。Shell 使用 alternate screen，退出、失败、中断和异常后都会恢复主屏、光标和输入模式。
+在完整 TTY 中直接运行 `mcv` 会进入统一的 Ink Shell，并异步打开只读 Overview。Overview 中按 `c` 或 `Enter` 进入 Capture、按 `d` 进入 Deploy、按 `s` 进入 Restore Latest Deployment；`mcv capture`、`mcv deploy` 与 `mcv restore` deep-link 到各自的同一 workflow，`mcv status` deep-link 到 Overview，`mcv discover` deep-link 到 Environment Details。Environment Details 中按 `Escape` 返回 Overview；除 Repository 路径输入页需要保留完整文本输入外，任一非 Apply 页面按 `q` 正常退出，按 `Ctrl+C` 以 130 退出。direct subcommand 正常关闭后会在主屏留下对应摘要。Shell 使用 alternate screen，退出、失败、中断和异常后都会恢复主屏、光标和输入模式。
 
 非 TTY 的无参数调用仍立即输出 help。显式使用 `status --plain`、`status --json`、`discover --plain`、`discover --json`、`capture --dry-run`、`capture --yes` 或 `capture --json` 时始终执行一次性协议，不进入 alternate screen。
 
@@ -124,6 +124,7 @@ mcv restore
 - `status --plain` 从同一份只读 Overview Report 汇总 Repository、可选 Git 状态、Pending Deployment Change、相对 Baseline Snapshot 的 unchanged/Drift/missing、IDE/Surface、缺失变量和最近操作；`status --json` 输出该 Report 的机器可读形式。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
 - `restore --dry-run` 只选择最近一次完整且内容可验证的 Deploy backup，展示备份时间、将恢复或删除的文件，并以独立的 Restore Conflict 阻止覆盖部署后的新变化。
 - `restore` 默认在终端确认完整 Plan；自动化场景可在审阅后使用 `restore --yes`，并可组合 `--json` 取得结构化 Result。为避免无监督删除，包含删除的 Plan 必须交互确认，`--yes` 会在写入前阻断。Apply 会重验 operation ID、完整 selection、backup 来源和目标哈希；事务开始时先创建并验证当前状态 backup。事务前按 Ctrl+C 以 130 退出；写入、删除或本机状态提交失败时自动回滚，backup/commit/rollback 期间忽略普通取消。
+- Restore TTY workflow 展示最近完整 backup 的时间、逐文件 write/delete 影响和 Restore Conflict 路径；冲突或无可用 backup 时 Apply 被禁用，且不提供 force restore。Plan 过期会自动重新生成并要求重新审阅；成功或失败结果页按 `Enter` 返回刷新后的 Overview，按 `q` 退出。
 
 ## 命令
 
@@ -137,7 +138,7 @@ mcv discover   TTY 中 deep-link 到 Environment Details；--plain/--json 强制
 mcv capture    TTY 中 deep-link 到可选择 Capture workflow；--dry-run/--yes/--json 强制一次性 Plan/Result
 mcv deploy     通过 --dry-run 按 IDE/capability 审阅 Deploy Plan；支持 --json，Apply 时校验前置条件并事务备份/写入/回滚
 mcv status     TTY 中 deep-link 到只读 Overview；--plain/--json 强制一次性 Report
-mcv restore    通过 --dry-run 审阅并交互确认完整 Restore Plan；审阅后可用 --yes 应用，支持 --json
+mcv restore    TTY 中 deep-link 到 Restore Latest Deployment；--dry-run/--yes/--json 强制一次性 Plan/Result
 ```
 
 删除默认不执行。只有 `mcv deploy --prune-managed` 经交互确认后，才会删除本机 state 中已记录为 MCV managed、但仓库已不再生成的文件，以及与本次 Canonical 部署逐文件完全一致的旧 `$CODEX_HOME/skills` Skill 副本；`--yes` 永远拒绝删除。普通 deploy 检测到后一种重复时会提示，不会自动删除；内容不同或包含链接的 legacy Skill 会保留。

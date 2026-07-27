@@ -5,6 +5,7 @@ import { applyCapturePlan, createCapturePlan, } from '../operations/capture.js';
 import { inspectEnvironment, } from '../operations/environment.js';
 import { inspectStatus, } from '../operations/status.js';
 import { applyDeployPlan, createDeployPlan, } from '../operations/deploy.js';
+import { applyRestorePlan, createRestorePlan, } from '../operations/restore.js';
 import { applyBindPlan, applyInitPlan, applyMigrationPlan, applyUnbindPlan, createBindPlan, createInitPlan, createMigrationPlan, createUnbindPlan, inspectRepository, } from '../operations/repository.js';
 import { readState, recordCaptureSuccess } from '../utils/state.js';
 import { createInitialShellState, shellReducer, } from './shell-state.js';
@@ -73,6 +74,9 @@ function Shell({ context, initialRoute, dependencies }) {
             else if (report.operation === 'capture') {
                 dispatch({ type: 'capture.loaded', plan: report });
             }
+            else if (report.operation === 'restore') {
+                dispatch({ type: 'restore.loaded', plan: report });
+            }
             else {
                 dispatch({
                     type: 'deploy.loaded',
@@ -121,6 +125,25 @@ function Shell({ context, initialRoute, dependencies }) {
         };
     }, [context, dependencies, state.page]);
     useEffect(() => {
+        if (state.page.route !== 'restore'
+            || state.page.status !== 'ready'
+            || state.page.workflow.status !== 'regenerating')
+            return;
+        try {
+            dispatch({
+                type: 'restore.loaded',
+                plan: (dependencies.createRestorePlan ?? createRestorePlan)(context),
+            });
+        }
+        catch (error) {
+            dispatch({
+                type: 'page.failed',
+                route: 'restore',
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }, [context, dependencies, state.page]);
+    useEffect(() => {
         if (state.page.route !== 'deploy'
             || state.page.status !== 'ready'
             || state.page.workflow.status !== 'applying')
@@ -139,6 +162,29 @@ function Shell({ context, initialRoute, dependencies }) {
             dispatch({
                 type: 'page.failed',
                 route: 'deploy',
+                message: error instanceof Error ? error.message : String(error),
+            });
+        });
+        return () => {
+            active = false;
+        };
+    }, [context, dependencies, state.page]);
+    useEffect(() => {
+        if (state.page.route !== 'restore'
+            || state.page.status !== 'ready'
+            || state.page.workflow.status !== 'applying')
+            return;
+        const workflow = state.page.workflow;
+        let active = true;
+        void Promise.resolve((dependencies.applyRestorePlan ?? applyRestorePlan)(context, workflow.plan, { changeIds: workflow.plan.changes.map((change) => change.id) })).then((result) => {
+            if (active)
+                dispatch({ type: 'restore.applied', result });
+        }, (error) => {
+            if (!active)
+                return;
+            dispatch({
+                type: 'page.failed',
+                route: 'restore',
                 message: error instanceof Error ? error.message : String(error),
             });
         });
@@ -251,8 +297,13 @@ function Shell({ context, initialRoute, dependencies }) {
             && state.page.status === 'ready'
             ? state.page.workflow
             : undefined;
+        const restoreWorkflow = state.page.route === 'restore'
+            && state.page.status === 'ready'
+            ? state.page.workflow
+            : undefined;
         if (captureWorkflow?.status === 'applying'
             || deployWorkflow?.status === 'applying'
+            || restoreWorkflow?.status === 'applying'
             || repositoryWorkflow?.status === 'applying')
             return;
         if (key.ctrl && input === 'c') {
@@ -329,6 +380,10 @@ function Shell({ context, initialRoute, dependencies }) {
             dispatch({ type: 'navigate', route: 'deploy' });
             return;
         }
+        if (state.page.route === 'overview' && input === 's') {
+            dispatch({ type: 'navigate', route: 'restore' });
+            return;
+        }
         if (state.page.route === 'overview'
             && (input === 'c' || key.return)) {
             dispatch({ type: 'navigate', route: 'capture' });
@@ -382,6 +437,19 @@ function Shell({ context, initialRoute, dependencies }) {
                     dispatch({ type: 'deploy.apply' });
                 else if (key.escape)
                     dispatch({ type: 'deploy.back' });
+            }
+            return;
+        }
+        if (state.page.route === 'restore' && state.page.status === 'ready') {
+            if (restoreWorkflow?.status === 'result' && key.return) {
+                dispatch({ type: 'navigate', route: 'overview' });
+                return;
+            }
+            if (restoreWorkflow?.status === 'review') {
+                if (key.return)
+                    dispatch({ type: 'restore.apply' });
+                else if (key.escape)
+                    dispatch({ type: 'navigate', route: 'overview' });
             }
             return;
         }
@@ -442,20 +510,24 @@ function Shell({ context, initialRoute, dependencies }) {
 function createOutcome(state, initialRoute) {
     const failureMessage = state.page.status === 'failure'
         ? state.page.message
-        : state.deployResult?.status === 'failed'
-            ? state.deployResult.error.message
-            : state.captureResult?.status === 'failed'
-                ? state.captureResult.error.message
-                : undefined;
+        : state.restoreResult?.status === 'failed'
+            ? state.restoreResult.error.message
+            : state.deployResult?.status === 'failed'
+                ? state.deployResult.error.message
+                : state.captureResult?.status === 'failed'
+                    ? state.captureResult.error.message
+                    : undefined;
     const summary = summarizeDirectRoute(state, initialRoute);
     return {
         reason: state.exitReason ?? 'completed',
         route: state.page.route,
         ...(summary ? { summary } : {}),
         ...(failureMessage ? { failureMessage } : {}),
-        ...(state.deployResult || state.captureResult
+        ...(state.restoreResult || state.deployResult || state.captureResult
             ? {
-                operationStatus: state.deployResult?.status ?? state.captureResult?.status,
+                operationStatus: state.restoreResult?.status
+                    ?? state.deployResult?.status
+                    ?? state.captureResult?.status,
             }
             : {}),
     };
@@ -485,6 +557,17 @@ function summarizeDirectRoute(state, initialRoute) {
             ? 'Deploy was blocked; device configuration was not changed.'
             : `Deploy failed: ${result.error.message}`;
     }
+    if (initialRoute === 'restore') {
+        const result = state.restoreResult;
+        if (!result)
+            return 'Restore closed without applying changes.';
+        if (result.status === 'succeeded') {
+            return `Restored ${result.data?.restoredPaths.length ?? 0} path(s) and deleted ${result.data?.deletedPaths.length ?? 0} path(s).`;
+        }
+        return result.status === 'blocked'
+            ? 'Restore was blocked; device configuration was not changed.'
+            : `Restore failed: ${result.error.message}`;
+    }
     if (initialRoute === 'repository')
         return undefined;
     const result = state.captureResult;
@@ -506,6 +589,9 @@ function loadRoute(context, route, dependencies) {
     }
     if (route === 'deploy') {
         return (dependencies.createDeployPlan ?? createDeployPlan)(context);
+    }
+    if (route === 'restore') {
+        return Promise.resolve((dependencies.createRestorePlan ?? createRestorePlan)(context));
     }
     return (dependencies.createCapturePlan ?? createCapturePlan)(context);
 }

@@ -44,3 +44,77 @@ The Deploy Plan became stale. Regenerating a new preview for review...
 Please wait.",
 }
 `;
+
+exports[`TUI Shell view > snapshots Restore no-backup, conflict, review, applying, stale, success, and rollback failure 1`] = `
+{
+  "applying": "MCV
+Restore Latest Deployment · Applying
+
+Restoring the latest complete deployment backup transactionally...
+
+Please wait; input is disabled during backup, Apply, and rollback.",
+  "conflict": "MCV
+Restore Latest Deployment · Review
+
+Repository: /Users/张涛/Configuration Repository
+Backup time: 2026-07-27T08:30:00.000Z
+Impact: 1 file(s) to write, 1 file(s) to delete
+
+[write] /Users/张涛/.codex/config.toml
+[delete] /Users/张涛/.codex/added.toml
+Restore Conflict: Restore would overwrite files that changed after the
+deployment.
+  /Users/张涛/.codex/config.toml
+Apply disabled: resolve the blocking Restore error, then regenerate the Plan.
+Next: Back up or manually resolve every Restore Conflict, then generate a new
+Restore Plan.
+
+Escape Overview   q Quit   Ctrl+C Cancel",
+  "noBackup": "MCV
+Restore Latest Deployment · Review
+
+Repository: /Users/张涛/Configuration Repository
+Backup time: not available
+Impact: 0 file(s) to write, 0 file(s) to delete
+
+Error: No complete and verified deployment backup is available.
+Apply disabled: resolve the blocking Restore error, then regenerate the Plan.
+Next: Run a successful Deploy before trying Restore again.
+
+Escape Overview   q Quit   Ctrl+C Cancel",
+  "review": "MCV
+Restore Latest Deployment · Review
+
+Repository: /Users/张涛/Configuration Repository
+Backup time: 2026-07-27T08:30:00.000Z
+Impact: 1 file(s) to write, 1 file(s) to delete
+
+[write] /Users/张涛/.codex/config.toml
+[delete] /Users/张涛/.codex/added.toml
+
+Enter Apply   Escape Overview   q Quit   Ctrl+C Cancel",
+  "rollbackFailure": "MCV
+Restore Latest Deployment · Result
+
+Restore failed: restore.rollbackFailed
+Error code: restore.rollbackFailed
+Next: Generate a new Restore Plan.
+
+Enter Refresh Overview   q Quit",
+  "stale": "MCV
+Restore Latest Deployment · Regenerating
+
+The Restore Plan became stale. Regenerating a new preview for review...
+
+Please wait.",
+  "success": "MCV
+Restore Latest Deployment · Result
+
+Restore succeeded.
+Written: 1 paths
+Deleted: 1 paths
+Pre-restore backup: /Users/张涛/.mcv/restore-backups/before-restore-success
+
+Enter Refresh Overview   q Quit",
+}
+`;

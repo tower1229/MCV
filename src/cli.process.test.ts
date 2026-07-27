@@ -548,11 +548,29 @@ describe('packaged mcv CLI', () => {
         ? path.join(isolatedRoot, 'mcv')
         : path.join(isolatedRoot, '.config', 'mcv');
     const backupDirectory = path.join(stateRoot, 'backups', 'complete');
+    const repositoryPath = path.join(isolatedRoot, 'repository');
     const backupPath = path.join('files', 'settings.json');
     const digest = (content: string): string =>
       crypto.createHash('sha256').update(content).digest('hex');
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
     fs.mkdirSync(path.join(backupDirectory, 'files'), { recursive: true });
+    fs.mkdirSync(repositoryPath);
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 2',
+      'repositoryId: restore-interrupt-id',
+      'initializedAt: 2026-07-27T00:00:00.000Z',
+      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets: {}',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(stateRoot, 'config.json'), `${JSON.stringify({
+      schemaVersion: 2,
+      repositoryPath,
+      defaultRepositoryId: 'restore-interrupt-id',
+    }, null, 2)}\n`);
     fs.writeFileSync(targetPath, deployedContent);
     fs.writeFileSync(path.join(backupDirectory, backupPath), originalContent);
     fs.writeFileSync(path.join(backupDirectory, 'manifest.json'), JSON.stringify({
@@ -644,7 +662,7 @@ describe('packaged mcv CLI', () => {
           'set timeout 3',
           'log_user 1',
           'spawn $env(MCV_TEST_NODE) $env(MCV_TEST_CLI) restore',
-          'expect -exact {Restore every file in this Plan? [y/N] }',
+          'expect -exact {Restore Latest Deployment · Review}',
           'send "\\003"',
           'expect eof',
           'set result [wait]',
@@ -679,7 +697,7 @@ describe('packaged mcv CLI', () => {
         });
       });
 
-      expect(outcome).toMatchObject({ code: 130, output: expect.stringContaining('restore.cancelled') });
+      expect(outcome).toMatchObject({ code: 130, output: expect.stringContaining('MCV interrupted.') });
       expect(fs.readFileSync(targetPath, 'utf8')).toBe(deployedContent);
       expect(fs.existsSync(path.join(stateRoot, 'restore-backups'))).toBe(false);
     } finally {

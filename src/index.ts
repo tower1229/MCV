@@ -69,7 +69,7 @@ export function createProgram(
     .option('--verbose', 'Show processed file content in the preview')
     .action(async (options) => {
       validateWriteOutputOptions(captureCommand, options);
-      if (shouldUseCaptureTui(options)) {
+      if (shouldUseWriteTui(options)) {
         await runShell(context, 'capture', true);
       } else {
         await captureConfigurations(context, captureDependencies, options);
@@ -85,7 +85,7 @@ export function createProgram(
     .option('--prune-managed', 'Delete stale managed files and exact duplicate Skills from the legacy Codex directory')
     .action(async (options) => {
       validateWriteOutputOptions(deployCommand, options);
-      if (shouldUseDeployTui(options)) {
+      if (shouldUseWriteTui(options)) {
         await runShell(context, 'deploy', true);
       } else {
         await deployConfigurations(context, deployDependencies, options);
@@ -138,7 +138,11 @@ export function createProgram(
     .option('--json', 'Print one machine-readable Restore Plan or Result')
     .action(async (options) => {
       validateWriteOutputOptions(restoreCommand, options);
-      await restoreLatestBackup(context, {}, options);
+      if (shouldUseWriteTui(options)) {
+        await runShell(context, 'restore', true);
+      } else {
+        await restoreLatestBackup(context, {}, options);
+      }
     });
 
   const repositoryCommand = program.command('repo')
@@ -202,19 +206,7 @@ function shouldUseReadOnlyTui(options: { plain?: boolean; json?: boolean }): boo
   );
 }
 
-function shouldUseCaptureTui(
-  options: { dryRun?: boolean; yes?: boolean; json?: boolean },
-): boolean {
-  return Boolean(
-    process.stdin.isTTY
-    && process.stdout.isTTY
-    && !options.dryRun
-    && !options.yes
-    && !options.json,
-  );
-}
-
-function shouldUseDeployTui(
+function shouldUseWriteTui(
   options: { dryRun?: boolean; yes?: boolean; json?: boolean },
 ): boolean {
   return Boolean(
@@ -228,7 +220,7 @@ function shouldUseDeployTui(
 
 async function runShell(
   context: DeviceContext,
-  route: 'overview' | 'environment' | 'capture' | 'deploy',
+  route: 'overview' | 'environment' | 'capture' | 'deploy' | 'restore',
   direct: boolean,
 ): Promise<void> {
   const outcome = await runTuiShell(context, route);
@@ -237,7 +229,7 @@ async function runShell(
 
 function reportShellOutcome(
   outcome: ShellOutcome,
-  initialRoute: 'overview' | 'environment' | 'capture' | 'deploy',
+  initialRoute: 'overview' | 'environment' | 'capture' | 'deploy' | 'restore',
   direct: boolean,
 ): void {
   if (outcome.reason === 'interrupted') {
@@ -268,6 +260,18 @@ function reportShellOutcome(
       return;
     }
     console.log(outcome.summary ?? 'Deploy closed without applying changes.');
+    return;
+  }
+  if (initialRoute === 'restore') {
+    if (outcome.operationStatus === 'blocked') process.exitCode = 3;
+    else if (outcome.operationStatus === 'failed' || outcome.failureMessage) {
+      process.exitCode = 1;
+    }
+    if (outcome.failureMessage) {
+      console.error(`Restore failed: ${outcome.failureMessage}`);
+      return;
+    }
+    console.log(outcome.summary ?? 'Restore closed without applying changes.');
     return;
   }
   if (outcome.failureMessage) {

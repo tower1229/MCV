@@ -14,6 +14,10 @@ import type {
   DeployPreview,
   DeployResult,
 } from '../operations/deploy.js';
+import type {
+  RestorePlan,
+  RestoreResult,
+} from '../operations/restore.js';
 import {
   captureDecisionGroups,
   captureWarnings,
@@ -25,6 +29,7 @@ import {
   type RepositoryOperation,
   type RepositoryPlan,
   type RepositoryWorkflowState,
+  type RestoreWorkflowState,
   type ShellState,
 } from './shell-state.js';
 
@@ -58,6 +63,9 @@ export function ShellView({ state }: ShellViewProps): ReactNode {
       )}
       {page.status === 'ready' && page.route === 'deploy' && (
         <DeployWorkflow workflow={page.workflow} />
+      )}
+      {page.status === 'ready' && page.route === 'restore' && (
+        <RestoreWorkflow workflow={page.workflow} />
       )}
       {controls && (
         <>
@@ -94,6 +102,15 @@ function pageTitle(state: ShellState): string {
       case 'result': return 'Deploy · Result';
     }
   }
+  if (page.route === 'restore') {
+    if (page.status !== 'ready') return 'Restore Latest Deployment';
+    switch (page.workflow.status) {
+      case 'review': return 'Restore Latest Deployment · Review';
+      case 'applying': return 'Restore Latest Deployment · Applying';
+      case 'regenerating': return 'Restore Latest Deployment · Regenerating';
+      case 'result': return 'Restore Latest Deployment · Result';
+    }
+  }
   if (page.status !== 'ready') return 'Capture';
   switch (page.workflow.status) {
     case 'selection': return 'Capture · Select Changes';
@@ -127,13 +144,13 @@ function pageControls(state: ShellState): string | undefined {
   }
   if (page.status !== 'ready') {
     return page.route === 'overview'
-      ? 'c Capture   d Deploy   e Environment Details   q Quit   Ctrl+C Cancel'
+      ? 'c Capture   d Deploy   s Restore   e Environment Details   q Quit   Ctrl+C Cancel'
       : page.route === 'environment'
         ? 'Escape Overview   q Quit   Ctrl+C Cancel'
         : 'q Quit   Ctrl+C Cancel';
   }
   if (page.route === 'overview') {
-    return 'c Capture   d Deploy   e Environment Details   r Repository   q Quit   Ctrl+C Cancel';
+    return 'c Capture   d Deploy   s Restore   e Environment Details   r Repository   q Quit   Ctrl+C Cancel';
   }
   if (page.route === 'environment') {
     return state.postInitOnboarding
@@ -148,6 +165,20 @@ function pageControls(state: ShellState): string | undefined {
         return 'Escape Back   q Quit   Ctrl+C Cancel';
       case 'confirmation':
         return '↑↓ Move   Space Confirm Warning   Enter Apply   Escape Back   q Quit   Ctrl+C Cancel';
+      case 'applying':
+      case 'regenerating':
+        return undefined;
+      case 'result':
+        return 'Enter Refresh Overview   q Quit';
+    }
+  }
+  if (page.route === 'restore') {
+    switch (page.workflow.status) {
+      case 'review':
+        return page.workflow.plan.status === 'planned'
+          && page.workflow.plan.readyToApply
+          ? 'Enter Apply   Escape Overview   q Quit   Ctrl+C Cancel'
+          : 'Escape Overview   q Quit   Ctrl+C Cancel';
       case 'applying':
       case 'regenerating':
         return undefined;
@@ -297,6 +328,8 @@ function repositoryActionLabel(
         ? 'Continue to Capture'
         : resumeRoute === 'deploy'
           ? 'Continue to Deploy'
+          : resumeRoute === 'restore'
+            ? 'Continue to Restore'
           : 'Continue to Overview';
     case 'bind-current': return 'Bind current repository';
     case 'enter-path': return 'Enter existing path';
@@ -821,6 +854,115 @@ function DeployResultView({ result }: { result: DeployResult }): ReactNode {
   return (
     <Box flexDirection="column">
       <Text color="red">Deploy failed: {result.error.message}</Text>
+      {result.nextActions.map((action) => (
+        <Text key={action}>Next: {action}</Text>
+      ))}
+    </Box>
+  );
+}
+
+function RestoreWorkflow({
+  workflow,
+}: {
+  workflow: RestoreWorkflowState;
+}): ReactNode {
+  switch (workflow.status) {
+    case 'review':
+      return <RestoreReview plan={workflow.plan} />;
+    case 'applying':
+      return (
+        <Box flexDirection="column">
+          <Text>Restoring the latest complete deployment backup transactionally...</Text>
+          <Text> </Text>
+          <Text dimColor>
+            Please wait; input is disabled during backup, Apply, and rollback.
+          </Text>
+        </Box>
+      );
+    case 'regenerating':
+      return (
+        <Box flexDirection="column">
+          <Text>
+            The Restore Plan became stale. Regenerating a new preview for review...
+          </Text>
+          <Text> </Text>
+          <Text dimColor>Please wait.</Text>
+        </Box>
+      );
+    case 'result':
+      return <RestoreResultView result={workflow.result} />;
+  }
+}
+
+function RestoreReview({ plan }: { plan: RestorePlan }): ReactNode {
+  const writeCount = plan.changes.filter(
+    (change) => change.action === 'restore',
+  ).length;
+  const deleteCount = plan.changes.length - writeCount;
+  const hasConflict = plan.issues.some(
+    (issue) => issue.code === 'restore.conflict',
+  );
+  return (
+    <Box flexDirection="column">
+      <Text>Repository: {plan.repositoryPath ?? 'not bound'}</Text>
+      <Text>Backup time: {plan.backup?.createdAt ?? 'not available'}</Text>
+      <Text>
+        Impact: {writeCount} file(s) to write, {deleteCount} file(s) to delete
+      </Text>
+      <Text> </Text>
+      {plan.changes.map((change) => (
+        <Text key={change.id}>
+          [{change.action === 'restore' ? 'write' : 'delete'}] {change.targetPath}
+        </Text>
+      ))}
+      {plan.issues.map((issue) => (
+        <Box key={issue.code} flexDirection="column">
+          <Text color="red">
+            {issue.code === 'restore.conflict' ? 'Restore Conflict: ' : 'Error: '}
+            {issue.message}
+          </Text>
+          {issue.details?.split('\n').map((detail) => (
+            <Text key={`${issue.code}:${detail}`}>{'  '}{detail}</Text>
+          ))}
+        </Box>
+      ))}
+      {(plan.status === 'failed' || !plan.readyToApply || hasConflict) && (
+        <Text color="red">
+          Apply disabled: resolve the blocking Restore error, then regenerate the Plan.
+        </Text>
+      )}
+      {plan.nextActions.map((action) => (
+        <Text key={action}>Next: {action}</Text>
+      ))}
+    </Box>
+  );
+}
+
+function RestoreResultView({ result }: { result: RestoreResult }): ReactNode {
+  if (result.status === 'succeeded') {
+    return (
+      <Box flexDirection="column">
+        <Text color="green">Restore succeeded.</Text>
+        <Text>Written: {result.data?.restoredPaths.length ?? 0} paths</Text>
+        <Text>Deleted: {result.data?.deletedPaths.length ?? 0} paths</Text>
+        <Text>Pre-restore backup: {result.data?.backupPath}</Text>
+      </Box>
+    );
+  }
+  if (result.status === 'blocked') {
+    return (
+      <Box flexDirection="column">
+        <Text color="yellow">Restore was blocked; device configuration was not changed.</Text>
+        {result.issues.map((issue) => (
+          <Text key={issue.code}>{issue.code}: {issue.message}</Text>
+        ))}
+      </Box>
+    );
+  }
+  return (
+    <Box flexDirection="column">
+      <Text color="red">Restore failed: {result.error.message}</Text>
+      <Text>Error code: {result.error.code}</Text>
       {result.nextActions.map((action) => (
         <Text key={action}>Next: {action}</Text>
       ))}

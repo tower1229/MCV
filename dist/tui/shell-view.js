@@ -5,7 +5,7 @@ export function ShellView({ state }) {
     const { page } = state;
     const title = pageTitle(state);
     const controls = pageControls(state);
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { bold: true, children: "MCV" }), _jsx(Text, { children: title }), _jsx(Text, { children: " " }), page.status === 'loading' && _jsxs(Text, { children: ["Loading ", title, "..."] }), page.status === 'failure' && _jsxs(Text, { color: "red", children: ["Failed: ", page.message] }), page.status === 'ready' && page.route === 'overview' && (_jsx(Overview, { report: page.report })), page.status === 'ready' && page.route === 'repository' && (_jsx(RepositoryWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'environment' && (_jsx(EnvironmentDetails, { report: page.report })), page.status === 'ready' && page.route === 'capture' && (_jsx(CaptureWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'deploy' && (_jsx(DeployWorkflow, { workflow: page.workflow })), controls && (_jsxs(_Fragment, { children: [_jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: controls })] }))] }));
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { bold: true, children: "MCV" }), _jsx(Text, { children: title }), _jsx(Text, { children: " " }), page.status === 'loading' && _jsxs(Text, { children: ["Loading ", title, "..."] }), page.status === 'failure' && _jsxs(Text, { color: "red", children: ["Failed: ", page.message] }), page.status === 'ready' && page.route === 'overview' && (_jsx(Overview, { report: page.report })), page.status === 'ready' && page.route === 'repository' && (_jsx(RepositoryWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'environment' && (_jsx(EnvironmentDetails, { report: page.report })), page.status === 'ready' && page.route === 'capture' && (_jsx(CaptureWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'deploy' && (_jsx(DeployWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'restore' && (_jsx(RestoreWorkflow, { workflow: page.workflow })), controls && (_jsxs(_Fragment, { children: [_jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: controls })] }))] }));
 }
 function pageTitle(state) {
     const { page } = state;
@@ -34,6 +34,16 @@ function pageTitle(state) {
             case 'applying': return 'Deploy · Applying';
             case 'regenerating': return 'Deploy · Regenerating';
             case 'result': return 'Deploy · Result';
+        }
+    }
+    if (page.route === 'restore') {
+        if (page.status !== 'ready')
+            return 'Restore Latest Deployment';
+        switch (page.workflow.status) {
+            case 'review': return 'Restore Latest Deployment · Review';
+            case 'applying': return 'Restore Latest Deployment · Applying';
+            case 'regenerating': return 'Restore Latest Deployment · Regenerating';
+            case 'result': return 'Restore Latest Deployment · Result';
         }
     }
     if (page.status !== 'ready')
@@ -70,13 +80,13 @@ function pageControls(state) {
     }
     if (page.status !== 'ready') {
         return page.route === 'overview'
-            ? 'c Capture   d Deploy   e Environment Details   q Quit   Ctrl+C Cancel'
+            ? 'c Capture   d Deploy   s Restore   e Environment Details   q Quit   Ctrl+C Cancel'
             : page.route === 'environment'
                 ? 'Escape Overview   q Quit   Ctrl+C Cancel'
                 : 'q Quit   Ctrl+C Cancel';
     }
     if (page.route === 'overview') {
-        return 'c Capture   d Deploy   e Environment Details   r Repository   q Quit   Ctrl+C Cancel';
+        return 'c Capture   d Deploy   s Restore   e Environment Details   r Repository   q Quit   Ctrl+C Cancel';
     }
     if (page.route === 'environment') {
         return state.postInitOnboarding
@@ -91,6 +101,20 @@ function pageControls(state) {
                 return 'Escape Back   q Quit   Ctrl+C Cancel';
             case 'confirmation':
                 return '↑↓ Move   Space Confirm Warning   Enter Apply   Escape Back   q Quit   Ctrl+C Cancel';
+            case 'applying':
+            case 'regenerating':
+                return undefined;
+            case 'result':
+                return 'Enter Refresh Overview   q Quit';
+        }
+    }
+    if (page.route === 'restore') {
+        switch (page.workflow.status) {
+            case 'review':
+                return page.workflow.plan.status === 'planned'
+                    && page.workflow.plan.readyToApply
+                    ? 'Enter Apply   Escape Overview   q Quit   Ctrl+C Cancel'
+                    : 'Escape Overview   q Quit   Ctrl+C Cancel';
             case 'applying':
             case 'regenerating':
                 return undefined;
@@ -151,7 +175,9 @@ function repositoryActionLabel(action, resumeRoute) {
                 ? 'Continue to Capture'
                 : resumeRoute === 'deploy'
                     ? 'Continue to Deploy'
-                    : 'Continue to Overview';
+                    : resumeRoute === 'restore'
+                        ? 'Continue to Restore'
+                        : 'Continue to Overview';
         case 'bind-current': return 'Bind current repository';
         case 'enter-path': return 'Enter existing path';
         case 'init-here': return 'Initialize here';
@@ -319,6 +345,33 @@ function DeployResultView({ result }) {
         return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { color: "yellow", children: "Deploy was blocked; device configuration was not changed." }), result.issues.map((issue) => _jsx(Text, { children: issue.message }, issue.code))] }));
     }
     return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { color: "red", children: ["Deploy failed: ", result.error.message] }), result.nextActions.map((action) => (_jsxs(Text, { children: ["Next: ", action] }, action)))] }));
+}
+function RestoreWorkflow({ workflow, }) {
+    switch (workflow.status) {
+        case 'review':
+            return _jsx(RestoreReview, { plan: workflow.plan });
+        case 'applying':
+            return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "Restoring the latest complete deployment backup transactionally..." }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait; input is disabled during backup, Apply, and rollback." })] }));
+        case 'regenerating':
+            return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "The Restore Plan became stale. Regenerating a new preview for review..." }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait." })] }));
+        case 'result':
+            return _jsx(RestoreResultView, { result: workflow.result });
+    }
+}
+function RestoreReview({ plan }) {
+    const writeCount = plan.changes.filter((change) => change.action === 'restore').length;
+    const deleteCount = plan.changes.length - writeCount;
+    const hasConflict = plan.issues.some((issue) => issue.code === 'restore.conflict');
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: ["Repository: ", plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: ["Backup time: ", plan.backup?.createdAt ?? 'not available'] }), _jsxs(Text, { children: ["Impact: ", writeCount, " file(s) to write, ", deleteCount, " file(s) to delete"] }), _jsx(Text, { children: " " }), plan.changes.map((change) => (_jsxs(Text, { children: ["[", change.action === 'restore' ? 'write' : 'delete', "] ", change.targetPath] }, change.id))), plan.issues.map((issue) => (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { color: "red", children: [issue.code === 'restore.conflict' ? 'Restore Conflict: ' : 'Error: ', issue.message] }), issue.details?.split('\n').map((detail) => (_jsxs(Text, { children: ['  ', detail] }, `${issue.code}:${detail}`)))] }, issue.code))), (plan.status === 'failed' || !plan.readyToApply || hasConflict) && (_jsx(Text, { color: "red", children: "Apply disabled: resolve the blocking Restore error, then regenerate the Plan." })), plan.nextActions.map((action) => (_jsxs(Text, { children: ["Next: ", action] }, action)))] }));
+}
+function RestoreResultView({ result }) {
+    if (result.status === 'succeeded') {
+        return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { color: "green", children: "Restore succeeded." }), _jsxs(Text, { children: ["Written: ", result.data?.restoredPaths.length ?? 0, " paths"] }), _jsxs(Text, { children: ["Deleted: ", result.data?.deletedPaths.length ?? 0, " paths"] }), _jsxs(Text, { children: ["Pre-restore backup: ", result.data?.backupPath] })] }));
+    }
+    if (result.status === 'blocked') {
+        return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { color: "yellow", children: "Restore was blocked; device configuration was not changed." }), result.issues.map((issue) => (_jsxs(Text, { children: [issue.code, ": ", issue.message] }, issue.code)))] }));
+    }
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { color: "red", children: ["Restore failed: ", result.error.message] }), _jsxs(Text, { children: ["Error code: ", result.error.code] }), result.nextActions.map((action) => (_jsxs(Text, { children: ["Next: ", action] }, action)))] }));
 }
 function displayDeployGroup(change) {
     const ide = change.ide === 'claude-code'
