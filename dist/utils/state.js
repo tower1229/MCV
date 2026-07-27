@@ -31,3 +31,12 @@ export function writeState(context, state) {
     }
     atomicWriteTextFile(statePath, JSON.stringify(state, null, 2));
 }
+export function recordCaptureSuccess(context) {
+    const state = readState(context);
+    state.lastOperation = {
+        kind: 'capture',
+        time: new Date().toISOString(),
+        success: true,
+    };
+    writeState(context, state);
+}

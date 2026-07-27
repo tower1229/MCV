@@ -1,6 +1,6 @@
 import type { DeviceContext } from '../adapters/types.js';
 import { askInTerminal, withInterruptsIgnored } from '../cli/prompt.js';
-import { readState, writeState } from '../utils/state.js';
+import { recordCaptureSuccess } from '../utils/state.js';
 import { applyCapturePlan, createCapturePlan } from '../operations/capture.js';
 import { renderCapturePlanPlain, renderCaptureResultPlain } from '../renderers/capture.js';
 import { renderJson } from '../renderers/json.js';
@@ -105,9 +105,7 @@ export async function captureConfigurations(
           .map((issue) => issue.code),
     }, { nonInteractive: options.yes }));
   if (result.status === 'succeeded') {
-    const state = readState(context);
-    state.lastOperation = { kind: 'capture', time: new Date().toISOString(), success: true };
-    writeState(context, state);
+    recordCaptureSuccess(context);
   } else {
     process.exitCode = result.status === 'blocked' ? 3 : 1;
   }

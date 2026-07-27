@@ -51,3 +51,13 @@ export function writeState(context: DeviceContext, state: McvState): void {
   }
   atomicWriteTextFile(statePath, JSON.stringify(state, null, 2));
 }
+
+export function recordCaptureSuccess(context: DeviceContext): void {
+  const state = readState(context);
+  state.lastOperation = {
+    kind: 'capture',
+    time: new Date().toISOString(),
+    success: true,
+  };
+  writeState(context, state);
+}

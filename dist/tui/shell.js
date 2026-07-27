@@ -4,7 +4,7 @@ import { useEffect, useReducer } from 'react';
 import { applyCapturePlan, createCapturePlan, } from '../operations/capture.js';
 import { inspectEnvironment, } from '../operations/environment.js';
 import { inspectStatus, } from '../operations/status.js';
-import { readState, writeState } from '../utils/state.js';
+import { recordCaptureSuccess } from '../utils/state.js';
 import { createInitialShellState, shellReducer, } from './shell-state.js';
 import { ShellView } from './shell-view.js';
 export async function runTuiShell(context, initialRoute, dependencies = {}, runtime = {}) {
@@ -138,8 +138,7 @@ function Shell({ context, initialRoute, dependencies }) {
             && state.page.status === 'ready'
             ? state.page.workflow
             : undefined;
-        if (captureWorkflow?.status === 'applying'
-            || captureWorkflow?.status === 'regenerating')
+        if (captureWorkflow?.status === 'applying')
             return;
         if (key.ctrl && input === 'c') {
             dispatch({ type: 'cancel' });
@@ -266,15 +265,6 @@ function loadRoute(context, route, dependencies) {
         return (dependencies.inspectEnvironment ?? inspectEnvironment)(context);
     }
     return (dependencies.createCapturePlan ?? createCapturePlan)(context);
-}
-function recordCaptureSuccess(context) {
-    const deviceState = readState(context);
-    deviceState.lastOperation = {
-        kind: 'capture',
-        time: new Date().toISOString(),
-        success: true,
-    };
-    writeState(context, deviceState);
 }
 function restoreAfterRenderFailure(wasRaw) {
     if (typeof process.stdin.setRawMode === 'function'

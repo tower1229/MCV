@@ -20,7 +20,7 @@ import {
   inspectStatus,
   type StatusReport,
 } from '../operations/status.js';
-import { readState, writeState } from '../utils/state.js';
+import { recordCaptureSuccess } from '../utils/state.js';
 import {
   createInitialShellState,
   shellReducer,
@@ -224,10 +224,7 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
       && state.page.status === 'ready'
       ? state.page.workflow
       : undefined;
-    if (
-      captureWorkflow?.status === 'applying'
-      || captureWorkflow?.status === 'regenerating'
-    ) return;
+    if (captureWorkflow?.status === 'applying') return;
     if (key.ctrl && input === 'c') {
       dispatch({ type: 'cancel' });
       return;
@@ -357,16 +354,6 @@ function loadRoute(
     return (dependencies.inspectEnvironment ?? inspectEnvironment)(context);
   }
   return (dependencies.createCapturePlan ?? createCapturePlan)(context);
-}
-
-function recordCaptureSuccess(context: DeviceContext): void {
-  const deviceState = readState(context);
-  deviceState.lastOperation = {
-    kind: 'capture',
-    time: new Date().toISOString(),
-    success: true,
-  };
-  writeState(context, deviceState);
 }
 
 function restoreAfterRenderFailure(wasRaw: boolean): void {
