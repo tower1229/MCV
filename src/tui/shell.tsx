@@ -159,6 +159,7 @@ export async function runTuiShell(
       />,
       {
         alternateScreen: true,
+        interactive: true,
         exitOnCtrlC: false,
         patchConsole: false,
       },

@@ -12,7 +12,7 @@ type Spawn = (
     timeout: number;
     windowsHide: boolean;
   },
-) => Pick<SpawnSyncReturns<string>, 'status' | 'stdout' | 'stderr'>;
+) => Pick<SpawnSyncReturns<string>, 'status' | 'stdout'>;
 
 const POWERSHELL_PREFIX = [
   '$flags = [Reflection.BindingFlags]::Static -bor [Reflection.BindingFlags]::NonPublic',
@@ -37,9 +37,10 @@ export function preserveTerminalInputMode(
   if (platform !== 'win32') return () => undefined;
 
   const captured = runPowerShell(spawn, CAPTURE_MODE_SCRIPT);
-  reportDiagnostics('capture', captured);
   const mode = parseMode(captured);
-  if (mode === undefined) return () => undefined;
+  if (mode === undefined) {
+    throw new Error('Could not capture the Windows console input mode.');
+  }
 
   return () => {
     const restoreModeScript = [
@@ -49,14 +50,16 @@ export function preserveTerminalInputMode(
       "$type.GetMethod('SetMode', $flags).Invoke($null, @($handle, $modeValue))",
     ].join('; ');
     const restored = runPowerShell(spawn, restoreModeScript);
-    reportDiagnostics('restore', restored);
+    if (restored.status !== 0) {
+      throw new Error('Could not restore the Windows console input mode.');
+    }
   };
 }
 
 function runPowerShell(
   spawn: Spawn,
   script: string,
-): Pick<SpawnSyncReturns<string>, 'status' | 'stdout' | 'stderr'> {
+): Pick<SpawnSyncReturns<string>, 'status' | 'stdout'> {
   return spawn(
     'powershell.exe',
     [
@@ -81,15 +84,4 @@ function parseMode(
   if (result.status !== 0) return undefined;
   const value = Number.parseInt(result.stdout.trim(), 10);
   return Number.isInteger(value) && value >= 0 ? value : undefined;
-}
-
-function reportDiagnostics(
-  phase: 'capture' | 'restore',
-  result: Pick<SpawnSyncReturns<string>, 'status' | 'stdout' | 'stderr'>,
-): void {
-  if (process.env.MCV_TEST_TERMINAL_MODE_DIAGNOSTICS !== 'true') return;
-  process.stderr.write(
-    `TERMINAL_MODE_${phase.toUpperCase()}:`
-      + `${result.status}:${result.stdout.trim()}:${result.stderr.trim()}\n`,
-  );
 }

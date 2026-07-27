@@ -26,15 +26,25 @@ describe('preserveTerminalInputMode', () => {
     );
   });
 
-  it('leaves cleanup as a no-op when the Windows mode cannot be read', () => {
+  it('fails safely when the Windows mode cannot be read', () => {
     const spawn = vi.fn().mockReturnValue({
       status: 1,
       stdout: '',
     });
 
-    const restore = preserveTerminalInputMode('win32', spawn);
-    restore();
-
+    expect(() => preserveTerminalInputMode('win32', spawn)).toThrow(
+      'Could not capture the Windows console input mode.',
+    );
     expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a failed Windows mode restore', () => {
+    const spawn = vi.fn()
+      .mockReturnValueOnce({ status: 0, stdout: '503\r\n' })
+      .mockReturnValueOnce({ status: 1, stdout: '' });
+
+    const restore = preserveTerminalInputMode('win32', spawn);
+
+    expect(restore).toThrow('Could not restore the Windows console input mode.');
   });
 });

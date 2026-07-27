@@ -18,6 +18,7 @@ export async function runTuiShell(context, initialRoute, dependencies = {}, runt
     try {
         instance = (runtime.render ?? render)(_jsx(Shell, { context: context, initialRoute: initialRoute, dependencies: dependencies }), {
             alternateScreen: true,
+            interactive: true,
             exitOnCtrlC: false,
             patchConsole: false,
         });

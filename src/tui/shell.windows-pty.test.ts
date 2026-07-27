@@ -64,12 +64,11 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
       'Add-Type -Path $ModeProbe',
       '$inputHandle = [McvTest.ConsoleMode]::GetStdHandle(-10)',
       '[uint32]$before = 0',
-      '[void][McvTest.ConsoleMode]::GetConsoleMode($inputHandle, [ref]$before)',
+      'if (-not [McvTest.ConsoleMode]::GetConsoleMode($inputHandle, [ref]$before)) { throw "GetConsoleMode before TUI failed" }',
       'if ($Route) { & $Node $Cli $Route } else { & $Node $Cli }',
       '$code = $LASTEXITCODE',
       '[uint32]$after = 0',
-      '[void][McvTest.ConsoleMode]::GetConsoleMode($inputHandle, [ref]$after)',
-      'Write-Output "INPUT_MODE_VALUES:$before,$after"',
+      'if (-not [McvTest.ConsoleMode]::GetConsoleMode($inputHandle, [ref]$after)) { throw "GetConsoleMode after TUI failed" }',
       'if ($before -eq $after) { Write-Output "INPUT_MODE:restored" } else { Write-Output "INPUT_MODE:changed" }',
       'Write-Output "EXIT_CODE:$code"',
       'exit $code',
@@ -132,11 +131,9 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
         cwd: process.cwd(),
         env: {
           ...process.env,
-          CI: 'false',
           HOME: testRoot,
           USERPROFILE: testRoot,
           APPDATA: testRoot,
-          MCV_TEST_TERMINAL_MODE_DIAGNOSTICS: 'true',
         },
       });
       let output = '';

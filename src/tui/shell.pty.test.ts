@@ -703,7 +703,6 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       const child = spawn(expectPath, ['-c', lines.join('\n')], {
         env: {
           ...process.env,
-          CI: 'false',
           HOME: testRoot,
           USERPROFILE: testRoot,
           APPDATA: testRoot,
