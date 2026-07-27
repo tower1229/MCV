@@ -69,7 +69,11 @@ export function createProgram(
     .option('--verbose', 'Show processed file content in the preview')
     .action(async (options) => {
       validateWriteOutputOptions(captureCommand, options);
-      await captureConfigurations(context, captureDependencies, options);
+      if (shouldUseCaptureTui(options)) {
+        await runShell(context, 'capture', true);
+      } else {
+        await captureConfigurations(context, captureDependencies, options);
+      }
     });
 
   const deployCommand = program
@@ -97,7 +101,7 @@ export function createProgram(
         );
       }
       if (shouldUseReadOnlyTui(options)) {
-        await runReadOnlyTui(context, 'environment', true);
+        await runShell(context, 'environment', true);
       } else {
         await discoverConfigurations(context, options);
       }
@@ -116,7 +120,7 @@ export function createProgram(
         );
       }
       if (shouldUseReadOnlyTui(options)) {
-        await runReadOnlyTui(context, 'overview', true);
+        await runShell(context, 'overview', true);
       } else {
         await showStatus(context, options);
       }
@@ -179,7 +183,7 @@ export function createProgram(
       program.outputHelp();
       return;
     }
-    await runReadOnlyTui(context, 'overview', false);
+    await runShell(context, 'overview', false);
   });
 
   return program;
@@ -194,9 +198,21 @@ function shouldUseReadOnlyTui(options: { plain?: boolean; json?: boolean }): boo
   );
 }
 
-async function runReadOnlyTui(
+function shouldUseCaptureTui(
+  options: { dryRun?: boolean; yes?: boolean; json?: boolean },
+): boolean {
+  return Boolean(
+    process.stdin.isTTY
+    && process.stdout.isTTY
+    && !options.dryRun
+    && !options.yes
+    && !options.json,
+  );
+}
+
+async function runShell(
   context: DeviceContext,
-  route: 'overview' | 'environment',
+  route: 'overview' | 'environment' | 'capture',
   direct: boolean,
 ): Promise<void> {
   const outcome = await runTuiShell(context, route);
@@ -205,7 +221,7 @@ async function runReadOnlyTui(
 
 function reportShellOutcome(
   outcome: ShellOutcome,
-  initialRoute: 'overview' | 'environment',
+  initialRoute: 'overview' | 'environment' | 'capture',
   direct: boolean,
 ): void {
   if (outcome.reason === 'interrupted') {
@@ -214,6 +230,18 @@ function reportShellOutcome(
     return;
   }
   if (!direct) return;
+  if (initialRoute === 'capture') {
+    if (outcome.operationStatus === 'blocked') process.exitCode = 3;
+    else if (outcome.operationStatus === 'failed' || outcome.failureMessage) {
+      process.exitCode = 1;
+    }
+    if (outcome.failureMessage) {
+      console.error(`Capture failed: ${outcome.failureMessage}`);
+      return;
+    }
+    console.log(outcome.summary ?? 'Capture closed without applying changes.');
+    return;
+  }
   if (outcome.failureMessage) {
     process.exitCode = 1;
     console.error(`${outcome.route === 'overview' ? 'Overview' : 'Environment Details'} failed: ${outcome.failureMessage}`);

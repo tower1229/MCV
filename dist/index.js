@@ -45,7 +45,12 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         .option('--verbose', 'Show processed file content in the preview')
         .action(async (options) => {
         validateWriteOutputOptions(captureCommand, options);
-        await captureConfigurations(context, captureDependencies, options);
+        if (shouldUseCaptureTui(options)) {
+            await runShell(context, 'capture', true);
+        }
+        else {
+            await captureConfigurations(context, captureDependencies, options);
+        }
     });
     const deployCommand = program
         .command('deploy')
@@ -68,7 +73,7 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
             discoverCommand.error("options '--plain' and '--json' cannot be used together", { exitCode: 2, code: 'mcv.conflictingOutputModes' });
         }
         if (shouldUseReadOnlyTui(options)) {
-            await runReadOnlyTui(context, 'environment', true);
+            await runShell(context, 'environment', true);
         }
         else {
             await discoverConfigurations(context, options);
@@ -84,7 +89,7 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
             statusCommand.error("options '--plain' and '--json' cannot be used together", { exitCode: 2, code: 'mcv.conflictingOutputModes' });
         }
         if (shouldUseReadOnlyTui(options)) {
-            await runReadOnlyTui(context, 'overview', true);
+            await runShell(context, 'overview', true);
         }
         else {
             await showStatus(context, options);
@@ -141,7 +146,7 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
             program.outputHelp();
             return;
         }
-        await runReadOnlyTui(context, 'overview', false);
+        await runShell(context, 'overview', false);
     });
     return program;
 }
@@ -151,7 +156,14 @@ function shouldUseReadOnlyTui(options) {
         && !options.plain
         && !options.json);
 }
-async function runReadOnlyTui(context, route, direct) {
+function shouldUseCaptureTui(options) {
+    return Boolean(process.stdin.isTTY
+        && process.stdout.isTTY
+        && !options.dryRun
+        && !options.yes
+        && !options.json);
+}
+async function runShell(context, route, direct) {
     const outcome = await runTuiShell(context, route);
     reportShellOutcome(outcome, route, direct);
 }
@@ -163,6 +175,19 @@ function reportShellOutcome(outcome, initialRoute, direct) {
     }
     if (!direct)
         return;
+    if (initialRoute === 'capture') {
+        if (outcome.operationStatus === 'blocked')
+            process.exitCode = 3;
+        else if (outcome.operationStatus === 'failed' || outcome.failureMessage) {
+            process.exitCode = 1;
+        }
+        if (outcome.failureMessage) {
+            console.error(`Capture failed: ${outcome.failureMessage}`);
+            return;
+        }
+        console.log(outcome.summary ?? 'Capture closed without applying changes.');
+        return;
+    }
     if (outcome.failureMessage) {
         process.exitCode = 1;
         console.error(`${outcome.route === 'overview' ? 'Overview' : 'Environment Details'} failed: ${outcome.failureMessage}`);

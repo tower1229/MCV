@@ -25,7 +25,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'spawn /bin/zsh -f -c {stty rows 24 columns 80; before=$(stty -g); "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; after=$(stty -g); if [[ "$before" == "$after" ]]; then mode=restored; else mode=changed; fi; print -r -- INPUT_MODE:$mode; print -r -- EXIT_CODE:$code; exit $code}',
       'expect -exact {Overview}',
       'after 200',
-      'send "\\r"',
+      'send "e"',
       'expect -exact {Loading Environment Details...}',
       'send "q"',
       'expect -exact {INPUT_MODE:restored}',
@@ -38,6 +38,47 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     expect(outcome.code).toBe(0);
     expectRestoredTerminal(outcome.output);
   });
+
+  it('opens the same Capture workflow from Overview and the capture deep link', async () => {
+    const repositoryPath = createCaptureRepository();
+    const overview = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {cd "$MCV_TEST_REPO"; "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Overview}',
+      'send "c"',
+      'expect -exact {Capture · Select Changes}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: repositoryPath });
+    const deepLink = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {cd "$MCV_TEST_REPO"; "$MCV_TEST_NODE" "$MCV_TEST_CLI" capture; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Capture · Select Changes}',
+      'send "\\r"',
+      'expect -exact {Capture · Confirm Apply}',
+      'send "\\r"',
+      'expect -exact {Capture · Result}',
+      'send "\\r"',
+      'expect -exact {Loading Overview...}',
+      'expect -exact {Repository:}',
+      'send "q"',
+      'expect -exact {Captured 0 selected item(s)}',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: repositoryPath });
+
+    expect(overview.code).toBe(0);
+    expect(deepLink.code).toBe(0);
+    expectRestoredTerminal(overview.output);
+    expectRestoredTerminal(deepLink.output);
+  }, 10_000);
 
   it('deep-links discover, navigates back to Overview, and exits cleanly', async () => {
     const outcome = await runExpect([
@@ -67,8 +108,8 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'set timeout 5',
       'log_user 1',
       'spawn /bin/zsh -f -c {stty rows 24 columns 80; before=$(stty -g); "$MCV_TEST_NODE" "$MCV_TEST_CLI" status; code=$?; after=$(stty -g); if [[ "$before" == "$after" ]]; then mode=restored; else mode=changed; fi; print -r -- INPUT_MODE:$mode; print -r -- EXIT_CODE:$code; exit $code}',
-      'expect -exact {Overview}',
-      'after 200',
+      'expect -exact {Ctrl+C Cancel}',
+      'after 100',
       'send "\\003"',
       'expect -exact {MCV interrupted.}',
       'expect -exact {INPUT_MODE:restored}',
@@ -225,6 +266,23 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
         resolve({ code, output });
       });
     });
+  }
+
+  function createCaptureRepository(): string {
+    const repositoryPath = path.join(testRoot, 'repository');
+    fs.mkdirSync(repositoryPath);
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 2',
+      'repositoryId: tui-capture-test',
+      'initializedAt: 2026-07-27T00:00:00.000Z',
+      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets: {}',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    return repositoryPath;
   }
 });
 

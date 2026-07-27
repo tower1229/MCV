@@ -42,9 +42,9 @@ MCV 仓库中的配置分为：
 
 ## 快速开始
 
-在完整 TTY 中直接运行 `mcv` 会进入统一的 Ink Shell，并异步打开只读 Overview。`mcv status` deep-link 到同一 Overview，`mcv discover` deep-link 到 Environment Details；Environment Details 中按 `Escape` 返回 Overview，任一页面按 `q` 正常退出，按 `Ctrl+C` 以 130 退出。direct read-only subcommand 正常关闭后会在主屏留下对应 Report 的简洁摘要。Shell 使用 alternate screen，退出、失败、中断和异常后都会恢复主屏、光标和输入模式。
+在完整 TTY 中直接运行 `mcv` 会进入统一的 Ink Shell，并异步打开只读 Overview。Overview 中按 `c` 或 `Enter` 进入 Capture，`mcv capture` deep-link 到同一可选择 workflow；`mcv status` deep-link 到 Overview，`mcv discover` deep-link 到 Environment Details。Environment Details 中按 `Escape` 返回 Overview，任一非 Apply 页面按 `q` 正常退出，按 `Ctrl+C` 以 130 退出。direct subcommand 正常关闭后会在主屏留下对应摘要。Shell 使用 alternate screen，退出、失败、中断和异常后都会恢复主屏、光标和输入模式。
 
-非 TTY 的无参数调用仍立即输出 help。显式使用 `status --plain`、`status --json`、`discover --plain` 或 `discover --json` 时始终执行一次性协议，不进入 alternate screen。
+非 TTY 的无参数调用仍立即输出 help。显式使用 `status --plain`、`status --json`、`discover --plain`、`discover --json`、`capture --dry-run`、`capture --yes` 或 `capture --json` 时始终执行一次性协议，不进入 alternate screen。
 
 ### 1. 创建私人配置仓库
 
@@ -73,7 +73,7 @@ mcv discover --json
 mcv capture
 ```
 
-MCV 会先输出经过处理的预览，只有确认后才写入仓库。处理包括：
+TTY workflow 会按 IDE 与 File、Skill、MCP 分组显示经过处理的安全预览。`Space` 选择项目，`d` 查看 Diff，`Enter` 继续；删除候选默认不选，warning 必须逐项显式确认，decision required 与 error 未解决时 Apply 不可用。Apply 前后检测到 Plan 已过期时会重新生成预览，不会执行旧选择。只有最终确认后才写入仓库。处理包括：
 
 - 按文件名排除 `.env`、credential 文件、私钥等已知敏感文件；
 - 按字段名识别 `secret`、`token`、`key`、`password`、`credential`；
@@ -130,7 +130,7 @@ mcv bind [PATH] 通过 --dry-run 预览绑定计划，使用 --yes 应用；支�
 mcv unbind     通过 --dry-run 预览解除绑定计划，使用 --yes 应用；支持 --json
 mcv migrate    通过 --dry-run 预览 Migration Plan，使用 --yes 备份并迁移；支持 --json
 mcv discover   TTY 中 deep-link 到 Environment Details；--plain/--json 强制一次性 Report
-mcv capture    预览并收集本机配置到 MCV 仓库
+mcv capture    TTY 中 deep-link 到可选择 Capture workflow；--dry-run/--yes/--json 强制一次性 Plan/Result
 mcv deploy     通过 --dry-run 按 IDE/capability 审阅 Deploy Plan；支持 --json，Apply 时校验前置条件并事务备份/写入/回滚
 mcv status     TTY 中 deep-link 到只读 Overview；--plain/--json 强制一次性 Report
 mcv restore    通过 --dry-run 审阅并交互确认完整 Restore Plan；审阅后可用 --yes 应用，支持 --json

@@ -1,9 +1,11 @@
 import { renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
+import type { CapturePlan, CaptureResult } from '../operations/capture.js';
 import { ShellView } from './shell-view.js';
 import {
   createInitialShellState,
   shellReducer,
+  type ShellState,
 } from './shell-state.js';
 
 describe('TUI Shell view', () => {
@@ -16,7 +18,7 @@ describe('TUI Shell view', () => {
 
       Loading Overview...
 
-      e Environment Details   q Quit   Ctrl+C Cancel"
+      c Capture   e Environment Details   q Quit   Ctrl+C Cancel"
     `);
   });
 
@@ -177,7 +179,7 @@ describe('TUI Shell view', () => {
         Gemini: disabled, not detected
       Last operation: deploy · failure
 
-      e Environment Details   q Quit   Ctrl+C Cancel",
+      c Capture   e Environment Details   q Quit   Ctrl+C Cancel",
         "narrow44": "MCV
       Overview
 
@@ -195,14 +197,14 @@ describe('TUI Shell view', () => {
         Gemini: disabled, not detected
       Last operation: deploy · failure
 
-      e Environment Details   q Quit   Ctrl+C
-      Cancel",
+      c Capture   e Environment Details   q Quit
+       Ctrl+C Cancel",
         "noColorFailure": "MCV
       Overview
 
       Failed: Repository unavailable.
 
-      e Environment Details   q Quit   Ctrl+C Cancel",
+      c Capture   e Environment Details   q Quit   Ctrl+C Cancel",
         "windows120": "MCV
       Environment Details
 
@@ -217,4 +219,322 @@ describe('TUI Shell view', () => {
     expect(Object.values(rendered).join('')).not.toMatch(/\u001b\[/);
     expect(Object.values(rendered).join('')).not.toContain('source-secret-value');
   });
+
+  it('snapshots grouped Capture selection at narrow width with Unicode and many changes', () => {
+    const plan = capturePlan(16);
+    const state = shellReducer(createInitialShellState('capture'), {
+      type: 'capture.loaded',
+      plan,
+    });
+
+    const rendered = renderToString(<ShellView state={state} />, { columns: 46 });
+
+    expect(rendered).toMatchInlineSnapshot(`
+      "MCV
+      Capture · Select Changes
+
+      Repository: /Users/张涛/Configuration
+      Repository/超长路径
+      16 changes · 15 selected
+
+      Claude Code / File
+      > [x] [modify] 设置.json
+      Codex / Skill
+        [x] [add] 工具 Skill
+      Shared / MCP
+        [x] [add] 本地服务
+      Claude Code / File
+        [x] [add] config-4.json
+        [x] [add] config-5.json
+        [x] [add] config-6.json
+        [x] [add] config-7.json
+        [x] [add] config-8.json
+        [x] [add] config-9.json
+        [x] [add] config-10.json
+        [x] [add] config-11.json
+        [x] [add] config-12.json
+      … 4 more changes
+
+      ↑↓ Move   Space Select   d Diff   Enter
+      Continue   q Quit   Ctrl+C Cancel"
+    `);
+  });
+
+  it('snapshots sanitized text Diff and binary metadata without raw content', () => {
+    const loaded = shellReducer(createInitialShellState('capture'), {
+      type: 'capture.loaded',
+      plan: capturePlan(2),
+    });
+    const textDiff = shellReducer(loaded, { type: 'capture.openDiff' });
+    const binaryFocused = shellReducer(loaded, { type: 'capture.move', delta: 1 });
+    const binaryDiff = shellReducer(binaryFocused, { type: 'capture.openDiff' });
+
+    const rendered = {
+      text: renderToString(<ShellView state={textDiff} />, { columns: 80 }),
+      binary: renderToString(<ShellView state={binaryDiff} />, { columns: 80 }),
+    };
+
+    expect(rendered).toMatchInlineSnapshot(`
+      {
+        "binary": "MCV
+      Capture · Diff
+
+      config-2.json · add
+      ide/claude-code/native/config-2.json
+        binary · 42 bytes · sha256
+      bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+      Escape Back   q Quit   Ctrl+C Cancel",
+        "text": "MCV
+      Capture · Diff
+
+      设置.json · modify
+      ide/claude-code/native/设置.json
+        - "theme": "light"
+        + "theme": "dark"
+
+      Escape Back   q Quit   Ctrl+C Cancel",
+      }
+    `);
+    expect(JSON.stringify(rendered)).not.toContain('raw-secret-must-not-render');
+  });
+
+  it('snapshots decision, warning confirmation, applying, regeneration, and result states', () => {
+    const plan = capturePlan(1, true);
+    const loaded = shellReducer(createInitialShellState('capture'), {
+      type: 'capture.loaded',
+      plan,
+    });
+    const decision = shellReducer(loaded, { type: 'capture.continue' });
+    const chosen = shellReducer(decision, { type: 'capture.chooseDecision' });
+    const confirmation = shellReducer(chosen, { type: 'capture.continue' });
+    const warned = shellReducer(confirmation, { type: 'capture.toggleWarning' });
+    const applying = shellReducer(warned, { type: 'capture.apply' });
+    const regenerating = shellReducer(applying, {
+      type: 'capture.applied',
+      result: staleCaptureResult(),
+    });
+    const result = shellReducer(applying, {
+      type: 'capture.applied',
+      result: successfulCaptureResult(),
+    });
+
+    const previousNoColor = process.env.NO_COLOR;
+    process.env.NO_COLOR = '1';
+    const rendered = {
+      decision: renderToString(<ShellView state={decision} />, { columns: 80 }),
+      confirmation: renderToString(<ShellView state={confirmation} />, { columns: 80 }),
+      applying: renderToString(<ShellView state={applying} />, { columns: 80 }),
+      regenerating: renderToString(<ShellView state={regenerating} />, { columns: 80 }),
+      result: renderToString(<ShellView state={result} />, { columns: 80 }),
+    };
+    if (previousNoColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = previousNoColor;
+
+    expect(rendered).toMatchInlineSnapshot(`
+      {
+        "applying": "MCV
+      Capture · Applying
+
+      Applying 2 selected changes transactionally...
+
+      Please wait; input is disabled during Apply.",
+        "confirmation": "MCV
+      Capture · Confirm Apply
+
+      2 selected changes
+      Warnings require explicit confirmation:
+      > [ ] A source item was skipped safely.
+
+      Apply disabled: confirm every warning.
+
+      ↑↓ Move   Space Confirm Warning   Enter Apply   Escape Back   q Quit   Ctrl+C
+      Cancel",
+        "decision": "MCV
+      Capture · Resolve Decisions
+
+      Decision 1/1: shared
+      > [ ] Claude Code
+        [ ] Skip this MCP
+
+      Continue disabled: choose exactly one option.
+
+      ↑↓ Move   Space Choose   Enter Continue   Escape Back   q Quit   Ctrl+C Cancel",
+        "regenerating": "MCV
+      Capture · Regenerating
+
+      The Capture Plan became stale. Regenerating a safe preview...
+
+      Please wait.",
+        "result": "MCV
+      Capture · Result
+
+      Capture succeeded.
+      Applied: 2 changes
+      Written: 2 paths
+      Deleted: 0 paths
+
+      Enter Refresh Overview   q Quit",
+      }
+    `);
+    expect(Object.values(rendered).join('')).not.toMatch(/\u001b\[/);
+  });
 });
+
+function capturePlan(
+  changeCount: number,
+  withIssues = false,
+): CapturePlan {
+  const changes: CapturePlan['changes'] = Array.from(
+    { length: changeCount },
+    (_, index) => ({
+      id: `capture-file-${index + 1}`,
+      ide: 'claude-code',
+      surface: 'native',
+      itemType: 'file',
+      capability: 'native',
+      name: index === 0 ? '设置.json' : `config-${index + 1}.json`,
+      change: index === 0 ? 'modify' : 'add',
+      defaultSelected: true,
+      repositoryPaths: [
+        `ide/claude-code/native/${index === 0 ? '设置.json' : `config-${index + 1}.json`}`,
+      ],
+      previews: index === 0
+        ? [{
+          repositoryPath: 'ide/claude-code/native/设置.json',
+          kind: 'text',
+          bytes: 42,
+          sha256: 'a'.repeat(64),
+          diff: '- "theme": "light"\n+ "theme": "dark"',
+        }]
+        : [{
+          repositoryPath: `ide/claude-code/native/config-${index + 1}.json`,
+          kind: 'binary',
+          bytes: 42,
+          sha256: 'b'.repeat(64),
+        }],
+    }),
+  );
+  if (withIssues) {
+    changes.push(
+      {
+        id: 'capture-mcp-claude',
+        ide: 'shared',
+        surface: 'shared',
+        itemType: 'mcp',
+        capability: 'mcp',
+        name: 'shared',
+        change: 'conflict',
+        defaultSelected: false,
+        repositoryPaths: ['common/mcp.yaml'],
+        previews: [],
+        decisionGroupId: 'shared',
+        decision: 'candidate',
+        sourceLabel: 'Claude Code',
+      },
+      {
+        id: 'capture-mcp-skip',
+        ide: 'shared',
+        surface: 'shared',
+        itemType: 'mcp',
+        capability: 'mcp',
+        name: 'shared',
+        change: 'conflict',
+        defaultSelected: false,
+        repositoryPaths: ['common/mcp.yaml'],
+        previews: [],
+        decisionGroupId: 'shared',
+        decision: 'skip',
+        sourceLabel: 'Skip this MCP',
+      },
+    );
+  }
+  if (changeCount === 16) {
+    changes[1] = {
+      ...changes[1],
+      ide: 'codex',
+      itemType: 'skill',
+      capability: 'skills',
+      name: '工具 Skill',
+      repositoryPaths: ['common/skills/工具 Skill/SKILL.md'],
+    };
+    changes[2] = {
+      ...changes[2],
+      ide: 'shared',
+      itemType: 'mcp',
+      capability: 'mcp',
+      name: '本地服务',
+      repositoryPaths: ['common/mcp.yaml'],
+    };
+    changes[15] = {
+      ...changes[15],
+      change: 'delete',
+      defaultSelected: false,
+    };
+  }
+
+  return {
+    schemaVersion: 1,
+    operation: 'capture',
+    status: 'planned',
+    readyToApply: !withIssues,
+    operationId: 'capture-operation',
+    preconditions: {},
+    repositoryPath: '/Users/张涛/Configuration Repository/超长路径',
+    changes,
+    issues: withIssues
+      ? [
+        {
+          severity: 'decisionRequired',
+          code: 'capture.mcpConflict',
+          message: 'Choose one MCP source.',
+        },
+        {
+          severity: 'warning',
+          code: 'capture.sourceSkipped.1.1',
+          message: 'A source item was skipped safely.',
+        },
+      ]
+      : [],
+    nextActions: [],
+    summary: {
+      sensitiveFieldCount: 1,
+      parameterizedPathCount: 2,
+      excludedFileCount: 3,
+    },
+  };
+}
+
+function staleCaptureResult(): CaptureResult {
+  return {
+    schemaVersion: 1,
+    operation: 'capture',
+    status: 'failed',
+    repositoryPath: '/tmp/mcv',
+    changes: [],
+    issues: [],
+    nextActions: ['Regenerate.'],
+    error: {
+      code: 'operation.stalePlan',
+      message: 'Plan stale.',
+      nextActions: ['Regenerate.'],
+    },
+  };
+}
+
+function successfulCaptureResult(): CaptureResult {
+  return {
+    schemaVersion: 1,
+    operation: 'capture',
+    status: 'succeeded',
+    repositoryPath: '/tmp/mcv',
+    changes: [],
+    issues: [],
+    nextActions: [],
+    data: {
+      appliedChangeIds: ['capture-file-1', 'capture-mcp-claude'],
+      writtenPaths: ['common/mcp.yaml', 'ide/claude-code/native/设置.json'],
+      deletedPaths: [],
+    },
+  };
+}
