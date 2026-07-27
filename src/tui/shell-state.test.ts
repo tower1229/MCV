@@ -114,6 +114,10 @@ describe('TUI Shell reducer', () => {
     expect(environment).toMatchObject({
       page: { route: 'environment', status: 'loading' },
       postInitOnboarding: true,
+      repositoryResult: {
+        operation: 'init',
+        result: { status: 'succeeded' },
+      },
     });
 
     const environmentReady = shellReducer(environment, {
@@ -309,6 +313,18 @@ describe('TUI Shell reducer', () => {
     });
 
     expect(cancelled.exitReason).toBe('interrupted');
+  });
+
+  it('opens Help as a ready read-only page in the persistent Shell', () => {
+    const help = shellReducer(createInitialShellState('overview'), {
+      type: 'navigate',
+      route: 'help',
+    });
+
+    expect(help.page).toEqual({
+      route: 'help',
+      status: 'ready',
+    });
   });
 
   it('loads Capture with safe defaults and keeps deletions unselected', () => {

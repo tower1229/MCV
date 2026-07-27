@@ -8,16 +8,21 @@ const terminalPrompt = vi.hoisted(() => ({
   off: vi.fn(),
   close: vi.fn(),
 }));
+const shellRuntime = vi.hoisted(() => ({
+  runTuiShell: vi.fn(),
+}));
 
 vi.mock('readline/promises', () => ({
   createInterface: vi.fn(() => terminalPrompt),
 }));
+vi.mock('./tui/shell.js', () => shellRuntime);
 
 import { createProgram } from './index.js';
 
 describe('mcv init interaction', () => {
   const originalCwd = process.cwd();
   const originalIsTTY = process.stdin.isTTY;
+  const originalStdoutIsTTY = process.stdout.isTTY;
   let testRoot: string;
   let repositoryPath: string;
   let homeDir: string;
@@ -31,16 +36,26 @@ describe('mcv init interaction', () => {
     fs.writeFileSync(path.join(homeDir, '.claude', 'settings.json'), '{"theme":"dark"}\n');
     process.chdir(repositoryPath);
     Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
+    Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: true });
     terminalPrompt.question.mockReset().mockResolvedValueOnce('y');
     terminalPrompt.once.mockReset();
     terminalPrompt.off.mockReset();
     terminalPrompt.close.mockReset();
+    shellRuntime.runTuiShell.mockReset().mockResolvedValue({
+      reason: 'completed',
+      route: 'repository',
+      summary: 'Repository closed without changes.',
+    });
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
     Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: originalIsTTY });
+    Object.defineProperty(process.stdout, 'isTTY', {
+      configurable: true,
+      value: originalStdoutIsTTY,
+    });
     vi.restoreAllMocks();
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
@@ -59,6 +74,10 @@ describe('mcv init interaction', () => {
   });
 
   it('prints help instead of opening the Shell when stdout is not a TTY', async () => {
+    Object.defineProperty(process.stdout, 'isTTY', {
+      configurable: true,
+      value: false,
+    });
     const context = { homeDir, platform: 'darwin' as const, env: {}, pathEnv: '' };
     const output: string[] = [];
     const cli = createProgram(context);
@@ -67,6 +86,48 @@ describe('mcv init interaction', () => {
     await cli.parseAsync(['node', 'mcv']);
 
     expect(output.join('')).toContain('Usage: mcv [options] [command]');
+    expect(terminalPrompt.question).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      argv: ['init'],
+      operation: 'init',
+    },
+    {
+      argv: ['repo'],
+      operation: undefined,
+    },
+    {
+      argv: ['bind'],
+      operation: 'bind',
+    },
+    {
+      argv: ['unbind'],
+      operation: 'unbind',
+    },
+    {
+      argv: ['migrate'],
+      operation: 'migrate',
+    },
+  ])('deep-links `mcv $argv` into the persistent Repository Shell', async ({
+    argv,
+    operation,
+  }) => {
+    await createProgram(
+      { homeDir, platform: 'darwin', env: {}, pathEnv: '' },
+    ).parseAsync(['node', 'mcv', ...argv]);
+
+    const entry = operation === undefined
+      ? undefined
+      : operation === 'unbind'
+        ? { operation }
+        : { operation, path: repositoryPath };
+    expect(shellRuntime.runTuiShell).toHaveBeenCalledWith(
+      expect.objectContaining({ homeDir }),
+      'repository',
+      entry === undefined ? {} : { repositoryEntry: entry },
+    );
     expect(terminalPrompt.question).not.toHaveBeenCalled();
   });
 });

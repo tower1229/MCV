@@ -5,7 +5,7 @@ export function ShellView({ state }) {
     const { page } = state;
     const title = pageTitle(state);
     const controls = pageControls(state);
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { bold: true, children: "MCV" }), _jsx(Text, { children: title }), _jsx(Text, { children: " " }), page.status === 'loading' && _jsxs(Text, { children: ["Loading ", title, "..."] }), page.status === 'failure' && _jsxs(Text, { color: "red", children: ["Failed: ", page.message] }), page.status === 'ready' && page.route === 'overview' && (_jsx(Overview, { report: page.report })), page.status === 'ready' && page.route === 'repository' && (_jsx(RepositoryWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'environment' && (_jsx(EnvironmentDetails, { report: page.report })), page.status === 'ready' && page.route === 'capture' && (_jsx(CaptureWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'deploy' && (_jsx(DeployWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'restore' && (_jsx(RestoreWorkflow, { workflow: page.workflow })), controls && (_jsxs(_Fragment, { children: [_jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: controls })] }))] }));
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { bold: true, children: "MCV" }), _jsx(Text, { children: title }), _jsx(Text, { children: " " }), page.status === 'loading' && _jsxs(Text, { children: ["Loading ", title, "..."] }), page.status === 'failure' && _jsxs(Text, { color: "red", children: ["Failed: ", page.message] }), page.status === 'ready' && page.route === 'overview' && (_jsx(Overview, { report: page.report })), page.status === 'ready' && page.route === 'repository' && (_jsx(RepositoryWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'environment' && (_jsx(EnvironmentDetails, { report: page.report })), page.status === 'ready' && page.route === 'help' && _jsx(Help, {}), page.status === 'ready' && page.route === 'capture' && (_jsx(CaptureWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'deploy' && (_jsx(DeployWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'restore' && (_jsx(RestoreWorkflow, { workflow: page.workflow })), controls && (_jsxs(_Fragment, { children: [_jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: controls })] }))] }));
 }
 function pageTitle(state) {
     const { page } = state;
@@ -22,6 +22,8 @@ function pageTitle(state) {
     }
     if (page.route === 'overview')
         return 'Overview';
+    if (page.route === 'help')
+        return 'Help';
     if (page.route === 'environment')
         return 'Environment Details';
     if (page.route === 'deploy') {
@@ -75,18 +77,21 @@ function pageControls(state) {
             case 'applying':
                 return undefined;
             case 'result':
-                return 'Enter Back   q Quit';
+                return 'Enter Overview   q Quit';
         }
     }
     if (page.status !== 'ready') {
         return page.route === 'overview'
-            ? 'c Capture   d Deploy   s Restore   e Environment Details   q Quit   Ctrl+C Cancel'
+            ? primaryNavigationControls()
             : page.route === 'environment'
                 ? 'Escape Overview   q Quit   Ctrl+C Cancel'
                 : 'q Quit   Ctrl+C Cancel';
     }
     if (page.route === 'overview') {
-        return 'c Capture   d Deploy   s Restore   e Environment Details   r Repository   q Quit   Ctrl+C Cancel';
+        return primaryNavigationControls();
+    }
+    if (page.route === 'help') {
+        return 'Escape Overview   q Quit   Ctrl+C Cancel';
     }
     if (page.route === 'environment') {
         return state.postInitOnboarding
@@ -138,6 +143,15 @@ function pageControls(state) {
         case 'result':
             return 'Enter Refresh Overview   q Quit';
     }
+}
+function primaryNavigationControls() {
+    return [
+        'Overview   Capture   Deploy   Restore Latest Deployment   Repository   Help',
+        'c Capture   d Deploy   s Restore   r Repository   h Help   q Quit   Ctrl+C Cancel',
+    ].join('\n');
+}
+function Help() {
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "Primary navigation:" }), _jsx(Text, { children: "  Overview" }), _jsx(Text, { children: "  Capture" }), _jsx(Text, { children: "  Deploy" }), _jsx(Text, { children: "  Restore Latest Deployment" }), _jsx(Text, { children: "  Repository" }), _jsx(Text, { children: "  Help" }), _jsx(Text, { children: " " }), _jsx(Text, { children: "Direct commands open the same Shell when attached to a terminal." }), _jsx(Text, { children: "Use --dry-run, --yes, --plain, or --json for one-shot output." })] }));
 }
 function RepositoryWorkflow({ workflow, }) {
     if (workflow.status === 'menu') {

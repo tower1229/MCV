@@ -1,6 +1,6 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import { render, useApp, useInput, } from 'ink';
-import { useEffect, useReducer } from 'react';
+import { useEffect, useReducer, useRef } from 'react';
 import { applyCapturePlan, createCapturePlan, } from '../operations/capture.js';
 import { inspectEnvironment, } from '../operations/environment.js';
 import { inspectStatus, } from '../operations/status.js';
@@ -34,18 +34,26 @@ export async function runTuiShell(context, initialRoute, dependencies = {}, runt
 function Shell({ context, initialRoute, dependencies }) {
     const [state, dispatch] = useReducer(shellReducer, initialRoute, createInitialShellState);
     const { exit } = useApp();
+    const repositoryEntry = useRef(dependencies.repositoryEntry);
     useEffect(() => {
         if (state.page.status !== 'loading')
             return;
         const route = state.page.route;
         const inspect = dependencies.inspectRepository ?? inspectRepository;
         if (route === 'repository') {
+            const report = inspect(context);
+            const currentDirectory = inspect(context, process.cwd());
             dispatch({
                 type: 'repository.loaded',
-                report: inspect(context),
-                currentDirectory: inspect(context, process.cwd()),
+                report,
+                currentDirectory,
                 resumeRoute: state.repositoryResumeRoute,
             });
+            const entry = repositoryEntry.current;
+            repositoryEntry.current = undefined;
+            if (entry) {
+                dispatch(createRepositoryEntryAction(context, entry, dependencies));
+            }
             return;
         }
         if (route !== 'environment') {
@@ -359,7 +367,7 @@ function Shell({ context, initialRoute, dependencies }) {
                 return;
             }
             if (repositoryWorkflow.status === 'result' && key.return) {
-                dispatch({ type: 'repository.back' });
+                dispatch({ type: 'navigate', route: 'overview' });
             }
             return;
         }
@@ -367,13 +375,12 @@ function Shell({ context, initialRoute, dependencies }) {
             dispatch({ type: 'exit' });
             return;
         }
-        if (state.page.route === 'overview'
-            && input === 'e') {
-            dispatch({ type: 'navigate', route: 'environment' });
-            return;
-        }
         if (state.page.route === 'overview' && input === 'r') {
             dispatch({ type: 'navigate', route: 'repository' });
+            return;
+        }
+        if (state.page.route === 'overview' && input === 'h') {
+            dispatch({ type: 'navigate', route: 'help' });
             return;
         }
         if (state.page.route === 'overview' && input === 'd') {
@@ -390,6 +397,10 @@ function Shell({ context, initialRoute, dependencies }) {
             return;
         }
         if (state.page.route === 'environment' && key.escape) {
+            dispatch({ type: 'navigate', route: 'overview' });
+            return;
+        }
+        if (state.page.route === 'help' && key.escape) {
             dispatch({ type: 'navigate', route: 'overview' });
             return;
         }
@@ -507,32 +518,96 @@ function Shell({ context, initialRoute, dependencies }) {
     }, [exit, initialRoute, state]);
     return _jsx(ShellView, { state: state });
 }
+function createRepositoryEntryAction(context, entry, dependencies) {
+    switch (entry.operation) {
+        case 'init':
+            return {
+                type: 'repository.plan',
+                operation: 'init',
+                plan: (dependencies.createInitPlan ?? createInitPlan)(context, entry.path),
+            };
+        case 'bind':
+            return {
+                type: 'repository.plan',
+                operation: 'bind',
+                plan: (dependencies.createBindPlan ?? createBindPlan)(context, entry.path),
+            };
+        case 'migrate':
+            return {
+                type: 'repository.plan',
+                operation: 'migrate',
+                plan: (dependencies.createMigrationPlan ?? createMigrationPlan)(context, entry.path),
+            };
+        case 'unbind':
+            return {
+                type: 'repository.plan',
+                operation: 'unbind',
+                plan: (dependencies.createUnbindPlan ?? createUnbindPlan)(context),
+            };
+    }
+}
 function createOutcome(state, initialRoute) {
+    const repositoryPlan = state.page.route === 'repository'
+        && state.page.status === 'ready'
+        && state.page.workflow.status === 'plan'
+        ? state.page.workflow.step.plan
+        : undefined;
     const failureMessage = state.page.status === 'failure'
         ? state.page.message
-        : state.restoreResult?.status === 'failed'
-            ? state.restoreResult.error.message
-            : state.deployResult?.status === 'failed'
-                ? state.deployResult.error.message
-                : state.captureResult?.status === 'failed'
-                    ? state.captureResult.error.message
-                    : undefined;
+        : repositoryPlan?.status === 'failed'
+            ? repositoryPlan.error.message
+            : state.repositoryResult?.result.status === 'failed'
+                ? state.repositoryResult.result.error.message
+                : state.restoreResult?.status === 'failed'
+                    ? state.restoreResult.error.message
+                    : state.deployResult?.status === 'failed'
+                        ? state.deployResult.error.message
+                        : state.captureResult?.status === 'failed'
+                            ? state.captureResult.error.message
+                            : undefined;
     const summary = summarizeDirectRoute(state, initialRoute);
+    const nextAction = directRouteNextAction(state, initialRoute);
     return {
         reason: state.exitReason ?? 'completed',
         route: state.page.route,
         ...(summary ? { summary } : {}),
         ...(failureMessage ? { failureMessage } : {}),
-        ...(state.restoreResult || state.deployResult || state.captureResult
-            ? {
-                operationStatus: state.restoreResult?.status
-                    ?? state.deployResult?.status
-                    ?? state.captureResult?.status,
-            }
-            : {}),
+        ...(nextAction ? { nextAction } : {}),
+        ...(repositoryPlan?.status === 'failed'
+            ? { operationStatus: 'failed' }
+            : state.repositoryResult
+                || state.restoreResult
+                || state.deployResult
+                || state.captureResult
+                ? {
+                    operationStatus: state.repositoryResult?.result.status
+                        ?? state.restoreResult?.status
+                        ?? state.deployResult?.status
+                        ?? state.captureResult?.status,
+                }
+                : {}),
     };
 }
 function summarizeDirectRoute(state, initialRoute) {
+    if (initialRoute === 'repository') {
+        const step = state.repositoryResult;
+        if (step) {
+            const label = step.operation.charAt(0).toUpperCase()
+                + step.operation.slice(1);
+            return step.result.status === 'succeeded'
+                ? `${label} succeeded for ${step.result.repositoryPath ?? 'the local Repository binding'}.`
+                : `${label} ${step.result.status}.`;
+        }
+        if (state.page.route === 'repository'
+            && state.page.status === 'ready'
+            && state.page.workflow.status === 'menu') {
+            const report = state.page.workflow.report.repositoryPath
+                ? state.page.workflow.report
+                : state.page.workflow.currentDirectory;
+            return `Repository: ${report.repositoryPath ?? 'not bound'}; schema ${report.repositorySchemaVersion ?? 'unknown'}; ID ${report.repositoryId ?? 'unknown'}.`;
+        }
+        return 'Repository closed without changes.';
+    }
     if (initialRoute === 'overview') {
         const report = state.reports.overview;
         if (!report)
@@ -568,8 +643,6 @@ function summarizeDirectRoute(state, initialRoute) {
             ? 'Restore was blocked; device configuration was not changed.'
             : `Restore failed: ${result.error.message}`;
     }
-    if (initialRoute === 'repository')
-        return undefined;
     const result = state.captureResult;
     if (!result)
         return 'Capture closed without applying changes.';
@@ -579,6 +652,37 @@ function summarizeDirectRoute(state, initialRoute) {
     return result.status === 'blocked'
         ? 'Capture was blocked; Repository was not changed.'
         : `Capture failed: ${result.error.message}`;
+}
+function directRouteNextAction(state, initialRoute) {
+    const repositoryResult = state.repositoryResult?.result;
+    const repositoryPlan = state.page.route === 'repository'
+        && state.page.status === 'ready'
+        && state.page.workflow.status === 'plan'
+        ? state.page.workflow.step.plan
+        : undefined;
+    const result = repositoryResult
+        ?? state.restoreResult
+        ?? state.deployResult
+        ?? state.captureResult;
+    const explicit = result?.nextActions[0];
+    if (explicit)
+        return explicit;
+    if (repositoryPlan?.nextActions[0])
+        return repositoryPlan.nextActions[0];
+    if (initialRoute === 'repository') {
+        switch (state.repositoryResult?.operation) {
+            case 'init': return 'Review detected IDEs, then Capture the configuration you want to keep.';
+            case 'bind': return 'Review Overview before Capture, Deploy, or Restore.';
+            case 'migrate': return 'Review Overview before the next write operation.';
+            case 'unbind': return 'Bind or initialize a Repository before the next write operation.';
+            default: return 'Return to Overview and choose the next workflow.';
+        }
+    }
+    if (initialRoute === 'overview')
+        return 'Choose Capture, Deploy, Restore Latest Deployment, Repository, or Help.';
+    if (initialRoute === 'environment')
+        return 'Return to Overview to choose the next workflow.';
+    return 'Return to Overview to review the refreshed device state.';
 }
 function loadRoute(context, route, dependencies) {
     if (route === 'overview') {

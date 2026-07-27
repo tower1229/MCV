@@ -39,6 +39,136 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     expectRestoredTerminal(outcome.output);
   });
 
+  it('shows only the six primary destinations and keeps Help in the same Shell', async () => {
+    const repositoryPath = createCaptureRepository();
+    writeBinding(repositoryPath, 'tui-capture-test');
+    const outcome = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {stty rows 30 columns 120; cd "$MCV_TEST_REPO"; "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Overview   Capture   Deploy   Restore Latest Deployment   Repository   Help}',
+      'send "h"',
+      'expect -exact {Primary navigation:}',
+      'expect -exact {Direct commands open the same Shell when attached to a terminal.}',
+      'send "\\033"',
+      'expect -exact {Loading Overview...}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: repositoryPath });
+
+    expect(outcome.code).toBe(0);
+    expect(outcome.output).not.toContain('Environment Details   r Repository');
+    expectRestoredTerminal(outcome.output);
+  }, 10_000);
+
+  it('deep-links every Repository business command into the persistent Shell', async () => {
+    const emptyPath = path.join(testRoot, 'empty');
+    fs.mkdirSync(emptyPath);
+    const init = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {cd "$MCV_TEST_REPO"; "$MCV_TEST_NODE" "$MCV_TEST_CLI" init; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Repository · Init Plan}',
+      'send "q"',
+      'expect -exact {Repository closed without changes.}',
+      'expect -exact {Next: Return to Overview and choose the next workflow.}',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: emptyPath });
+
+    const repositoryPath = createCaptureRepository();
+    const repository = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {cd "$MCV_TEST_REPO"; "$MCV_TEST_NODE" "$MCV_TEST_CLI" repo; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Bind current repository}',
+      'send "q"',
+      'expect -exact {Repository: }',
+      'expect -exact {Next: Return to Overview and choose the next workflow.}',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: repositoryPath });
+
+    const bind = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {"$MCV_TEST_NODE" "$MCV_TEST_CLI" bind "$MCV_TEST_REPO"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Repository · Bind Plan}',
+      'send "\\r"',
+      'expect -exact {Loading Overview...}',
+      'expect -exact {Overview}',
+      'send "r"',
+      'expect -exact {Unbind this device}',
+      'send "q"',
+      'expect -exact {Bind succeeded for }',
+      'expect -exact {Next: Review Overview before Capture, Deploy, or Restore.}',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: repositoryPath });
+
+    const unbind = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {"$MCV_TEST_NODE" "$MCV_TEST_CLI" unbind; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Repository · Unbind Plan}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ]);
+
+    const schemaOnePath = createSchemaOneRepository();
+    writeBinding(schemaOnePath, 'tui-migration-test');
+    const migrate = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {"$MCV_TEST_NODE" "$MCV_TEST_CLI" migrate "$MCV_TEST_REPO"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Repository · Migrate Plan}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: schemaOnePath });
+
+    for (const outcome of [init, repository, bind, unbind, migrate]) {
+      expect(outcome.code).toBe(0);
+      expectRestoredTerminal(outcome.output);
+    }
+  }, 25_000);
+
+  it('prints a Repository Plan error and next action after restoring the main screen', async () => {
+    const invalidPath = path.join(testRoot, 'invalid-repository');
+    fs.mkdirSync(invalidPath);
+    const outcome = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {"$MCV_TEST_NODE" "$MCV_TEST_CLI" bind "$MCV_TEST_REPO"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Repository · Bind Plan}',
+      'expect -exact {Apply disabled until the Repository selection is fixed.}',
+      'send "q"',
+      'expect -exact {Repository failed: The selected directory is not a valid MCV Repository.}',
+      'expect -exact {Next: Choose a directory containing a valid mcv.yaml manifest.}',
+      'expect -exact {EXIT_CODE:1}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: invalidPath });
+
+    expect(outcome.code).toBe(1);
+    expectRestoredTerminal(outcome.output);
+  });
+
   it('opens the same Capture workflow from Overview and the capture deep link', async () => {
     const repositoryPath = createCaptureRepository();
     const overview = await runExpect([

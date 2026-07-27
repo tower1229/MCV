@@ -1,6 +1,8 @@
 export function createInitialShellState(route) {
     return {
-        page: { route, status: 'loading' },
+        page: route === 'help'
+            ? { route, status: 'ready' }
+            : { route, status: 'loading' },
         reports: {},
         postInitOnboarding: false,
         repositoryResumeRoute: route === 'repository' ? 'overview' : route,
@@ -61,11 +63,18 @@ export function shellReducer(state, action) {
             return updateRepositoryWorkflow(state, (workflow) => workflow.status === 'plan' && workflow.step.plan.status === 'planned'
                 ? { ...workflow, status: 'applying' }
                 : workflow);
-        case 'repository.applied':
+        case 'repository.applied': {
+            const stateWithRepositoryResult = {
+                ...state,
+                repositoryResult: {
+                    operation: action.operation,
+                    result: action.result,
+                },
+            };
             if (action.result.status === 'succeeded') {
                 if (action.operation === 'init') {
                     return {
-                        ...state,
+                        ...stateWithRepositoryResult,
                         page: { route: 'environment', status: 'loading' },
                         postInitOnboarding: true,
                     };
@@ -74,7 +83,7 @@ export function shellReducer(state, action) {
                     && state.page.route === 'repository'
                     && state.page.status === 'ready') {
                     return {
-                        ...state,
+                        ...stateWithRepositoryResult,
                         page: {
                             route: state.page.workflow.resumeRoute,
                             status: 'loading',
@@ -82,17 +91,18 @@ export function shellReducer(state, action) {
                     };
                 }
                 return {
-                    ...state,
+                    ...stateWithRepositoryResult,
                     page: { route: 'repository', status: 'loading' },
                 };
             }
-            return updateRepositoryWorkflow(state, (workflow) => ({
+            return updateRepositoryWorkflow(stateWithRepositoryResult, (workflow) => ({
                 status: 'result',
                 step: action,
                 report: workflow.report,
                 currentDirectory: workflow.currentDirectory,
                 resumeRoute: workflow.resumeRoute,
             }));
+        }
         case 'repository.back':
             return updateRepositoryWorkflow(state, (workflow) => ({
                 status: 'menu',
@@ -355,10 +365,9 @@ export function shellReducer(state, action) {
                 ...(action.route === 'repository' && state.page.route !== 'repository'
                     ? { repositoryResumeRoute: state.page.route }
                     : {}),
-                page: {
-                    route: action.route,
-                    status: 'loading',
-                },
+                page: action.route === 'help'
+                    ? { route: 'help', status: 'ready' }
+                    : { route: action.route, status: 'loading' },
             };
         case 'exit':
             return { ...state, exitReason: 'completed' };

@@ -42,9 +42,11 @@ MCV 仓库中的配置分为：
 
 ## 快速开始
 
-在完整 TTY 中直接运行 `mcv` 会进入统一的 Ink Shell，并异步打开只读 Overview。Overview 中按 `c` 或 `Enter` 进入 Capture、按 `d` 进入 Deploy、按 `s` 进入 Restore Latest Deployment；`mcv capture`、`mcv deploy` 与 `mcv restore` deep-link 到各自的同一 workflow，`mcv status` deep-link 到 Overview，`mcv discover` deep-link 到 Environment Details。Environment Details 中按 `Escape` 返回 Overview；除 Repository 路径输入页需要保留完整文本输入外，任一非 Apply 页面按 `q` 正常退出，按 `Ctrl+C` 以 130 退出。direct subcommand 正常关闭后会在主屏留下对应摘要。Shell 使用 alternate screen，退出、失败、中断和异常后都会恢复主屏、光标和输入模式。
+在完整 TTY 中直接运行 `mcv` 会进入统一的 Ink Shell，并异步打开只读 Overview。一级导航固定为 Overview、Capture、Deploy、Restore Latest Deployment、Repository 和 Help；Overview 中按 `c` 或 `Enter` 进入 Capture、按 `d` 进入 Deploy、按 `s` 进入 Restore Latest Deployment、按 `r` 进入 Repository、按 `h` 进入 Help。所有业务子命令都 deep-link 到同一个持久 Shell：`status` 打开 Overview，`discover` 打开 Environment Details，Capture/Deploy/Restore 打开各自 workflow，Repository 生命周期命令直接打开对应 Repository 页面或 Plan。只读页按 `Escape` 返回 Overview；除 Repository 路径输入页需要保留完整文本输入外，任一非 Apply 页面按 `q` 正常退出，按 `Ctrl+C` 以 130 退出。direct subcommand 正常关闭后会在主屏留下对应摘要和 next action。Shell 使用 alternate screen，退出、失败、中断和异常后都会恢复主屏、光标和输入模式。
 
-非 TTY 的无参数调用仍立即输出 help。显式使用 `status --plain`、`status --json`、`discover --plain`、`discover --json`、`capture --dry-run`、`capture --yes` 或 `capture --json` 时始终执行一次性协议，不进入 alternate screen。
+非 TTY 的无参数调用仍立即输出 help。显式使用 `--plain`、`--dry-run`、`--yes` 或 `--json` 的命令始终执行一次性协议，不进入 alternate screen。
+
+发布门在 macOS 与 Windows CI 中分别运行 packaged real PTY/ConPTY 测试，并验证 alternate screen、光标和输入模式恢复；任一平台未实际执行对应终端测试时，发布门不会通过。
 
 ### 1. 创建私人配置仓库
 
@@ -56,7 +58,7 @@ cd my-mcv-config
 mcv init
 ```
 
-该命令创建 schema v2 的 `mcv.yaml` 并绑定当前设备，然后以单次 Result 结束。继续运行 `mcv discover --plain` 和 `mcv capture --dry-run` 检查并审阅本机配置。MCV 不执行任何 Git 操作。
+该命令在 TTY 中直接打开 Repository Init Plan；确认后创建 schema v2 的 `mcv.yaml`、绑定当前设备，并继续 Environment discovery 与 Capture workflow。显式使用 `--dry-run`、`--yes` 或 `--json` 时保持一次性协议。MCV 不执行任何 Git 操作。
 
 ### 2. 查看可发现的配置
 
@@ -129,14 +131,14 @@ mcv restore
 ## 命令
 
 ```text
-mcv init       通过 --dry-run 预览 Init Plan，使用 --yes 初始化并绑定仓库；支持 --json
-mcv repo       检查当前 Repository 绑定；支持 --plain/--json
-mcv bind [PATH] 通过 --dry-run 预览绑定计划，使用 --yes 应用；支持 --json
-mcv unbind     通过 --dry-run 预览解除绑定计划，使用 --yes 应用；支持 --json
-mcv migrate    通过 --dry-run 预览 Migration Plan，使用 --yes 备份并迁移；支持 --json
+mcv init       TTY 中 deep-link 到 Init Plan；--dry-run/--yes/--json 强制一次性 Plan/Result
+mcv repo       TTY 中 deep-link 到 Repository；--plain/--json 强制一次性 Report
+mcv bind [PATH] TTY 中 deep-link 到 Bind Plan；--dry-run/--yes/--json 强制一次性 Plan/Result
+mcv unbind     TTY 中 deep-link 到 Unbind Plan；--dry-run/--yes/--json 强制一次性 Plan/Result
+mcv migrate    TTY 中 deep-link 到 Migration Plan；--dry-run/--yes/--json 强制一次性 Plan/Result
 mcv discover   TTY 中 deep-link 到 Environment Details；--plain/--json 强制一次性 Report
 mcv capture    TTY 中 deep-link 到可选择 Capture workflow；--dry-run/--yes/--json 强制一次性 Plan/Result
-mcv deploy     通过 --dry-run 按 IDE/capability 审阅 Deploy Plan；支持 --json，Apply 时校验前置条件并事务备份/写入/回滚
+mcv deploy     TTY 中 deep-link 到可选择 Deploy workflow；--dry-run/--yes/--json 强制一次性 Plan/Result
 mcv status     TTY 中 deep-link 到只读 Overview；--plain/--json 强制一次性 Report
 mcv restore    TTY 中 deep-link 到 Restore Latest Deployment；--dry-run/--yes/--json 强制一次性 Plan/Result
 ```

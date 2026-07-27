@@ -1,0 +1,36 @@
+name: Release Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+      - run: npm ci
+      - name: Verify macOS PTY prerequisites
+        if: runner.os == 'macOS'
+        shell: bash
+        run: test -x /usr/bin/expect && test -x /bin/zsh
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: node dist/index.js --help
+      - run: npm pack --dry-run

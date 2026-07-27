@@ -58,6 +58,7 @@ export function ShellView({ state }: ShellViewProps): ReactNode {
       {page.status === 'ready' && page.route === 'environment' && (
         <EnvironmentDetails report={page.report} />
       )}
+      {page.status === 'ready' && page.route === 'help' && <Help />}
       {page.status === 'ready' && page.route === 'capture' && (
         <CaptureWorkflow workflow={page.workflow} />
       )}
@@ -90,6 +91,7 @@ function pageTitle(state: ShellState): string {
     }
   }
   if (page.route === 'overview') return 'Overview';
+  if (page.route === 'help') return 'Help';
   if (page.route === 'environment') return 'Environment Details';
   if (page.route === 'deploy') {
     if (page.status !== 'ready') return 'Deploy';
@@ -139,18 +141,21 @@ function pageControls(state: ShellState): string | undefined {
       case 'applying':
         return undefined;
       case 'result':
-        return 'Enter Back   q Quit';
+        return 'Enter Overview   q Quit';
     }
   }
   if (page.status !== 'ready') {
     return page.route === 'overview'
-      ? 'c Capture   d Deploy   s Restore   e Environment Details   q Quit   Ctrl+C Cancel'
+      ? primaryNavigationControls()
       : page.route === 'environment'
         ? 'Escape Overview   q Quit   Ctrl+C Cancel'
         : 'q Quit   Ctrl+C Cancel';
   }
   if (page.route === 'overview') {
-    return 'c Capture   d Deploy   s Restore   e Environment Details   r Repository   q Quit   Ctrl+C Cancel';
+    return primaryNavigationControls();
+  }
+  if (page.route === 'help') {
+    return 'Escape Overview   q Quit   Ctrl+C Cancel';
   }
   if (page.route === 'environment') {
     return state.postInitOnboarding
@@ -202,6 +207,30 @@ function pageControls(state: ShellState): string | undefined {
     case 'result':
       return 'Enter Refresh Overview   q Quit';
   }
+}
+
+function primaryNavigationControls(): string {
+  return [
+    'Overview   Capture   Deploy   Restore Latest Deployment   Repository   Help',
+    'c Capture   d Deploy   s Restore   r Repository   h Help   q Quit   Ctrl+C Cancel',
+  ].join('\n');
+}
+
+function Help(): ReactNode {
+  return (
+    <Box flexDirection="column">
+      <Text>Primary navigation:</Text>
+      <Text>  Overview</Text>
+      <Text>  Capture</Text>
+      <Text>  Deploy</Text>
+      <Text>  Restore Latest Deployment</Text>
+      <Text>  Repository</Text>
+      <Text>  Help</Text>
+      <Text> </Text>
+      <Text>Direct commands open the same Shell when attached to a terminal.</Text>
+      <Text>Use --dry-run, --yes, --plain, or --json for one-shot output.</Text>
+    </Box>
+  );
 }
 
 function RepositoryWorkflow({

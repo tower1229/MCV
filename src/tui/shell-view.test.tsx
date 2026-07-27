@@ -20,9 +20,43 @@ describe('TUI Shell view', () => {
 
       Loading Overview...
 
-      c Capture   d Deploy   s Restore   e Environment Details   q Quit   Ctrl+C
+      Overview   Capture   Deploy   Restore Latest Deployment   Repository   Help
+      c Capture   d Deploy   s Restore   r Repository   h Help   q Quit   Ctrl+C
       Cancel"
     `);
+  });
+
+  it('renders Help inside the Shell with only the six primary destinations', () => {
+    const state = shellReducer(createInitialShellState('overview'), {
+      type: 'navigate',
+      route: 'help',
+    });
+
+    expect(renderToString(<ShellView state={state} />)).toMatchInlineSnapshot(`
+      "MCV
+      Help
+
+      Primary navigation:
+        Overview
+        Capture
+        Deploy
+        Restore Latest Deployment
+        Repository
+        Help
+
+      Direct commands open the same Shell when attached to a terminal.
+      Use --dry-run, --yes, --plain, or --json for one-shot output.
+
+      Escape Overview   q Quit   Ctrl+C Cancel"
+    `);
+  });
+
+  it('sends Repository write Results back to Overview', () => {
+    const state = repositoryFailureResultState();
+
+    expect(renderToString(<ShellView state={state} />)).toContain(
+      'Enter Overview   q Quit',
+    );
   });
 
   it('renders an actionable failure state', () => {
@@ -182,7 +216,8 @@ describe('TUI Shell view', () => {
         Gemini: disabled, not detected
       Last operation: deploy · failure
 
-      c Capture   d Deploy   s Restore   e Environment Details   r Repository   q Quit   Ctrl+C Cancel",
+      Overview   Capture   Deploy   Restore Latest Deployment   Repository   Help
+      c Capture   d Deploy   s Restore   r Repository   h Help   q Quit   Ctrl+C Cancel",
         "narrow44": "MCV
       Overview
 
@@ -200,15 +235,17 @@ describe('TUI Shell view', () => {
         Gemini: disabled, not detected
       Last operation: deploy · failure
 
-      c Capture   d Deploy   s Restore   e
-      Environment Details   r Repository   q Quit
-        Ctrl+C Cancel",
+      Overview   Capture   Deploy   Restore Latest
+       Deployment   Repository   Help
+      c Capture   d Deploy   s Restore   r
+      Repository   h Help   q Quit   Ctrl+C Cancel",
         "noColorFailure": "MCV
       Overview
 
       Failed: Repository unavailable.
 
-      c Capture   d Deploy   s Restore   e Environment Details   q Quit   Ctrl+C
+      Overview   Capture   Deploy   Restore Latest Deployment   Repository   Help
+      c Capture   d Deploy   s Restore   r Repository   h Help   q Quit   Ctrl+C
       Cancel",
         "windows120": "MCV
       Environment Details
@@ -832,4 +869,36 @@ function successfulCaptureResult(): CaptureResult {
       deletedPaths: [],
     },
   };
+}
+
+function repositoryFailureResultState(): ShellState {
+  return {
+    ...createInitialShellState('repository'),
+    page: {
+      route: 'repository',
+      status: 'ready',
+      workflow: {
+        status: 'result',
+        step: {
+          operation: 'bind',
+          result: {
+            operation: 'bind',
+            status: 'failed',
+            repositoryPath: '/tmp/repository',
+            changes: [],
+            issues: [],
+            nextActions: ['Choose a valid Repository.'],
+            error: {
+              code: 'repository.invalidManifest',
+              message: 'The selected directory is not a valid Repository.',
+              nextActions: ['Choose a valid Repository.'],
+            },
+          },
+        },
+        report: {},
+        currentDirectory: {},
+        resumeRoute: 'overview',
+      },
+    },
+  } as unknown as ShellState;
 }

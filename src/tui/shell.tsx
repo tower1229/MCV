@@ -4,7 +4,7 @@ import {
   useInput,
   type Instance,
 } from 'ink';
-import { useEffect, useReducer } from 'react';
+import { useEffect, useReducer, useRef } from 'react';
 import type { DeviceContext } from '../adapters/types.js';
 import {
   applyCapturePlan,
@@ -63,6 +63,7 @@ import {
 import { ShellView } from './shell-view.js';
 
 export interface ShellDependencies {
+  repositoryEntry?: RepositoryEntry;
   inspectRepository?: (
     context: DeviceContext,
     explicitPath?: string,
@@ -113,11 +114,18 @@ export interface ShellDependencies {
   ) => UnbindResult;
 }
 
+export type RepositoryEntry =
+  | { operation: 'init'; path: string }
+  | { operation: 'bind'; path: string }
+  | { operation: 'unbind' }
+  | { operation: 'migrate'; path: string };
+
 export interface ShellOutcome {
   reason: 'completed' | 'interrupted';
   route: ShellRoute;
   summary?: string;
   failureMessage?: string;
+  nextAction?: string;
   operationStatus?: 'succeeded' | 'blocked' | 'failed';
 }
 
@@ -172,6 +180,7 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
     createInitialShellState,
   );
   const { exit } = useApp();
+  const repositoryEntry = useRef(dependencies.repositoryEntry);
 
   useEffect(() => {
     if (state.page.status !== 'loading') return;
@@ -179,12 +188,23 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
     const route = state.page.route;
     const inspect = dependencies.inspectRepository ?? inspectRepository;
     if (route === 'repository') {
+      const report = inspect(context);
+      const currentDirectory = inspect(context, process.cwd());
       dispatch({
         type: 'repository.loaded',
-        report: inspect(context),
-        currentDirectory: inspect(context, process.cwd()),
+        report,
+        currentDirectory,
         resumeRoute: state.repositoryResumeRoute,
       });
+      const entry = repositoryEntry.current;
+      repositoryEntry.current = undefined;
+      if (entry) {
+        dispatch(createRepositoryEntryAction(
+          context,
+          entry,
+          dependencies,
+        ));
+      }
       return;
     }
     if (route !== 'environment') {
@@ -542,7 +562,7 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
         return;
       }
       if (repositoryWorkflow.status === 'result' && key.return) {
-        dispatch({ type: 'repository.back' });
+        dispatch({ type: 'navigate', route: 'overview' });
       }
       return;
     }
@@ -550,15 +570,12 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
       dispatch({ type: 'exit' });
       return;
     }
-    if (
-      state.page.route === 'overview'
-      && input === 'e'
-    ) {
-      dispatch({ type: 'navigate', route: 'environment' });
-      return;
-    }
     if (state.page.route === 'overview' && input === 'r') {
       dispatch({ type: 'navigate', route: 'repository' });
+      return;
+    }
+    if (state.page.route === 'overview' && input === 'h') {
+      dispatch({ type: 'navigate', route: 'help' });
       return;
     }
     if (state.page.route === 'overview' && input === 'd') {
@@ -577,6 +594,10 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
       return;
     }
     if (state.page.route === 'environment' && key.escape) {
+      dispatch({ type: 'navigate', route: 'overview' });
+      return;
+    }
+    if (state.page.route === 'help' && key.escape) {
       dispatch({ type: 'navigate', route: 'overview' });
       return;
     }
@@ -677,12 +698,63 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
   return <ShellView state={state} />;
 }
 
+function createRepositoryEntryAction(
+  context: DeviceContext,
+  entry: RepositoryEntry,
+  dependencies: ShellDependencies,
+): Parameters<typeof shellReducer>[1] {
+  switch (entry.operation) {
+    case 'init':
+      return {
+        type: 'repository.plan',
+        operation: 'init',
+        plan: (dependencies.createInitPlan ?? createInitPlan)(
+          context,
+          entry.path,
+        ),
+      };
+    case 'bind':
+      return {
+        type: 'repository.plan',
+        operation: 'bind',
+        plan: (dependencies.createBindPlan ?? createBindPlan)(
+          context,
+          entry.path,
+        ),
+      };
+    case 'migrate':
+      return {
+        type: 'repository.plan',
+        operation: 'migrate',
+        plan: (dependencies.createMigrationPlan ?? createMigrationPlan)(
+          context,
+          entry.path,
+        ),
+      };
+    case 'unbind':
+      return {
+        type: 'repository.plan',
+        operation: 'unbind',
+        plan: (dependencies.createUnbindPlan ?? createUnbindPlan)(context),
+      };
+  }
+}
+
 function createOutcome(
   state: ShellState,
   initialRoute: ShellRoute,
 ): ShellOutcome {
+  const repositoryPlan = state.page.route === 'repository'
+    && state.page.status === 'ready'
+    && state.page.workflow.status === 'plan'
+    ? state.page.workflow.step.plan
+    : undefined;
   const failureMessage = state.page.status === 'failure'
     ? state.page.message
+    : repositoryPlan?.status === 'failed'
+      ? repositoryPlan.error.message
+    : state.repositoryResult?.result.status === 'failed'
+      ? state.repositoryResult.result.error.message
     : state.restoreResult?.status === 'failed'
       ? state.restoreResult.error.message
       : state.deployResult?.status === 'failed'
@@ -691,15 +763,23 @@ function createOutcome(
       ? state.captureResult.error.message
       : undefined;
   const summary = summarizeDirectRoute(state, initialRoute);
+  const nextAction = directRouteNextAction(state, initialRoute);
   return {
     reason: state.exitReason ?? 'completed',
     route: state.page.route,
     ...(summary ? { summary } : {}),
     ...(failureMessage ? { failureMessage } : {}),
-    ...(state.restoreResult || state.deployResult || state.captureResult
+    ...(nextAction ? { nextAction } : {}),
+    ...(repositoryPlan?.status === 'failed'
+      ? { operationStatus: 'failed' as const }
+      : state.repositoryResult
+      || state.restoreResult
+      || state.deployResult
+      || state.captureResult
       ? {
         operationStatus:
-          state.restoreResult?.status
+          state.repositoryResult?.result.status
+          ?? state.restoreResult?.status
           ?? state.deployResult?.status
           ?? state.captureResult?.status,
       }
@@ -711,6 +791,27 @@ function summarizeDirectRoute(
   state: ShellState,
   initialRoute: ShellRoute,
 ): string | undefined {
+  if (initialRoute === 'repository') {
+    const step = state.repositoryResult;
+    if (step) {
+      const label = step.operation.charAt(0).toUpperCase()
+        + step.operation.slice(1);
+      return step.result.status === 'succeeded'
+        ? `${label} succeeded for ${step.result.repositoryPath ?? 'the local Repository binding'}.`
+        : `${label} ${step.result.status}.`;
+    }
+    if (
+      state.page.route === 'repository'
+      && state.page.status === 'ready'
+      && state.page.workflow.status === 'menu'
+    ) {
+      const report = state.page.workflow.report.repositoryPath
+        ? state.page.workflow.report
+        : state.page.workflow.currentDirectory;
+      return `Repository: ${report.repositoryPath ?? 'not bound'}; schema ${report.repositorySchemaVersion ?? 'unknown'}; ID ${report.repositoryId ?? 'unknown'}.`;
+    }
+    return 'Repository closed without changes.';
+  }
   if (initialRoute === 'overview') {
     const report = state.reports.overview;
     if (!report) return undefined;
@@ -742,7 +843,6 @@ function summarizeDirectRoute(
       ? 'Restore was blocked; device configuration was not changed.'
       : `Restore failed: ${result.error.message}`;
   }
-  if (initialRoute === 'repository') return undefined;
   const result = state.captureResult;
   if (!result) return 'Capture closed without applying changes.';
   if (result.status === 'succeeded') {
@@ -751,6 +851,37 @@ function summarizeDirectRoute(
   return result.status === 'blocked'
     ? 'Capture was blocked; Repository was not changed.'
     : `Capture failed: ${result.error.message}`;
+}
+
+function directRouteNextAction(
+  state: ShellState,
+  initialRoute: ShellRoute,
+): string | undefined {
+  const repositoryResult = state.repositoryResult?.result;
+  const repositoryPlan = state.page.route === 'repository'
+    && state.page.status === 'ready'
+    && state.page.workflow.status === 'plan'
+    ? state.page.workflow.step.plan
+    : undefined;
+  const result = repositoryResult
+    ?? state.restoreResult
+    ?? state.deployResult
+    ?? state.captureResult;
+  const explicit = result?.nextActions[0];
+  if (explicit) return explicit;
+  if (repositoryPlan?.nextActions[0]) return repositoryPlan.nextActions[0];
+  if (initialRoute === 'repository') {
+    switch (state.repositoryResult?.operation) {
+      case 'init': return 'Review detected IDEs, then Capture the configuration you want to keep.';
+      case 'bind': return 'Review Overview before Capture, Deploy, or Restore.';
+      case 'migrate': return 'Review Overview before the next write operation.';
+      case 'unbind': return 'Bind or initialize a Repository before the next write operation.';
+      default: return 'Return to Overview and choose the next workflow.';
+    }
+  }
+  if (initialRoute === 'overview') return 'Choose Capture, Deploy, Restore Latest Deployment, Repository, or Help.';
+  if (initialRoute === 'environment') return 'Return to Overview to choose the next workflow.';
+  return 'Return to Overview to review the refreshed device state.';
 }
 
 function loadRoute(
