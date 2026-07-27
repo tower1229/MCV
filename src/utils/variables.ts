@@ -1,4 +1,4 @@
-import { isRecord } from './objects';
+import { isRecord } from './objects.js';
 
 export function resolvePortableValue(
   value: unknown,

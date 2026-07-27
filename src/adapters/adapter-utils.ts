@@ -5,8 +5,8 @@ import type {
   CanonicalDeploySource,
   DeployFile,
   DeviceContext,
-} from './types';
-import { resolvePortableValue } from '../utils/variables';
+} from './types.js';
+import { resolvePortableValue } from '../utils/variables.js';
 
 export function hasExecutable(
   executable: string,

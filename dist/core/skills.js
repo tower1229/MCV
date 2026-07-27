@@ -1,46 +1,8 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.getSkillSources = getSkillSources;
-exports.collectSkills = collectSkills;
-exports.skillPackageToCaptureFiles = skillPackageToCaptureFiles;
-const crypto = __importStar(require("crypto"));
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-const sanitize_1 = require("../utils/sanitize");
-function getSkillSources(context, enabled) {
+import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
+import { isSensitiveFile, scanTextForSecrets } from '../utils/sanitize.js';
+export function getSkillSources(context, enabled) {
     const env = context.env;
     const codexHome = env.CODEX_HOME || path.join(context.homeDir, '.codex');
     const claudeHome = env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude');
@@ -59,7 +21,7 @@ function getSkillSources(context, enabled) {
         ] : []),
     ];
 }
-function collectSkills(sources) {
+export function collectSkills(sources) {
     const packages = new Map();
     const warnings = [];
     let excludedFileCount = 0;
@@ -108,7 +70,7 @@ function collectSkills(sources) {
     }
     return { packages, warnings, excludedFileCount };
 }
-function skillPackageToCaptureFiles(skill) {
+export function skillPackageToCaptureFiles(skill) {
     return skill.files.map((file) => ({
         sourcePath: path.join(skill.directory, file.relativePath),
         repositoryPath: path.posix.join('common', 'skills', skill.name, file.relativePath.replace(/\\/g, '/')),
@@ -134,14 +96,14 @@ function walkSkill(root, directory, files, warnings, excluded) {
         }
         if (!entry.isFile())
             continue;
-        if ((0, sanitize_1.isSensitiveFile)(current)) {
+        if (isSensitiveFile(current)) {
             warnings.push(`Excluded sensitive Skill file: ${current}`);
             excluded();
             continue;
         }
         const content = fs.readFileSync(current);
         if (isText(content)) {
-            const findings = (0, sanitize_1.scanTextForSecrets)(content.toString('utf8'));
+            const findings = scanTextForSecrets(content.toString('utf8'));
             if (findings.length > 0) {
                 warnings.push(`Blocked Skill file with suspected plaintext secret: ${current} (${findings.join(', ')})`);
                 excluded();

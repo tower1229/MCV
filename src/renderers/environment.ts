@@ -1,5 +1,5 @@
-import type { EnvironmentReport } from '../operations/environment';
-import { styleText } from './color';
+import type { EnvironmentReport } from '../operations/environment.js';
+import { styleText } from './color.js';
 
 export function renderEnvironmentPlain(report: EnvironmentReport): string[] {
   return report.environments.flatMap((environment) => [

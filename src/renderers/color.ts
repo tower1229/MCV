@@ -1,4 +1,4 @@
-import type { Issue, IssueSeverity } from '../operations/contracts';
+import type { Issue, IssueSeverity } from '../operations/contracts.js';
 
 export type TextTone = 'green' | 'yellow' | 'red' | 'cyan' | 'dim';
 

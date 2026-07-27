@@ -4,22 +4,22 @@ import * as yaml from 'yaml';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import type { DeviceContext } from '../adapters/types';
-import { normalizeMcpServers } from '../core/mcp';
-import { atomicWriteTextFile } from '../utils/files';
-import { isRecord } from '../utils/objects';
+import type { DeviceContext } from '../adapters/types.js';
+import { normalizeMcpServers } from '../core/mcp.js';
+import { atomicWriteTextFile } from '../utils/files.js';
+import { isRecord } from '../utils/objects.js';
 import {
   CURRENT_SCHEMA_VERSION,
   readManifest,
   validateManifest,
   type McvManifest,
-} from '../utils/repository';
+} from '../utils/repository.js';
 import {
   getStateFilePath,
   readState,
   writeState,
   type McvState,
-} from '../utils/state';
+} from '../utils/state.js';
 import {
   OPERATION_SCHEMA_VERSION,
   type Issue,
@@ -27,7 +27,7 @@ import {
   type Plan,
   type Report,
   type Result,
-} from './contracts';
+} from './contracts.js';
 
 export interface GitRepositoryStatus {
   branch: string | null;

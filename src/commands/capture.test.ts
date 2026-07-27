@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createProgram } from '../index';
+import { createProgram } from '../index.js';
 import { parse as parseToml } from 'smol-toml';
 
 describe('mcv capture', () => {

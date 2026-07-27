@@ -1,24 +1,17 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.renderRepositoryPlain = renderRepositoryPlain;
-exports.renderBindPlain = renderBindPlain;
-exports.renderUnbindPlain = renderUnbindPlain;
-exports.renderInitPlain = renderInitPlain;
-exports.renderMigrationPlain = renderMigrationPlain;
-const color_1 = require("./color");
-function renderRepositoryPlain(report) {
+import { renderIssuePlain, styleText } from './color.js';
+export function renderRepositoryPlain(report) {
     const lines = [
         `Repository: ${report.repositoryPath ?? 'not bound'}`,
         `Repository ID: ${report.repositoryId ?? 'unknown'}`,
         `Schema version: ${report.repositorySchemaVersion ?? 'unknown'}`,
-        `Validity: ${report.valid ? (0, color_1.styleText)('valid', 'green') : (0, color_1.styleText)('invalid', 'red')}`,
+        `Validity: ${report.valid ? styleText('valid', 'green') : styleText('invalid', 'red')}`,
     ];
     if (report.git) {
-        lines.push(`Git: ${report.git.clean ? (0, color_1.styleText)('clean', 'green') : (0, color_1.styleText)('dirty', 'yellow')}${report.git.branch ? ` (${report.git.branch})` : ''}`);
+        lines.push(`Git: ${report.git.clean ? styleText('clean', 'green') : styleText('dirty', 'yellow')}${report.git.branch ? ` (${report.git.branch})` : ''}`);
     }
     return appendIssuesAndActions(lines, report);
 }
-function renderBindPlain(contract) {
+export function renderBindPlain(contract) {
     if (contract.status === 'planned') {
         return appendIssuesAndActions([
             `Bind Plan: ${contract.repositoryPath}`,
@@ -30,7 +23,7 @@ function renderBindPlain(contract) {
     }
     return appendIssuesAndActions([], contract);
 }
-function renderUnbindPlain(contract) {
+export function renderUnbindPlain(contract) {
     if (contract.status === 'planned') {
         return appendIssuesAndActions([
             `Unbind Plan: ${contract.repositoryPath ?? 'not bound'}`,
@@ -41,7 +34,7 @@ function renderUnbindPlain(contract) {
         return appendIssuesAndActions([], contract);
     return appendIssuesAndActions(['Removed the MCV Repository binding from this device.'], contract);
 }
-function renderInitPlain(contract) {
+export function renderInitPlain(contract) {
     if (contract.status === 'planned') {
         const lines = [
             `Init Plan: ${contract.repositoryPath}`,
@@ -54,7 +47,7 @@ function renderInitPlain(contract) {
     }
     return appendIssuesAndActions([], contract);
 }
-function renderMigrationPlain(contract) {
+export function renderMigrationPlain(contract) {
     if (contract.status === 'planned') {
         const lines = [
             `Migration Plan: ${contract.repositoryPath}`,
@@ -79,7 +72,7 @@ function renderMigrationPlain(contract) {
 function appendIssuesAndActions(lines, contract) {
     return [
         ...lines,
-        ...contract.issues.map(color_1.renderIssuePlain),
+        ...contract.issues.map(renderIssuePlain),
         ...contract.nextActions.map((action) => `Next: ${action}`),
     ];
 }

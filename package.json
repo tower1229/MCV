@@ -33,7 +33,7 @@
   ],
   "author": "tower1229",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "bugs": {
     "url": "https://github.com/tower1229/MCV/issues"
   },

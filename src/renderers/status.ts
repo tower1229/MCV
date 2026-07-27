@@ -1,5 +1,5 @@
-import type { StatusReport } from '../operations/status';
-import { styleText } from './color';
+import type { StatusReport } from '../operations/status.js';
+import { styleText } from './color.js';
 
 export function renderStatusPlain(report: StatusReport): string[] {
   const lines = [

@@ -1,46 +1,40 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.showRepository = showRepository;
-exports.bind = bind;
-exports.unbind = unbind;
-exports.migrate = migrate;
-const repository_1 = require("../operations/repository");
-const repository_2 = require("../renderers/repository");
-const json_1 = require("../renderers/json");
-function showRepository(context, options = {}) {
-    const report = (0, repository_1.inspectRepository)(context);
-    render(report, options, repository_2.renderRepositoryPlain);
+import { applyMigrationPlan, applyBindPlan, applyUnbindPlan, createBindPlan, createMigrationPlan, createUnbindPlan, inspectRepository, } from '../operations/repository.js';
+import { renderBindPlain, renderMigrationPlain, renderRepositoryPlain, renderUnbindPlain, } from '../renderers/repository.js';
+import { renderJson } from '../renderers/json.js';
+export function showRepository(context, options = {}) {
+    const report = inspectRepository(context);
+    render(report, options, renderRepositoryPlain);
     return report;
 }
-function bind(context, repositoryPath, options = {}) {
-    const plan = (0, repository_1.createBindPlan)(context, repositoryPath);
+export function bind(context, repositoryPath, options = {}) {
+    const plan = createBindPlan(context, repositoryPath);
     const contract = options.dryRun || !options.yes
         ? plan
-        : (0, repository_1.applyBindPlan)(context, plan);
-    render(contract, options, repository_2.renderBindPlain);
+        : applyBindPlan(context, plan);
+    render(contract, options, renderBindPlain);
     if (contract.status === 'failed')
         process.exitCode = 1;
     return contract;
 }
-function unbind(context, options = {}) {
-    const plan = (0, repository_1.createUnbindPlan)(context);
+export function unbind(context, options = {}) {
+    const plan = createUnbindPlan(context);
     const contract = options.dryRun || !options.yes
         ? plan
-        : (0, repository_1.applyUnbindPlan)(context, plan);
-    render(contract, options, repository_2.renderUnbindPlain);
+        : applyUnbindPlan(context, plan);
+    render(contract, options, renderUnbindPlain);
     if (contract.status === 'failed')
         process.exitCode = 1;
     return contract;
 }
-function migrate(context, repositoryPath, options = {}) {
-    const plan = (0, repository_1.createMigrationPlan)(context, repositoryPath);
+export function migrate(context, repositoryPath, options = {}) {
+    const plan = createMigrationPlan(context, repositoryPath);
     const contract = options.dryRun || !options.yes
         ? plan
-        : (0, repository_1.applyMigrationPlan)(context, plan);
+        : applyMigrationPlan(context, plan);
     if (options.json)
-        console.log((0, json_1.renderJson)(contract));
+        console.log(renderJson(contract));
     else
-        for (const line of (0, repository_2.renderMigrationPlain)(contract))
+        for (const line of renderMigrationPlain(contract))
             console.log(line);
     if (contract.status === 'failed')
         process.exitCode = 1;
@@ -48,7 +42,7 @@ function migrate(context, repositoryPath, options = {}) {
 }
 function render(contract, options, renderPlain) {
     if (options.json) {
-        console.log((0, json_1.renderJson)(contract));
+        console.log(renderJson(contract));
         return;
     }
     for (const line of renderPlain(contract))

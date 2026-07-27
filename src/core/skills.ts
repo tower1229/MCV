@@ -1,8 +1,8 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { CaptureFile, DeviceContext } from '../adapters/types';
-import { isSensitiveFile, scanTextForSecrets } from '../utils/sanitize';
+import type { CaptureFile, DeviceContext } from '../adapters/types.js';
+import { isSensitiveFile, scanTextForSecrets } from '../utils/sanitize.js';
 
 export interface SkillSource {
   ide: string;

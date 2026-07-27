@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { mergeRecords, isRecord } from '../utils/objects';
+import { mergeRecords, isRecord } from '../utils/objects.js';
 import type {
   CanonicalDeploySource,
   CanonicalTransformer,
@@ -9,9 +9,9 @@ import type {
   DeployFile,
   DeviceContext,
   NativeCaptureResult,
-} from './types';
-import { CLAUDE_CODE_MCP_PATH } from './overlay-policies';
-import { normalizeMcpServers, toNativeMcpServers } from '../core/mcp';
+} from './types.js';
+import { CLAUDE_CODE_MCP_PATH } from './overlay-policies.js';
+import { normalizeMcpServers, toNativeMcpServers } from '../core/mcp.js';
 
 export class ClaudeCodeCanonicalTransformer implements CanonicalTransformer {
   transform(

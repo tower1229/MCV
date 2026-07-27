@@ -1,9 +1,9 @@
 import * as path from 'path';
-import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObject } from '../utils/structured-config';
-import { hasExecutable } from './adapter-utils';
-import { CodexCanonicalTransformer } from './codex-canonical-transformer';
-import { CodexNativeFileHandler } from './codex-native-file-handler';
-import { CODEX_MANAGED_PATHS } from './overlay-policies';
+import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObject } from '../utils/structured-config.js';
+import { hasExecutable } from './adapter-utils.js';
+import { CodexCanonicalTransformer } from './codex-canonical-transformer.js';
+import { CodexNativeFileHandler } from './codex-native-file-handler.js';
+import { CODEX_MANAGED_PATHS } from './overlay-policies.js';
 import type {
   CanonicalTransformer,
   CaptureResult,
@@ -14,7 +14,7 @@ import type {
   DeviceContext,
   IdeAdapter,
   NativeFileHandler,
-} from './types';
+} from './types.js';
 
 export class CodexAdapter implements IdeAdapter {
   constructor(

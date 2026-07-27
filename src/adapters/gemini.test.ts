@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
-import { GeminiAdapter } from './gemini';
+import { GeminiAdapter } from './gemini.js';
 
 describe('GeminiAdapter', () => {
   let homeDir: string;

@@ -3,10 +3,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { DeviceContext } from '../adapters/types';
-import { atomicWriteFile } from '../utils/files';
-import { readState, writeState } from '../utils/state';
-import { applyDeployPlan, createDeployPlan } from './deploy';
+import type { DeviceContext } from '../adapters/types.js';
+import { atomicWriteFile } from '../utils/files.js';
+import { readState, writeState } from '../utils/state.js';
+import { applyDeployPlan, createDeployPlan } from './deploy.js';
 
 describe('Deploy operations', () => {
   let testRoot: string;

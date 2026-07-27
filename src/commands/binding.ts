@@ -1,4 +1,4 @@
-import type { DeviceContext } from '../adapters/types';
+import type { DeviceContext } from '../adapters/types.js';
 import {
   applyMigrationPlan,
   applyBindPlan,
@@ -14,14 +14,14 @@ import {
   type RepositoryReport,
   type UnbindPlan,
   type UnbindResult,
-} from '../operations/repository';
+} from '../operations/repository.js';
 import {
   renderBindPlain,
   renderMigrationPlain,
   renderRepositoryPlain,
   renderUnbindPlain,
-} from '../renderers/repository';
-import { renderJson } from '../renderers/json';
+} from '../renderers/repository.js';
+import { renderJson } from '../renderers/json.js';
 
 export interface RepositoryOutputOptions {
   dryRun?: boolean;

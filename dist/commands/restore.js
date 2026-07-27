@@ -1,29 +1,26 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.restoreLatestBackup = restoreLatestBackup;
-const promises_1 = require("readline/promises");
-const restore_1 = require("../operations/restore");
-const json_1 = require("../renderers/json");
-const restore_2 = require("../renderers/restore");
-async function restoreLatestBackup(context, dependencies = {}, options = {}) {
-    const reviewPlan = (0, restore_1.createRestorePlan)(context);
+import { createInterface } from 'readline/promises';
+import { applyRestorePlan, createRestorePlan, } from '../operations/restore.js';
+import { renderJson } from '../renderers/json.js';
+import { renderRestorePlanPlain, renderRestoreResultPlain } from '../renderers/restore.js';
+export async function restoreLatestBackup(context, dependencies = {}, options = {}) {
+    const reviewPlan = createRestorePlan(context);
     if (options.dryRun) {
         if (options.json)
-            console.log((0, json_1.renderJson)(reviewPlan));
+            console.log(renderJson(reviewPlan));
         else
-            for (const line of (0, restore_2.renderRestorePlanPlain)(reviewPlan))
+            for (const line of renderRestorePlanPlain(reviewPlan))
                 console.log(line);
         if (reviewPlan.status === 'failed')
             process.exitCode = 1;
         return;
     }
     if (reviewPlan.status === 'failed') {
-        const result = (0, restore_1.applyRestorePlan)(context, reviewPlan, { changeIds: [] });
+        const result = applyRestorePlan(context, reviewPlan, { changeIds: [] });
         process.exitCode = 1;
         if (options.json)
-            console.log((0, json_1.renderJson)(result));
+            console.log(renderJson(result));
         else
-            for (const line of (0, restore_2.renderRestoreResultPlain)(result))
+            for (const line of renderRestoreResultPlain(result))
                 console.log(line);
         return;
     }
@@ -32,7 +29,7 @@ async function restoreLatestBackup(context, dependencies = {}, options = {}) {
     process.on('SIGINT', handleInterrupt);
     try {
         if (!options.json && !options.yes) {
-            for (const line of (0, restore_2.renderRestorePlanPlain)(reviewPlan))
+            for (const line of renderRestorePlanPlain(reviewPlan))
                 console.log(line);
         }
         if (!options.yes) {
@@ -50,11 +47,11 @@ async function restoreLatestBackup(context, dependencies = {}, options = {}) {
                     throw error;
             }
             if (cancellation.signal.aborted) {
-                const result = (0, restore_1.applyRestorePlan)(context, reviewPlan, {
+                const result = applyRestorePlan(context, reviewPlan, {
                     changeIds: reviewPlan.changes.map((change) => change.id),
                 }, { signal: cancellation.signal });
                 process.exitCode = 130;
-                for (const line of (0, restore_2.renderRestoreResultPlain)(result))
+                for (const line of renderRestoreResultPlain(result))
                     console.log(line);
                 return;
             }
@@ -64,15 +61,15 @@ async function restoreLatestBackup(context, dependencies = {}, options = {}) {
             }
         }
         await new Promise((resolve) => setImmediate(resolve));
-        const result = (0, restore_1.applyRestorePlan)(context, reviewPlan, { changeIds: reviewPlan.changes.map((change) => change.id) }, { signal: cancellation.signal, nonInteractive: options.yes });
+        const result = applyRestorePlan(context, reviewPlan, { changeIds: reviewPlan.changes.map((change) => change.id) }, { signal: cancellation.signal, nonInteractive: options.yes });
         if (result.issues.some((issue) => issue.code === 'restore.cancelled'))
             process.exitCode = 130;
         else if (result.status !== 'succeeded')
             process.exitCode = result.status === 'blocked' ? 3 : 1;
         if (options.json)
-            console.log((0, json_1.renderJson)(result));
+            console.log(renderJson(result));
         else
-            for (const line of (0, restore_2.renderRestoreResultPlain)(result))
+            for (const line of renderRestoreResultPlain(result))
                 console.log(line);
         await new Promise((resolve) => setImmediate(resolve));
     }
@@ -81,7 +78,7 @@ async function restoreLatestBackup(context, dependencies = {}, options = {}) {
     }
 }
 async function confirmInTerminal(cancellation) {
-    const prompt = (0, promises_1.createInterface)({ input: process.stdin, output: process.stdout });
+    const prompt = createInterface({ input: process.stdin, output: process.stdout });
     const handleInterrupt = () => cancellation.abort();
     prompt.once('SIGINT', handleInterrupt);
     try {

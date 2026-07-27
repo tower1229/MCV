@@ -1,9 +1,5 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.renderCapturePlanPlain = renderCapturePlanPlain;
-exports.renderCaptureResultPlain = renderCaptureResultPlain;
-const color_1 = require("./color");
-function renderCapturePlanPlain(plan) {
+import { renderIssuePlain } from './color.js';
+export function renderCapturePlanPlain(plan) {
     const lines = [`Capture Plan: ${plan.repositoryPath ?? 'not bound'}`];
     let currentGroup = '';
     for (const change of plan.changes) {
@@ -28,18 +24,18 @@ function renderCapturePlanPlain(plan) {
     }
     lines.push(`Summary: ${plan.changes.length} item(s), ${plan.summary.sensitiveFieldCount} sensitive field(s) replaced, ${plan.summary.parameterizedPathCount} path(s) parameterized, ${plan.summary.excludedFileCount} file(s) excluded.`);
     for (const issue of plan.issues) {
-        lines.push((0, color_1.renderIssuePlain)(issue));
+        lines.push(renderIssuePlain(issue));
     }
     for (const action of plan.nextActions)
         lines.push(`Next: ${action}`);
     return lines;
 }
-function renderCaptureResultPlain(result) {
+export function renderCaptureResultPlain(result) {
     if (result.status === 'succeeded') {
         return [`Captured ${result.data?.appliedChangeIds.length ?? 0} selected item(s) into ${result.repositoryPath}.`];
     }
     return [
-        ...result.issues.map(color_1.renderIssuePlain),
+        ...result.issues.map(renderIssuePlain),
         ...result.nextActions.map((action) => `Next: ${action}`),
     ];
 }

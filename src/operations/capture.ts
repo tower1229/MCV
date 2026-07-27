@@ -4,33 +4,33 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import * as yaml from 'yaml';
-import { createAdapterDefinitions, type TargetId } from '../adapters';
+import { createAdapterDefinitions, type TargetId } from '../adapters/index.js';
 import type {
   CaptureFile,
   ConfigurationCapability,
   DeviceContext,
-} from '../adapters/types';
+} from '../adapters/types.js';
 import {
   collectSkills,
   getSkillSources,
   type SkillPackage,
-} from '../core/skills';
-import { isRecord, mergeRecords } from '../utils/objects';
-import { readManifest, resolveBoundRepository } from '../utils/repository';
-import { scanTextForSecrets } from '../utils/sanitize';
+} from '../core/skills.js';
+import { isRecord, mergeRecords } from '../utils/objects.js';
+import { readManifest, resolveBoundRepository } from '../utils/repository.js';
+import { scanTextForSecrets } from '../utils/sanitize.js';
 import {
   deleteObjectPath,
   parseStructuredObject,
   stringifyStructuredObject,
   type StructuredFormat,
-} from '../utils/structured-config';
+} from '../utils/structured-config.js';
 import {
   OPERATION_SCHEMA_VERSION,
   type Issue,
   type McvError,
   type Plan,
   type Result,
-} from './contracts';
+} from './contracts.js';
 
 export type CaptureItemType = 'file' | 'skill' | 'mcp';
 

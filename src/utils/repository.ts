@@ -1,10 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { readState } from './state';
-import { isRecord } from './objects';
-import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020';
-import type { DeviceContext } from '../adapters/types';
+import { readState } from './state.js';
+import { isRecord } from './objects.js';
+import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
+import type { DeviceContext } from '../adapters/types.js';
 
 export const CURRENT_SCHEMA_VERSION = 2;
 let manifestValidator: ValidateFunction | undefined;
@@ -47,7 +47,7 @@ export function validateManifest(raw: Record<string, unknown>, source = 'mcv.yam
 }
 
 function createManifestValidator(): ValidateFunction {
-  const schemaPath = path.resolve(__dirname, '../../schemas/mcv.schema.json');
+  const schemaPath = new URL('../../schemas/mcv.schema.json', import.meta.url);
   const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8')) as object;
   return new Ajv2020({ allErrors: true, useDefaults: true, strict: true }).compile(schema);
 }

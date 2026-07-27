@@ -1,11 +1,11 @@
 import { createInterface } from 'readline/promises';
-import type { DeviceContext } from '../adapters/types';
+import type { DeviceContext } from '../adapters/types.js';
 import {
   applyRestorePlan,
   createRestorePlan,
-} from '../operations/restore';
-import { renderJson } from '../renderers/json';
-import { renderRestorePlanPlain, renderRestoreResultPlain } from '../renderers/restore';
+} from '../operations/restore.js';
+import { renderJson } from '../renderers/json.js';
+import { renderRestorePlanPlain, renderRestoreResultPlain } from '../renderers/restore.js';
 
 export interface RestoreDependencies {
   confirmRestore?: () => Promise<boolean>;

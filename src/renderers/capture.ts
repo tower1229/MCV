@@ -1,5 +1,5 @@
-import type { CapturePlan, CaptureResult } from '../operations/capture';
-import { renderIssuePlain } from './color';
+import type { CapturePlan, CaptureResult } from '../operations/capture.js';
+import { renderIssuePlain } from './color.js';
 
 export function renderCapturePlanPlain(plan: CapturePlan): string[] {
   const lines = [`Capture Plan: ${plan.repositoryPath ?? 'not bound'}`];

@@ -1,16 +1,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { createAdapterDefinitions, type TargetId } from '../adapters';
+import { createAdapterDefinitions, type TargetId } from '../adapters/index.js';
 import type {
   DetectedConfigDirectory,
   DetectedConfigFile,
   DeviceContext,
-} from '../adapters/types';
+} from '../adapters/types.js';
 import {
   OPERATION_SCHEMA_VERSION,
   type Report,
-} from './contracts';
-import { readManifest, type McvManifest } from '../utils/repository';
+} from './contracts.js';
+import { readManifest, type McvManifest } from '../utils/repository.js';
 
 export type EnvironmentId = 'codex' | 'claude-code' | 'gemini';
 

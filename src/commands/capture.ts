@@ -1,9 +1,9 @@
-import type { DeviceContext } from '../adapters/types';
-import { askInTerminal, withInterruptsIgnored } from '../cli/prompt';
-import { readState, writeState } from '../utils/state';
-import { applyCapturePlan, createCapturePlan } from '../operations/capture';
-import { renderCapturePlanPlain, renderCaptureResultPlain } from '../renderers/capture';
-import { renderJson } from '../renderers/json';
+import type { DeviceContext } from '../adapters/types.js';
+import { askInTerminal, withInterruptsIgnored } from '../cli/prompt.js';
+import { readState, writeState } from '../utils/state.js';
+import { applyCapturePlan, createCapturePlan } from '../operations/capture.js';
+import { renderCapturePlanPlain, renderCaptureResultPlain } from '../renderers/capture.js';
+import { renderJson } from '../renderers/json.js';
 
 export interface CaptureOptions {
   dryRun?: boolean;

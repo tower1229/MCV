@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { DeployFile, DeviceContext } from '../adapters/types';
-import { findSymbolicLinkAncestor } from './files';
+import type { DeployFile, DeviceContext } from '../adapters/types.js';
+import { findSymbolicLinkAncestor } from './files.js';
 
 export interface LegacySkillDuplicates {
   names: string[];

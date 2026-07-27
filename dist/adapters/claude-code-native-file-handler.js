@@ -1,57 +1,21 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ClaudeCodeNativeFileHandler = void 0;
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-const objects_1 = require("../utils/objects");
-const files_1 = require("../utils/files");
-const sanitize_1 = require("../utils/sanitize");
-const structured_config_1 = require("../utils/structured-config");
-const variables_1 = require("../utils/variables");
-const overlay_policies_1 = require("./overlay-policies");
-const adapter_utils_1 = require("./adapter-utils");
+import * as fs from 'fs';
+import * as path from 'path';
+import { isRecord } from '../utils/objects.js';
+import { atomicWriteFile } from '../utils/files.js';
+import { isSensitiveFile, sanitizeConfig } from '../utils/sanitize.js';
+import { deleteObjectPath } from '../utils/structured-config.js';
+import { resolvePortableValue } from '../utils/variables.js';
+import { CLAUDE_CODE_MANAGED_PATHS } from './overlay-policies.js';
+import { readCanonicalSource, repositoryFileForPlatform } from './adapter-utils.js';
 const JSON_CAPTURE_POLICIES = {
     'user-settings': {
         repositoryPath: 'ide/claude-code/native/settings.json',
-        managedPaths: new Set(overlay_policies_1.CLAUDE_CODE_MANAGED_PATHS),
+        managedPaths: new Set(CLAUDE_CODE_MANAGED_PATHS),
         localPaths: new Set(),
     },
     'user-state': {
         repositoryPath: 'ide/claude-code/native/.claude.json',
-        managedPaths: new Set(overlay_policies_1.CLAUDE_CODE_MANAGED_PATHS),
+        managedPaths: new Set(CLAUDE_CODE_MANAGED_PATHS),
         localPaths: new Set([
             '$.projects', '$.clientDataCache', '$.firstStartTime', '$.githubRepoPaths',
             '$.hasCompletedOnboarding', '$.hasIdeOnboardingBeenShown', '$.ideHintShownCount',
@@ -64,7 +28,7 @@ const JSON_CAPTURE_POLICIES = {
         ]),
     },
 };
-class ClaudeCodeNativeFileHandler {
+export class ClaudeCodeNativeFileHandler {
     root(context) {
         return context.env?.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude');
     }
@@ -107,12 +71,12 @@ class ClaudeCodeNativeFileHandler {
         let parameterizedPathCount = 0;
         let excludedFileCount = 0;
         for (const file of files.filter((candidate) => candidate.exists)) {
-            if ((0, sanitize_1.isSensitiveFile)(file.path)) {
+            if (isSensitiveFile(file.path)) {
                 excludedFileCount += 1;
                 continue;
             }
             if (file.id === 'user-instructions') {
-                const sanitized = (0, sanitize_1.sanitizeConfig)(fs.readFileSync(file.path, 'utf8'), context);
+                const sanitized = sanitizeConfig(fs.readFileSync(file.path, 'utf8'), context);
                 sensitiveFieldCount += sanitized.sensitiveFieldCount;
                 parameterizedPathCount += sanitized.parameterizedPathCount;
                 managedFiles.push({
@@ -134,7 +98,7 @@ class ClaudeCodeNativeFileHandler {
                 if (policy.localPaths.has(objectPath))
                     continue;
                 if (policy.managedPaths.has(objectPath)) {
-                    const sanitized = (0, sanitize_1.sanitizeConfig)({ [key]: value }, context);
+                    const sanitized = sanitizeConfig({ [key]: value }, context);
                     sensitiveFieldCount += sanitized.sensitiveFieldCount;
                     parameterizedPathCount += sanitized.parameterizedPathCount;
                     managedFields.push({
@@ -148,7 +112,7 @@ class ClaudeCodeNativeFileHandler {
                 }
             }
             if (Object.keys(nativeFields).length > 0) {
-                const sanitized = (0, sanitize_1.sanitizeConfig)(nativeFields, context);
+                const sanitized = sanitizeConfig(nativeFields, context);
                 sensitiveFieldCount += sanitized.sensitiveFieldCount;
                 parameterizedPathCount += sanitized.parameterizedPathCount;
                 capturedFiles.push({
@@ -176,12 +140,12 @@ class ClaudeCodeNativeFileHandler {
     async deploy(repositoryPath, context) {
         const mappings = [
             {
-                sourcePath: (0, adapter_utils_1.repositoryFileForPlatform)(repositoryPath, 'ide/claude-code/native/settings.json', context),
+                sourcePath: repositoryFileForPlatform(repositoryPath, 'ide/claude-code/native/settings.json', context),
                 targetPath: path.join(this.root(context), 'settings.json'),
                 localPaths: JSON_CAPTURE_POLICIES['user-settings'].localPaths,
             },
             {
-                sourcePath: (0, adapter_utils_1.repositoryFileForPlatform)(repositoryPath, 'ide/claude-code/native/.claude.json', context),
+                sourcePath: repositoryFileForPlatform(repositoryPath, 'ide/claude-code/native/.claude.json', context),
                 targetPath: path.join(context.homeDir, '.claude.json'),
                 localPaths: JSON_CAPTURE_POLICIES['user-state'].localPaths,
             },
@@ -190,12 +154,12 @@ class ClaudeCodeNativeFileHandler {
             if (!fs.existsSync(mapping.sourcePath))
                 return [];
             const parsed = JSON.parse(fs.readFileSync(mapping.sourcePath, 'utf8'));
-            if (!(0, objects_1.isRecord)(parsed)) {
+            if (!isRecord(parsed)) {
                 throw new Error(`${mapping.sourcePath} must contain a JSON object.`);
             }
-            const resolved = (0, variables_1.resolvePortableValue)(parsed, context.variables ?? {}, context.platform);
+            const resolved = resolvePortableValue(parsed, context.variables ?? {}, context.platform);
             for (const localPath of mapping.localPaths)
-                (0, structured_config_1.deleteObjectPath)(resolved, localPath);
+                deleteObjectPath(resolved, localPath);
             return [{
                     targetPath: mapping.targetPath,
                     content: `${JSON.stringify(resolved, null, 2)}\n`,
@@ -203,11 +167,11 @@ class ClaudeCodeNativeFileHandler {
         });
         return {
             files,
-            write: (file) => (0, files_1.atomicWriteFile)(file.targetPath, file.content),
+            write: (file) => atomicWriteFile(file.targetPath, file.content),
         };
     }
     async readCanonical(repositoryPath, context) {
-        return (0, adapter_utils_1.readCanonicalSource)(repositoryPath, context);
+        return readCanonicalSource(repositoryPath, context);
     }
     readDeployTarget(targetPath) {
         if (!fs.existsSync(targetPath))
@@ -231,7 +195,7 @@ class ClaudeCodeNativeFileHandler {
     readJsonObject(filePath, warnings) {
         try {
             const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-            if (!(0, objects_1.isRecord)(parsed)) {
+            if (!isRecord(parsed)) {
                 warnings.push(`Skipped ${filePath}: expected a JSON object.`);
                 return undefined;
             }
@@ -244,4 +208,3 @@ class ClaudeCodeNativeFileHandler {
         }
     }
 }
-exports.ClaudeCodeNativeFileHandler = ClaudeCodeNativeFileHandler;

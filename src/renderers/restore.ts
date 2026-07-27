@@ -1,5 +1,5 @@
-import type { RestorePlan, RestoreResult } from '../operations/restore';
-import { renderIssuePlain } from './color';
+import type { RestorePlan, RestoreResult } from '../operations/restore.js';
+import { renderIssuePlain } from './color.js';
 
 export function renderRestorePlanPlain(plan: RestorePlan): string[] {
   const lines = ['Restore Plan: latest complete deployment backup'];

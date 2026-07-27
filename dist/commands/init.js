@@ -1,18 +1,15 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.initRepository = initRepository;
-const repository_1 = require("../operations/repository");
-const json_1 = require("../renderers/json");
-const repository_2 = require("../renderers/repository");
-function initRepository(context, targetDir = process.cwd(), options = {}) {
-    const plan = (0, repository_1.createInitPlan)(context, targetDir);
+import { applyInitPlan, createInitPlan, } from '../operations/repository.js';
+import { renderJson } from '../renderers/json.js';
+import { renderInitPlain } from '../renderers/repository.js';
+export function initRepository(context, targetDir = process.cwd(), options = {}) {
+    const plan = createInitPlan(context, targetDir);
     if (options.dryRun || !options.yes) {
         render(plan, options);
         return plan;
     }
     const result = plan.issues.some((issue) => issue.severity !== 'notice')
         ? blockedInitResult(plan)
-        : (0, repository_1.applyInitPlan)(context, plan);
+        : applyInitPlan(context, plan);
     render(result, options);
     if (result.status === 'failed')
         process.exitCode = 1;
@@ -33,9 +30,9 @@ function blockedInitResult(plan) {
 }
 function render(contract, options) {
     if (options.json) {
-        console.log((0, json_1.renderJson)(contract));
+        console.log(renderJson(contract));
         return;
     }
-    for (const line of (0, repository_2.renderInitPlain)(contract))
+    for (const line of renderInitPlain(contract))
         console.log(line);
 }

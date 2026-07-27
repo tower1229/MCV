@@ -8,8 +8,8 @@ import type {
   RepositoryReport,
   UnbindPlan,
   UnbindResult,
-} from '../operations/repository';
-import { renderIssuePlain, styleText } from './color';
+} from '../operations/repository.js';
+import { renderIssuePlain, styleText } from './color.js';
 
 export function renderRepositoryPlain(report: RepositoryReport): string[] {
   const lines = [

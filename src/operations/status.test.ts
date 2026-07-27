@@ -4,9 +4,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { DeviceContext } from '../adapters/types';
-import { writeState } from '../utils/state';
-import { inspectStatus } from './status';
+import type { DeviceContext } from '../adapters/types.js';
+import { writeState } from '../utils/state.js';
+import { inspectStatus } from './status.js';
 
 describe('inspectStatus', () => {
   let testRoot: string;

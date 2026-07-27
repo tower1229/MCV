@@ -1,10 +1,6 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.askInTerminal = askInTerminal;
-exports.withInterruptsIgnored = withInterruptsIgnored;
-const promises_1 = require("readline/promises");
-async function askInTerminal(question) {
-    const prompt = (0, promises_1.createInterface)({ input: process.stdin, output: process.stdout });
+import { createInterface } from 'readline/promises';
+export async function askInTerminal(question) {
+    const prompt = createInterface({ input: process.stdin, output: process.stdout });
     const cancellation = new AbortController();
     const handleInterrupt = () => cancellation.abort();
     process.once('SIGINT', handleInterrupt);
@@ -24,7 +20,7 @@ async function askInTerminal(question) {
         prompt.close();
     }
 }
-async function withInterruptsIgnored(operation) {
+export async function withInterruptsIgnored(operation) {
     const ignoreInterrupt = () => { };
     process.on('SIGINT', ignoreInterrupt);
     try {

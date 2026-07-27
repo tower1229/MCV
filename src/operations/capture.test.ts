@@ -3,9 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { DeviceContext } from '../adapters/types';
-import { readState, writeState } from '../utils/state';
-import { applyCapturePlan, createCapturePlan } from './capture';
+import type { DeviceContext } from '../adapters/types.js';
+import { readState, writeState } from '../utils/state.js';
+import { applyCapturePlan, createCapturePlan } from './capture.js';
 
 describe('Capture operations', () => {
   let testRoot: string;

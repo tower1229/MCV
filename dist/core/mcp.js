@@ -1,49 +1,12 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.normalizeMcpServers = normalizeMcpServers;
-exports.toNativeMcpServers = toNativeMcpServers;
-const path = __importStar(require("path"));
-const objects_1 = require("../utils/objects");
+import * as path from 'path';
+import { isRecord } from '../utils/objects.js';
 const PORTABLE_KEYS = new Set(['command', 'args', 'env', 'cwd', 'url', 'httpUrl', 'serverUrl', 'transport', 'overrides']);
-function normalizeMcpServers(input, surface) {
+export function normalizeMcpServers(input, surface) {
     const servers = {};
     const surfaceOverrides = {};
     const excluded = [];
     for (const [name, raw] of Object.entries(input)) {
-        if (!(0, objects_1.isRecord)(raw))
+        if (!isRecord(raw))
             continue;
         const command = typeof raw.command === 'string' ? raw.command : undefined;
         if (isRuntimeMcp(name, command)) {
@@ -56,7 +19,7 @@ function normalizeMcpServers(input, surface) {
             portable.command = command;
         if (Array.isArray(raw.args))
             portable.args = raw.args;
-        if ((0, objects_1.isRecord)(raw.env))
+        if (isRecord(raw.env))
             portable.env = normalizeEnvironment(raw.env);
         if (typeof raw.cwd === 'string')
             portable.cwd = raw.cwd;
@@ -70,9 +33,9 @@ function normalizeMcpServers(input, surface) {
     }
     return { servers, overrides: surfaceOverrides, excluded };
 }
-function toNativeMcpServers(input, surface, surfaceOverrides = {}) {
+export function toNativeMcpServers(input, surface, surfaceOverrides = {}) {
     return Object.fromEntries(Object.entries(input).flatMap(([name, raw]) => {
-        if (!(0, objects_1.isRecord)(raw))
+        if (!isRecord(raw))
             return [];
         const native = {};
         if (typeof raw.command === 'string')
@@ -83,7 +46,7 @@ function toNativeMcpServers(input, surface, surfaceOverrides = {}) {
             native.cwd = raw.cwd;
         if (typeof raw.url === 'string')
             native[surface === 'antigravity' ? 'serverUrl' : 'url'] = raw.url;
-        if ((0, objects_1.isRecord)(raw.env)) {
+        if (isRecord(raw.env)) {
             if (surface === 'codex') {
                 const literal = {};
                 const forwarded = [];
@@ -106,9 +69,9 @@ function toNativeMcpServers(input, surface, surfaceOverrides = {}) {
                 }));
             }
         }
-        if ((0, objects_1.isRecord)(raw.overrides) && (0, objects_1.isRecord)(raw.overrides[surface]))
+        if (isRecord(raw.overrides) && isRecord(raw.overrides[surface]))
             Object.assign(native, raw.overrides[surface]);
-        if ((0, objects_1.isRecord)(surfaceOverrides[name]))
+        if (isRecord(surfaceOverrides[name]))
             Object.assign(native, convertOverrideReferences(surfaceOverrides[name], surface));
         return [[name, native]];
     }));
@@ -116,7 +79,7 @@ function toNativeMcpServers(input, surface, surfaceOverrides = {}) {
 function convertOverrideReferences(value, surface) {
     if (Array.isArray(value))
         return value.map((entry) => convertOverrideReferences(entry, surface));
-    if ((0, objects_1.isRecord)(value))
+    if (isRecord(value))
         return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, convertOverrideReferences(entry, surface)]));
     const reference = parseEnvReference(value);
     if (!reference)

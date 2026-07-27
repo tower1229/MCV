@@ -1,16 +1,12 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolvePortableValue = resolvePortableValue;
-exports.resolveVariableDefinitions = resolveVariableDefinitions;
-const objects_1 = require("./objects");
-function resolvePortableValue(value, variables, platform) {
+import { isRecord } from './objects.js';
+export function resolvePortableValue(value, variables, platform) {
     if (typeof value === 'string') {
         return resolvePortableVariables(value, variables, platform);
     }
     if (Array.isArray(value)) {
         return value.map((item) => resolvePortableValue(item, variables, platform));
     }
-    if ((0, objects_1.isRecord)(value)) {
+    if (isRecord(value)) {
         return Object.fromEntries(Object.entries(value).map(([key, child]) => [
             key,
             resolvePortableValue(child, variables, platform),
@@ -18,7 +14,7 @@ function resolvePortableValue(value, variables, platform) {
     }
     return value;
 }
-function resolveVariableDefinitions(definitions, deviceValues, platform) {
+export function resolveVariableDefinitions(definitions, deviceValues, platform) {
     const resolved = { ...deviceValues };
     const resolving = new Set();
     const resolveName = (name) => {

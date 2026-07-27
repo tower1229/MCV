@@ -1,63 +1,27 @@
 #!/usr/bin/env node
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.createDefaultDeviceContext = createDefaultDeviceContext;
-exports.createProgram = createProgram;
-exports.runCli = runCli;
-const commander_1 = require("commander");
-const os = __importStar(require("os"));
-const prompt_1 = require("./cli/prompt");
-const discover_1 = require("./commands/discover");
-const capture_1 = require("./commands/capture");
-const init_1 = require("./commands/init");
-const deploy_1 = require("./commands/deploy");
-const status_1 = require("./commands/status");
-const restore_1 = require("./commands/restore");
-const binding_1 = require("./commands/binding");
+import { Command, CommanderError, Option } from 'commander';
+import { readFileSync, realpathSync } from 'fs';
+import * as os from 'os';
+import { fileURLToPath } from 'url';
+import { askInTerminal } from './cli/prompt.js';
+import { discoverConfigurations } from './commands/discover.js';
+import { captureConfigurations, } from './commands/capture.js';
+import { initRepository } from './commands/init.js';
+import { deployConfigurations, } from './commands/deploy.js';
+import { showStatus } from './commands/status.js';
+import { restoreLatestBackup } from './commands/restore.js';
+import { bind, migrate, showRepository, unbind } from './commands/binding.js';
 // package.json is the single version source for both npm and the CLI.
-const packageVersion = require('../package.json').version;
-function createDefaultDeviceContext() {
+const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+export function createDefaultDeviceContext() {
     return {
         homeDir: os.homedir(),
         platform: process.platform,
         env: process.env,
     };
 }
-function createProgram(context = createDefaultDeviceContext(), captureDependencies = {}, deployDependencies = {}) {
-    const program = new commander_1.Command();
+export function createProgram(context = createDefaultDeviceContext(), captureDependencies = {}, deployDependencies = {}) {
+    const program = new Command();
     program
         .name('mcv')
         .description('Mobile Configuration Vehicle - Personal AI IDE configuration manager')
@@ -70,7 +34,7 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         .option('--json', 'Print one machine-readable Plan or Result')
         .action((options) => {
         validateWriteOutputOptions(initCommand, options);
-        (0, init_1.initRepository)(context, process.cwd(), options);
+        initRepository(context, process.cwd(), options);
     });
     const captureCommand = program
         .command('capture')
@@ -81,7 +45,7 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         .option('--verbose', 'Show processed file content in the preview')
         .action(async (options) => {
         validateWriteOutputOptions(captureCommand, options);
-        await (0, capture_1.captureConfigurations)(context, captureDependencies, options);
+        await captureConfigurations(context, captureDependencies, options);
     });
     const deployCommand = program
         .command('deploy')
@@ -92,29 +56,29 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         .option('--prune-managed', 'Delete stale managed files and exact duplicate Skills from the legacy Codex directory')
         .action(async (options) => {
         validateWriteOutputOptions(deployCommand, options);
-        await (0, deploy_1.deployConfigurations)(context, deployDependencies, options);
+        await deployConfigurations(context, deployDependencies, options);
     });
     const discoverCommand = program
         .command('discover')
         .description('Detect supported AI IDEs and report their configuration paths')
-        .addOption(new commander_1.Option('--plain', 'Print a one-shot English text report'))
-        .addOption(new commander_1.Option('--json', 'Print one machine-readable report'))
+        .addOption(new Option('--plain', 'Print a one-shot English text report'))
+        .addOption(new Option('--json', 'Print one machine-readable report'))
         .action(async (options) => {
         if (options.plain && options.json) {
             discoverCommand.error("options '--plain' and '--json' cannot be used together", { exitCode: 2, code: 'mcv.conflictingOutputModes' });
         }
-        await (0, discover_1.discoverConfigurations)(context, options);
+        await discoverConfigurations(context, options);
     });
     const statusCommand = program
         .command('status')
         .description('Compare local configuration with the last deployment')
-        .addOption(new commander_1.Option('--plain', 'Print a one-shot English text report'))
-        .addOption(new commander_1.Option('--json', 'Print one machine-readable report'))
+        .addOption(new Option('--plain', 'Print a one-shot English text report'))
+        .addOption(new Option('--json', 'Print one machine-readable report'))
         .action(async (options) => {
         if (options.plain && options.json) {
             statusCommand.error("options '--plain' and '--json' cannot be used together", { exitCode: 2, code: 'mcv.conflictingOutputModes' });
         }
-        await (0, status_1.showStatus)(context, options);
+        await showStatus(context, options);
     });
     const restoreCommand = program
         .command('restore')
@@ -124,35 +88,35 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         .option('--json', 'Print one machine-readable Restore Plan or Result')
         .action(async (options) => {
         validateWriteOutputOptions(restoreCommand, options);
-        await (0, restore_1.restoreLatestBackup)(context, {}, options);
+        await restoreLatestBackup(context, {}, options);
     });
     const repositoryCommand = program.command('repo')
         .description('Inspect the current MCV Repository binding')
-        .addOption(new commander_1.Option('--plain', 'Print a one-shot English text report'))
-        .addOption(new commander_1.Option('--json', 'Print one machine-readable report'))
+        .addOption(new Option('--plain', 'Print a one-shot English text report'))
+        .addOption(new Option('--json', 'Print one machine-readable report'))
         .action((options) => {
         if (options.plain && options.json) {
             repositoryCommand.error("options '--plain' and '--json' cannot be used together", { exitCode: 2, code: 'mcv.conflictingOutputModes' });
         }
-        (0, binding_1.showRepository)(context, options);
+        showRepository(context, options);
     });
     const bindCommand = program.command('bind [path]')
         .description('Bind this device to an existing MCV Repository')
         .option('--dry-run', 'Preview the Repository binding without writing')
         .option('--yes', 'Bind without prompting after reviewing a dry-run')
-        .addOption(new commander_1.Option('--json', 'Print one machine-readable Plan or Result'))
+        .addOption(new Option('--json', 'Print one machine-readable Plan or Result'))
         .action((repositoryPath, options) => {
         validateWriteOutputOptions(bindCommand, options);
-        (0, binding_1.bind)(context, repositoryPath, options);
+        bind(context, repositoryPath, options);
     });
     const unbindCommand = program.command('unbind')
         .description('Remove the Repository binding from this device')
         .option('--dry-run', 'Preview removal of the local Repository binding')
         .option('--yes', 'Remove the local binding without prompting after reviewing a dry-run')
-        .addOption(new commander_1.Option('--json', 'Print one machine-readable Plan or Result'))
+        .addOption(new Option('--json', 'Print one machine-readable Plan or Result'))
         .action((options) => {
         validateWriteOutputOptions(unbindCommand, options);
-        (0, binding_1.unbind)(context, options);
+        unbind(context, options);
     });
     const migrateCommand = program.command('migrate [path]').description('Migrate a v1 repository to schema v2')
         .option('--dry-run', 'Preview migration without writing')
@@ -160,7 +124,7 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         .option('--json', 'Print one machine-readable Plan or Result')
         .action((repositoryPath = process.cwd(), options) => {
         validateWriteOutputOptions(migrateCommand, options);
-        (0, binding_1.migrate)(context, repositoryPath, options);
+        migrate(context, repositoryPath, options);
     });
     program.action(async () => {
         if (!process.stdin.isTTY) {
@@ -169,14 +133,14 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
         }
         let command;
         let repositoryPath;
-        const menu = await (0, prompt_1.askInTerminal)('MCV: 1) discover 2) capture 3) deploy 4) status 5) restore 6) bind  Select: ');
+        const menu = await askInTerminal('MCV: 1) discover 2) capture 3) deploy 4) status 5) restore 6) bind  Select: ');
         if (menu.interrupted) {
             process.exitCode = 130;
             console.log('MCV interrupted.');
             return;
         }
         if (menu.answer.trim() === '6') {
-            const pathAnswer = await (0, prompt_1.askInTerminal)('Repository path (blank to cancel): ');
+            const pathAnswer = await askInTerminal('Repository path (blank to cancel): ');
             if (pathAnswer.interrupted) {
                 process.exitCode = 130;
                 console.log('MCV interrupted.');
@@ -188,7 +152,7 @@ function createProgram(context = createDefaultDeviceContext(), captureDependenci
             command = { '1': 'discover', '2': 'capture', '3': 'deploy', '4': 'status', '5': 'restore' }[menu.answer.trim()];
         }
         if (repositoryPath)
-            (0, binding_1.bind)(context, repositoryPath, { yes: true });
+            bind(context, repositoryPath, { yes: true });
         else if (command)
             await createProgram(context, captureDependencies, deployDependencies).parseAsync(['node', 'mcv', command]);
     });
@@ -208,7 +172,7 @@ function validateWriteOutputOptions(command, options) {
         });
     }
 }
-async function runCli(argv = process.argv) {
+export async function runCli(argv = process.argv) {
     const program = createProgram();
     program.exitOverride();
     for (const command of program.commands)
@@ -217,7 +181,7 @@ async function runCli(argv = process.argv) {
         await program.parseAsync(argv);
     }
     catch (error) {
-        if (error instanceof commander_1.CommanderError) {
+        if (error instanceof CommanderError) {
             process.exitCode = normalizeCommanderExitCode(error);
             return;
         }
@@ -232,6 +196,17 @@ function normalizeCommanderExitCode(error) {
         return 2;
     return error.code.startsWith('commander.') ? 2 : 1;
 }
-if (require.main === module) {
+if (isMainModule()) {
     void runCli();
+}
+function isMainModule() {
+    const entryPoint = process.argv[1];
+    if (!entryPoint)
+        return false;
+    try {
+        return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entryPoint);
+    }
+    catch {
+        return false;
+    }
 }

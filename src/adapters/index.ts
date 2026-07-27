@@ -1,7 +1,7 @@
-import { ClaudeCodeAdapter } from './claude-code';
-import { CodexAdapter } from './codex';
-import { GeminiAdapter } from './gemini';
-import type { IdeAdapter } from './types';
+import { ClaudeCodeAdapter } from './claude-code.js';
+import { CodexAdapter } from './codex.js';
+import { GeminiAdapter } from './gemini.js';
+import type { IdeAdapter } from './types.js';
 
 export type TargetId = 'codex' | 'claudeCode' | 'gemini';
 

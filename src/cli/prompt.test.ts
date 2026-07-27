@@ -11,7 +11,7 @@ vi.mock('readline/promises', () => ({
   createInterface: vi.fn(() => terminalPrompt),
 }));
 
-import { askInTerminal, withInterruptsIgnored } from './prompt';
+import { askInTerminal, withInterruptsIgnored } from './prompt.js';
 
 describe('terminal prompt interruption', () => {
   afterEach(() => {

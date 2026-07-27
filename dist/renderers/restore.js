@@ -1,9 +1,5 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.renderRestorePlanPlain = renderRestorePlanPlain;
-exports.renderRestoreResultPlain = renderRestoreResultPlain;
-const color_1 = require("./color");
-function renderRestorePlanPlain(plan) {
+import { renderIssuePlain } from './color.js';
+export function renderRestorePlanPlain(plan) {
     const lines = ['Restore Plan: latest complete deployment backup'];
     if (plan.backup)
         lines.push(`Backup time: ${plan.backup.createdAt}`);
@@ -14,7 +10,7 @@ function renderRestorePlanPlain(plan) {
     const deleteCount = plan.changes.length - restoreCount;
     lines.push(`Summary: ${restoreCount} file(s) to restore, ${deleteCount} file(s) to delete.`);
     for (const issue of plan.issues) {
-        lines.push((0, color_1.renderIssuePlain)(issue));
+        lines.push(renderIssuePlain(issue));
         if (issue.details) {
             for (const detail of issue.details.split('\n'))
                 lines.push(`  ${detail}`);
@@ -26,7 +22,7 @@ function renderRestorePlanPlain(plan) {
         lines.push(`Next: ${action}`);
     return lines;
 }
-function renderRestoreResultPlain(result) {
+export function renderRestoreResultPlain(result) {
     if (result.status === 'succeeded') {
         return [
             `Current pre-restore state saved to ${result.data?.backupPath}.`,
@@ -35,7 +31,7 @@ function renderRestoreResultPlain(result) {
     }
     const lines = [`Restore ${result.status}.`];
     for (const issue of result.issues) {
-        lines.push((0, color_1.renderIssuePlain)(issue));
+        lines.push(renderIssuePlain(issue));
         if (issue.details) {
             for (const detail of issue.details.split('\n'))
                 lines.push(`  ${detail}`);

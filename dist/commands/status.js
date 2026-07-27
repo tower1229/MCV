@@ -1,15 +1,12 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.showStatus = showStatus;
-const status_1 = require("../operations/status");
-const json_1 = require("../renderers/json");
-const status_2 = require("../renderers/status");
-async function showStatus(context, options = {}) {
-    const report = await (0, status_1.inspectStatus)(context);
+import { inspectStatus, } from '../operations/status.js';
+import { renderJson } from '../renderers/json.js';
+import { renderStatusPlain } from '../renderers/status.js';
+export async function showStatus(context, options = {}) {
+    const report = await inspectStatus(context);
     if (options.json)
-        console.log((0, json_1.renderJson)(report));
+        console.log(renderJson(report));
     else
-        for (const line of (0, status_2.renderStatusPlain)(report))
+        for (const line of renderStatusPlain(report))
             console.log(line);
     return report;
 }

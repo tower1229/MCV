@@ -1,64 +1,27 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.createCapturePlan = createCapturePlan;
-exports.applyCapturePlan = applyCapturePlan;
-const crypto = __importStar(require("crypto"));
-const buffer_1 = require("buffer");
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-const uuid_1 = require("uuid");
-const yaml = __importStar(require("yaml"));
-const adapters_1 = require("../adapters");
-const skills_1 = require("../core/skills");
-const objects_1 = require("../utils/objects");
-const repository_1 = require("../utils/repository");
-const sanitize_1 = require("../utils/sanitize");
-const structured_config_1 = require("../utils/structured-config");
-const contracts_1 = require("./contracts");
+import * as crypto from 'crypto';
+import { isUtf8 } from 'buffer';
+import * as fs from 'fs';
+import * as path from 'path';
+import { v4 as uuidv4 } from 'uuid';
+import * as yaml from 'yaml';
+import { createAdapterDefinitions } from '../adapters/index.js';
+import { collectSkills, getSkillSources, } from '../core/skills.js';
+import { isRecord, mergeRecords } from '../utils/objects.js';
+import { readManifest, resolveBoundRepository } from '../utils/repository.js';
+import { scanTextForSecrets } from '../utils/sanitize.js';
+import { deleteObjectPath, parseStructuredObject, stringifyStructuredObject, } from '../utils/structured-config.js';
+import { OPERATION_SCHEMA_VERSION, } from './contracts.js';
 const activeCapturePlans = new WeakMap();
 const EMPTY_SUMMARY = {
     sensitiveFieldCount: 0,
     parameterizedPathCount: 0,
     excludedFileCount: 0,
 };
-async function createCapturePlan(context) {
-    const operationId = (0, uuid_1.v4)();
+export async function createCapturePlan(context) {
+    const operationId = uuidv4();
     let repositoryPath = null;
     try {
-        repositoryPath = (0, repository_1.resolveBoundRepository)(context);
+        repositoryPath = resolveBoundRepository(context);
         const mutations = new Map();
         const plan = await buildCapturePlan(context, repositoryPath, operationId, mutations);
         registerCapturePlan(plan, mutations);
@@ -66,7 +29,7 @@ async function createCapturePlan(context) {
     }
     catch {
         return {
-            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'capture',
             status: 'failed',
             readyToApply: false,
@@ -90,11 +53,11 @@ async function createCapturePlan(context) {
     }
 }
 async function buildCapturePlan(context, repositoryPath, operationId, mutations) {
-    const manifest = (0, repository_1.readManifest)(repositoryPath);
-    const definitions = (0, adapters_1.createAdapterDefinitions)().filter(({ targetId }) => manifest.targets[targetId]?.enabled === true);
+    const manifest = readManifest(repositoryPath);
+    const definitions = createAdapterDefinitions().filter(({ targetId }) => manifest.targets[targetId]?.enabled === true);
     if (definitions.length === 0) {
         return {
-            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'capture',
             status: 'planned',
             readyToApply: true,
@@ -130,7 +93,7 @@ async function buildCapturePlan(context, repositoryPath, operationId, mutations)
         ide: ideName(definition.targetId),
         surface: surfaceName(file.repositoryPath, definition.targetId),
     })));
-    const skills = (0, skills_1.collectSkills)((0, skills_1.getSkillSources)(captureContext, {
+    const skills = collectSkills(getSkillSources(captureContext, {
         codex: manifest.targets.codex?.enabled === true,
         claudeCode: manifest.targets.claudeCode?.enabled === true,
         gemini: manifest.targets.gemini?.enabled === true,
@@ -173,7 +136,7 @@ async function buildCapturePlan(context, repositoryPath, operationId, mutations)
     };
     const blocked = issues.some((issue) => issue.severity === 'decisionRequired' || issue.severity === 'error');
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'capture',
         status: 'planned',
         readyToApply: !blocked,
@@ -188,7 +151,7 @@ async function buildCapturePlan(context, repositoryPath, operationId, mutations)
         summary,
     };
 }
-async function applyCapturePlan(context, plan, selection, options = {}) {
+export async function applyCapturePlan(context, plan, selection, options = {}) {
     if (plan.status === 'failed')
         return failedCaptureResult(plan.repositoryPath, plan.error, plan.issues);
     const active = activeCapturePlans.get(plan);
@@ -209,7 +172,7 @@ async function applyCapturePlan(context, plan, selection, options = {}) {
     if (blocking.length > 0) {
         return blockedCaptureResult(plan, blocking);
     }
-    if (!plan.repositoryPath || (0, repository_1.resolveBoundRepository)(context) !== plan.repositoryPath) {
+    if (!plan.repositoryPath || resolveBoundRepository(context) !== plan.repositoryPath) {
         activeCapturePlans.delete(plan);
         return failedCaptureResult(plan.repositoryPath, stalePlanError());
     }
@@ -238,7 +201,7 @@ async function applyCapturePlan(context, plan, selection, options = {}) {
         const applied = applyCaptureTransaction(plan.repositoryPath, selectedMutations, options.moveFile ?? fs.renameSync, options.restoreFile ?? ((targetPath, content) => fs.writeFileSync(targetPath, content)));
         activeCapturePlans.delete(plan);
         return {
-            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'capture',
             status: 'succeeded',
             repositoryPath: plan.repositoryPath,
@@ -441,7 +404,7 @@ class CaptureRollbackError extends Error {
     }
 }
 function createRecoveryBackup(repositoryPath, originals) {
-    const recoveryPath = path.join(path.dirname(repositoryPath), `.${path.basename(repositoryPath)}.mcv-capture-${(0, uuid_1.v4)()}`);
+    const recoveryPath = path.join(path.dirname(repositoryPath), `.${path.basename(repositoryPath)}.mcv-capture-${uuidv4()}`);
     try {
         const filesPath = path.join(recoveryPath, 'files');
         fs.mkdirSync(filesPath, { recursive: true });
@@ -516,7 +479,7 @@ function stalePlanError() {
 }
 function failedCaptureResult(repositoryPath, error, issues = [{ severity: 'error', code: error.code, message: error.message }]) {
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'capture',
         status: 'failed',
         repositoryPath,
@@ -528,7 +491,7 @@ function failedCaptureResult(repositoryPath, error, issues = [{ severity: 'error
 }
 function blockedCaptureResult(plan, issues) {
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'capture',
         status: 'blocked',
         repositoryPath: plan.repositoryPath,
@@ -568,7 +531,7 @@ function addMcpChanges(repositoryPath, files, changes, issues, plannedRepository
     const candidatesByName = new Map();
     for (const file of registryFiles) {
         const parsed = yaml.parse(file.content);
-        if (!(0, objects_1.isRecord)(parsed) || !(0, objects_1.isRecord)(parsed.servers)) {
+        if (!isRecord(parsed) || !isRecord(parsed.servers)) {
             issues.push({
                 severity: 'error',
                 code: 'capture.invalidMcpRegistry',
@@ -577,7 +540,7 @@ function addMcpChanges(repositoryPath, files, changes, issues, plannedRepository
             continue;
         }
         for (const [name, value] of Object.entries(parsed.servers)) {
-            if (!(0, objects_1.isRecord)(value))
+            if (!isRecord(value))
                 continue;
             candidatesByName.set(name, [
                 ...(candidatesByName.get(name) ?? []),
@@ -589,7 +552,7 @@ function addMcpChanges(repositoryPath, files, changes, issues, plannedRepository
     const names = new Set([...candidatesByName.keys(), ...Object.keys(existingServers)]);
     for (const name of [...names].sort()) {
         const deviceCandidates = uniqueMcpCandidates(candidatesByName.get(name) ?? []);
-        const existing = (0, objects_1.isRecord)(existingServers[name]) ? existingServers[name] : undefined;
+        const existing = isRecord(existingServers[name]) ? existingServers[name] : undefined;
         if (deviceCandidates.length === 0 && existing) {
             const content = yaml.stringify({ [name]: existing });
             const change = {
@@ -852,7 +815,7 @@ function addRepositoryDeletionChanges(repositoryPath, enabledTargets, sourcedFil
 }
 function planFile(repositoryPath, file, issues) {
     const contentBuffer = toBuffer(file.content);
-    if (isText(contentBuffer) && (0, sanitize_1.scanTextForSecrets)(contentBuffer.toString('utf8')).length > 0) {
+    if (isText(contentBuffer) && scanTextForSecrets(contentBuffer.toString('utf8')).length > 0) {
         issues.push({
             severity: 'error',
             code: 'capture.plaintextSecretBlocked',
@@ -913,8 +876,8 @@ function preview(repositoryPath, next, previous, issues) {
     }
     const nextText = nextBuffer.toString('utf8');
     const previousText = previousBuffer?.toString('utf8');
-    if ((0, sanitize_1.scanTextForSecrets)(nextText).length > 0
-        || (previousText !== undefined && (0, sanitize_1.scanTextForSecrets)(previousText).length > 0)) {
+    if (scanTextForSecrets(nextText).length > 0
+        || (previousText !== undefined && scanTextForSecrets(previousText).length > 0)) {
         issues.push({
             severity: 'error',
             code: 'capture.plaintextSecretBlocked',
@@ -959,12 +922,12 @@ function mergeWithRepository(file, existingBuffer) {
     const format = structuredFormat(file.repositoryPath);
     if (file.ownership !== 'native' || !format)
         return file.content;
-    const existing = (0, structured_config_1.parseStructuredObject)(existingBuffer.toString('utf8'), format, file.repositoryPath);
-    const captured = (0, structured_config_1.parseStructuredObject)(file.content, format, file.repositoryPath);
-    const merged = (0, objects_1.mergeRecords)(existing, captured);
+    const existing = parseStructuredObject(existingBuffer.toString('utf8'), format, file.repositoryPath);
+    const captured = parseStructuredObject(file.content, format, file.repositoryPath);
+    const merged = mergeRecords(existing, captured);
     for (const localPath of file.localPaths ?? [])
-        (0, structured_config_1.deleteObjectPath)(merged, localPath);
-    return (0, structured_config_1.stringifyStructuredObject)(merged, format);
+        deleteObjectPath(merged, localPath);
+    return stringifyStructuredObject(merged, format);
 }
 function structuredFormat(repositoryPath) {
     if (repositoryPath.endsWith('.json'))
@@ -979,7 +942,7 @@ function readMcpServers(registryPath) {
     if (!fs.existsSync(registryPath))
         return {};
     const parsed = yaml.parse(fs.readFileSync(registryPath, 'utf8'));
-    return (0, objects_1.isRecord)(parsed) && (0, objects_1.isRecord)(parsed.servers) ? parsed.servers : {};
+    return isRecord(parsed) && isRecord(parsed.servers) ? parsed.servers : {};
 }
 function uniqueMcpCandidates(candidates) {
     return candidates.filter((candidate, index) => candidates.findIndex((other) => stableValue(other.value) === stableValue(candidate.value)) === index);
@@ -987,8 +950,8 @@ function uniqueMcpCandidates(candidates) {
 function mergeMcpCandidates(candidates) {
     const sorted = [...candidates].sort((left, right) => left.sourcePath.localeCompare(right.sourcePath));
     const result = { ...withoutOverrides(sorted[0].value) };
-    const overrides = sorted.reduce((merged, candidate) => (0, objects_1.isRecord)(candidate.value.overrides)
-        ? (0, objects_1.mergeRecords)(merged, candidate.value.overrides)
+    const overrides = sorted.reduce((merged, candidate) => isRecord(candidate.value.overrides)
+        ? mergeRecords(merged, candidate.value.overrides)
         : merged, {});
     if (Object.keys(overrides).length > 0)
         result.overrides = overrides;
@@ -1044,7 +1007,7 @@ function hashBuffer(value) {
 function stableValue(value) {
     if (Array.isArray(value))
         return `[${value.map(stableValue).join(',')}]`;
-    if ((0, objects_1.isRecord)(value)) {
+    if (isRecord(value)) {
         return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableValue(value[key])}`).join(',')}}`;
     }
     return JSON.stringify(value);
@@ -1066,7 +1029,7 @@ function resolveManifestVariables(variables, context) {
     return Object.fromEntries(Object.entries(variables ?? {}).flatMap(([name, declaration]) => {
         const value = typeof declaration === 'string'
             ? declaration
-            : (0, objects_1.isRecord)(declaration) && typeof declaration[platformKey] === 'string'
+            : isRecord(declaration) && typeof declaration[platformKey] === 'string'
                 ? declaration[platformKey]
                 : undefined;
         return value ? [[name, value.replace(/\$\{HOME\}/g, context.homeDir)]] : [];
@@ -1082,7 +1045,7 @@ function listFiles(directory) {
 }
 function isText(content) {
     const sample = content.subarray(0, Math.min(content.length, 8_192));
-    if (sample.includes(0) || !(0, buffer_1.isUtf8)(sample) || hasBinarySignature(sample))
+    if (sample.includes(0) || !isUtf8(sample) || hasBinarySignature(sample))
         return false;
     return !sample.some((byte) => byte < 0x20 && byte !== 0x09 && byte !== 0x0a && byte !== 0x0d);
 }

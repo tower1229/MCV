@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { isRecord } from '../utils/objects';
+import { isRecord } from '../utils/objects.js';
 
 const PORTABLE_KEYS = new Set(['command', 'args', 'env', 'cwd', 'url', 'httpUrl', 'serverUrl', 'transport', 'overrides']);
 

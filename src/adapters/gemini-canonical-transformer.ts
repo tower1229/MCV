@@ -1,8 +1,8 @@
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { isRecord } from '../utils/objects';
-import { GEMINI_MCP_PATH } from './overlay-policies';
-import { normalizeMcpServers, toNativeMcpServers } from '../core/mcp';
+import { isRecord } from '../utils/objects.js';
+import { GEMINI_MCP_PATH } from './overlay-policies.js';
+import { normalizeMcpServers, toNativeMcpServers } from '../core/mcp.js';
 import type {
   CanonicalDeploySource,
   CanonicalTransformer,
@@ -11,7 +11,7 @@ import type {
   DeployFile,
   DeviceContext,
   NativeCaptureResult,
-} from './types';
+} from './types.js';
 
 export class GeminiCanonicalTransformer implements CanonicalTransformer {
   transform(capture: NativeCaptureResult, _context: DeviceContext): CaptureResult {

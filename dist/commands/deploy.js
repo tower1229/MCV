@@ -1,19 +1,16 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.deployConfigurations = deployConfigurations;
-const adapters_1 = require("../adapters");
-const prompt_1 = require("../cli/prompt");
-const repository_1 = require("../utils/repository");
-const deploy_1 = require("../operations/deploy");
-const deploy_2 = require("../renderers/deploy");
-const json_1 = require("../renderers/json");
-async function deployConfigurations(context, dependencies = {}, options = {}) {
-    const reviewPlan = await (0, deploy_1.createDeployPlan)(context);
+import { createAdapterDefinitions } from '../adapters/index.js';
+import { askInTerminal, withInterruptsIgnored } from '../cli/prompt.js';
+import { readManifest } from '../utils/repository.js';
+import { applyDeployPlan, createDeployPlan } from '../operations/deploy.js';
+import { renderDeployPlanPlain, renderDeployResultPlain } from '../renderers/deploy.js';
+import { renderJson } from '../renderers/json.js';
+export async function deployConfigurations(context, dependencies = {}, options = {}) {
+    const reviewPlan = await createDeployPlan(context);
     if (options.dryRun) {
         if (options.json)
-            console.log((0, json_1.renderJson)(reviewPlan));
+            console.log(renderJson(reviewPlan));
         else
-            for (const line of (0, deploy_2.renderDeployPlanPlain)(reviewPlan))
+            for (const line of renderDeployPlanPlain(reviewPlan))
                 console.log(line);
         if (reviewPlan.status === 'failed')
             process.exitCode = 1;
@@ -21,21 +18,21 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
     }
     if (reviewPlan.status !== 'failed' && reviewPlan.changes.length === 0) {
         if (options.json) {
-            const result = await (0, prompt_1.withInterruptsIgnored)(() => (0, deploy_1.applyDeployPlan)(context, reviewPlan, { changeIds: [] }, { nonInteractive: options.yes }));
-            console.log((0, json_1.renderJson)(result));
+            const result = await withInterruptsIgnored(() => applyDeployPlan(context, reviewPlan, { changeIds: [] }, { nonInteractive: options.yes }));
+            console.log(renderJson(result));
             if (result.status !== 'succeeded')
                 process.exitCode = result.status === 'blocked' ? 3 : 1;
         }
         else {
-            const manifest = reviewPlan.repositoryPath ? (0, repository_1.readManifest)(reviewPlan.repositoryPath) : undefined;
-            const enabled = (0, adapters_1.createAdapterDefinitions)().filter(({ targetId }) => manifest?.targets?.[targetId]?.enabled === true);
+            const manifest = reviewPlan.repositoryPath ? readManifest(reviewPlan.repositoryPath) : undefined;
+            const enabled = createAdapterDefinitions().filter(({ targetId }) => manifest?.targets?.[targetId]?.enabled === true);
             const subject = enabled.length === 1 ? `${enabled[0].name} configuration is` : 'Configurations are';
             console.log(`${subject} already in sync.`);
         }
         return;
     }
     if (!options.json && !options.yes) {
-        for (const line of (0, deploy_2.renderDeployPlanPlain)(reviewPlan))
+        for (const line of renderDeployPlanPlain(reviewPlan))
             console.log(line);
     }
     if (!options.yes) {
@@ -59,7 +56,7 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
             .filter((change) => change.defaultSelected
             || (options.pruneManaged === true && change.change === 'delete'))
             .map((change) => change.id);
-    const result = await (0, prompt_1.withInterruptsIgnored)(() => (0, deploy_1.applyDeployPlan)(context, reviewPlan, {
+    const result = await withInterruptsIgnored(() => applyDeployPlan(context, reviewPlan, {
         changeIds: selectedIds,
         confirmedIssueCodes: options.yes
             ? []
@@ -70,12 +67,12 @@ async function deployConfigurations(context, dependencies = {}, options = {}) {
     if (result.status !== 'succeeded')
         process.exitCode = result.status === 'blocked' ? 3 : 1;
     if (options.json)
-        console.log((0, json_1.renderJson)(result));
+        console.log(renderJson(result));
     else
-        for (const line of (0, deploy_2.renderDeployResultPlain)(result))
+        for (const line of renderDeployResultPlain(result))
             console.log(line);
 }
 async function confirmInTerminal() {
-    const outcome = await (0, prompt_1.askInTerminal)('Write these changes to this device? [y/N] ');
+    const outcome = await askInTerminal('Write these changes to this device? [y/N] ');
     return outcome.interrupted ? undefined : /^(y|yes)$/i.test(outcome.answer.trim());
 }

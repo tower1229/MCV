@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { DeviceContext } from '../adapters/types';
-import type { ConfigurationCapability } from '../adapters/types';
-import { atomicWriteTextFile } from './files';
+import type { DeviceContext } from '../adapters/types.js';
+import type { ConfigurationCapability } from '../adapters/types.js';
+import { atomicWriteTextFile } from './files.js';
 
 export interface BaselineSnapshot {
   recordedAt: string;

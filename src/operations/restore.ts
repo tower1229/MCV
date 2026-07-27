@@ -2,18 +2,18 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import type { DeviceContext } from '../adapters/types';
-import { atomicWriteFile, hashFile } from '../utils/files';
-import { isRecord } from '../utils/objects';
-import { readManifest } from '../utils/repository';
-import { getStateFilePath, readState, writeState, type McvState } from '../utils/state';
+import type { DeviceContext } from '../adapters/types.js';
+import { atomicWriteFile, hashFile } from '../utils/files.js';
+import { isRecord } from '../utils/objects.js';
+import { readManifest } from '../utils/repository.js';
+import { getStateFilePath, readState, writeState, type McvState } from '../utils/state.js';
 import {
   OPERATION_SCHEMA_VERSION,
   type Issue,
   type McvError,
   type Plan,
   type Result,
-} from './contracts';
+} from './contracts.js';
 
 type DeployBackupAction = 'add' | 'modify' | 'delete';
 

@@ -1,67 +1,23 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.inspectRepository = inspectRepository;
-exports.createInitPlan = createInitPlan;
-exports.applyInitPlan = applyInitPlan;
-exports.createMigrationPlan = createMigrationPlan;
-exports.applyMigrationPlan = applyMigrationPlan;
-exports.createBindPlan = createBindPlan;
-exports.applyBindPlan = applyBindPlan;
-exports.createUnbindPlan = createUnbindPlan;
-exports.applyUnbindPlan = applyUnbindPlan;
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-const yaml = __importStar(require("yaml"));
-const child_process_1 = require("child_process");
-const crypto_1 = require("crypto");
-const uuid_1 = require("uuid");
-const mcp_1 = require("../core/mcp");
-const files_1 = require("../utils/files");
-const objects_1 = require("../utils/objects");
-const repository_1 = require("../utils/repository");
-const state_1 = require("../utils/state");
-const contracts_1 = require("./contracts");
+import * as fs from 'fs';
+import * as path from 'path';
+import * as yaml from 'yaml';
+import { execFileSync } from 'child_process';
+import { createHash } from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
+import { normalizeMcpServers } from '../core/mcp.js';
+import { atomicWriteTextFile } from '../utils/files.js';
+import { isRecord } from '../utils/objects.js';
+import { CURRENT_SCHEMA_VERSION, readManifest, validateManifest, } from '../utils/repository.js';
+import { getStateFilePath, readState, writeState, } from '../utils/state.js';
+import { OPERATION_SCHEMA_VERSION, } from './contracts.js';
 const activeRepositoryPlans = new WeakMap();
 const activeLifecyclePlans = new WeakMap();
-function inspectRepository(context, explicitPath) {
-    const state = (0, state_1.readState)(context);
+export function inspectRepository(context, explicitPath) {
+    const state = readState(context);
     const repositoryPath = explicitPath ?? state.repositoryPath ?? null;
     if (!repositoryPath) {
         return {
-            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'repository',
             status: 'reported',
             ready: false,
@@ -82,7 +38,7 @@ function inspectRepository(context, explicitPath) {
     const inspectedRepositoryId = identity.repositoryId ?? state.defaultRepositoryId ?? null;
     const inspectedSchemaVersion = identity.schemaVersion;
     if (inspectedSchemaVersion !== null
-        && inspectedSchemaVersion !== repository_1.CURRENT_SCHEMA_VERSION) {
+        && inspectedSchemaVersion !== CURRENT_SCHEMA_VERSION) {
         const migratable = inspectedSchemaVersion === 1;
         const code = migratable
             ? 'repository.migrationRequired'
@@ -94,7 +50,7 @@ function inspectRepository(context, explicitPath) {
             ? ['Run `mcv migrate --dry-run` to review the required migration.']
             : ['Update MCV to a version that supports this Repository schema.'];
         return {
-            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'repository',
             status: 'reported',
             ready: false,
@@ -113,11 +69,11 @@ function inspectRepository(context, explicitPath) {
     }
     let manifest;
     try {
-        manifest = (0, repository_1.readManifest)(repositoryPath);
+        manifest = readManifest(repositoryPath);
     }
     catch (error) {
         return {
-            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'repository',
             status: 'reported',
             ready: false,
@@ -138,7 +94,7 @@ function inspectRepository(context, explicitPath) {
     if (state.defaultRepositoryId
         && state.defaultRepositoryId !== manifest.repositoryId) {
         return {
-            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'repository',
             status: 'reported',
             ready: false,
@@ -156,7 +112,7 @@ function inspectRepository(context, explicitPath) {
         };
     }
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'repository',
         status: 'reported',
         ready: true,
@@ -172,17 +128,17 @@ function inspectRepository(context, explicitPath) {
 }
 function inspectGitRepository(repositoryPath) {
     try {
-        (0, child_process_1.execFileSync)('git', ['rev-parse', '--is-inside-work-tree'], {
+        execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
             cwd: repositoryPath,
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'ignore'],
         });
-        const branch = (0, child_process_1.execFileSync)('git', ['branch', '--show-current'], {
+        const branch = execFileSync('git', ['branch', '--show-current'], {
             cwd: repositoryPath,
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'ignore'],
         }).trim() || null;
-        const status = (0, child_process_1.execFileSync)('git', ['status', '--porcelain'], {
+        const status = execFileSync('git', ['status', '--porcelain'], {
             cwd: repositoryPath,
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'ignore'],
@@ -195,7 +151,7 @@ function inspectGitRepository(repositoryPath) {
         return {};
     }
 }
-function createInitPlan(context, repositoryPath = process.cwd()) {
+export function createInitPlan(context, repositoryPath = process.cwd()) {
     const resolvedPath = path.resolve(repositoryPath);
     const manifestPath = path.join(resolvedPath, 'mcv.yaml');
     const stateSnapshot = readStateSnapshot(context);
@@ -205,9 +161,9 @@ function createInitPlan(context, repositoryPath = process.cwd()) {
         state: stateSnapshot.hash,
         stateTarget: hashText(stateSnapshot.path),
     };
-    const operationId = (0, uuid_1.v4)();
+    const operationId = uuidv4();
     const failed = (error) => freezeLifecyclePlan({
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'init',
         status: 'failed',
         readyToApply: false,
@@ -252,7 +208,7 @@ function createInitPlan(context, repositoryPath = process.cwd()) {
             nextActions: ['Run `mcv unbind` before initializing a different Repository.'],
         });
     }
-    const repositoryId = (0, uuid_1.v4)();
+    const repositoryId = uuidv4();
     const initializedAt = new Date().toISOString();
     const issues = entries.length === 0 ? [] : [{
             severity: 'warning',
@@ -261,7 +217,7 @@ function createInitPlan(context, repositoryPath = process.cwd()) {
             details: `${entries.length} existing entr${entries.length === 1 ? 'y' : 'ies'}.`,
         }];
     return registerLifecyclePlan({
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'init',
         status: 'planned',
         readyToApply: true,
@@ -275,7 +231,7 @@ function createInitPlan(context, repositoryPath = process.cwd()) {
                 repositoryPath: resolvedPath,
                 repositoryId,
                 initializedAt,
-                schemaVersion: repository_1.CURRENT_SCHEMA_VERSION,
+                schemaVersion: CURRENT_SCHEMA_VERSION,
             }, {
                 id: 'repository-binding',
                 kind: 'bind',
@@ -286,7 +242,7 @@ function createInitPlan(context, repositoryPath = process.cwd()) {
         nextActions: [],
     });
 }
-function applyInitPlan(context, plan) {
+export function applyInitPlan(context, plan) {
     if (plan.status === 'failed')
         return failedInitResult(plan.repositoryPath, plan.error, plan.issues);
     const validation = validateLifecyclePlan(context, plan);
@@ -304,15 +260,15 @@ function applyInitPlan(context, plan) {
     const manifest = createEmptyManifest(manifestChange.repositoryId, manifestChange.initializedAt);
     const state = validation.state;
     state.schemaVersion = 2;
-    state.deviceId ??= (0, uuid_1.v4)();
+    state.deviceId ??= uuidv4();
     state.defaultRepositoryId = bindingChange.repositoryId;
     state.repositoryPath = bindingChange.repositoryPath;
     state.baselineSnapshot = { recordedAt: manifestChange.initializedAt, files: {} };
     let manifestWritten = false;
     try {
-        (0, files_1.atomicWriteTextFile)(manifestChange.path, yaml.stringify(manifest));
+        atomicWriteTextFile(manifestChange.path, yaml.stringify(manifest));
         manifestWritten = true;
-        (0, state_1.writeState)(context, state);
+        writeState(context, state);
     }
     catch (error) {
         if (manifestWritten) {
@@ -332,7 +288,7 @@ function applyInitPlan(context, plan) {
         activeLifecyclePlans.delete(plan);
     }
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'init',
         status: 'succeeded',
         repositoryPath: bindingChange.repositoryPath,
@@ -341,20 +297,20 @@ function applyInitPlan(context, plan) {
         nextActions: [],
         data: {
             repositoryId: bindingChange.repositoryId,
-            repositorySchemaVersion: repository_1.CURRENT_SCHEMA_VERSION,
+            repositorySchemaVersion: CURRENT_SCHEMA_VERSION,
         },
     };
 }
-function createMigrationPlan(context, repositoryPath = process.cwd()) {
+export function createMigrationPlan(context, repositoryPath = process.cwd()) {
     const resolvedPath = path.resolve(repositoryPath);
-    const operationId = (0, uuid_1.v4)();
+    const operationId = uuidv4();
     const preconditions = {
         repository: hashDirectory(resolvedPath),
         repositoryTarget: hashText(resolvedPath),
-        stateTarget: hashText(path.dirname((0, state_1.getStateFilePath)(context))),
+        stateTarget: hashText(path.dirname(getStateFilePath(context))),
     };
     const failed = (error) => freezeLifecyclePlan({
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'migrate',
         status: 'failed',
         readyToApply: false,
@@ -370,7 +326,7 @@ function createMigrationPlan(context, repositoryPath = process.cwd()) {
     let raw;
     try {
         const parsed = yaml.parse(fs.readFileSync(manifestPath, 'utf8'));
-        if (!(0, objects_1.isRecord)(parsed))
+        if (!isRecord(parsed))
             throw new Error(`${manifestPath} must contain a YAML object.`);
         raw = parsed;
     }
@@ -383,7 +339,7 @@ function createMigrationPlan(context, repositoryPath = process.cwd()) {
         });
     }
     if (raw.schemaVersion !== 1) {
-        const current = raw.schemaVersion === repository_1.CURRENT_SCHEMA_VERSION;
+        const current = raw.schemaVersion === CURRENT_SCHEMA_VERSION;
         return failed({
             code: current ? 'repository.migrationNotRequired' : 'repository.unsupportedSchema',
             message: current
@@ -404,13 +360,13 @@ function createMigrationPlan(context, repositoryPath = process.cwd()) {
     const changes = [{
             id: 'repository-backup',
             kind: 'backup',
-            path: path.join(path.dirname((0, state_1.getStateFilePath)(context)), 'repository-backups'),
+            path: path.join(path.dirname(getStateFilePath(context)), 'repository-backups'),
         }, {
             id: 'schema-version',
             kind: 'modify',
             path: manifestPath,
             before: 1,
-            after: repository_1.CURRENT_SCHEMA_VERSION,
+            after: CURRENT_SCHEMA_VERSION,
         }];
     for (const mapping of geminiLayoutMappings(resolvedPath)) {
         if (fs.existsSync(mapping.sourcePath) && !fs.existsSync(mapping.targetPath)) {
@@ -423,7 +379,7 @@ function createMigrationPlan(context, repositoryPath = process.cwd()) {
         changes.push({ id: 'mcp-registry', kind: 'modify', path: registryPath });
     }
     return registerLifecyclePlan({
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'migrate',
         status: 'planned',
         readyToApply: true,
@@ -435,7 +391,7 @@ function createMigrationPlan(context, repositoryPath = process.cwd()) {
         nextActions: [],
     });
 }
-function applyMigrationPlan(context, plan) {
+export function applyMigrationPlan(context, plan) {
     if (plan.status === 'failed')
         return failedMigrationResult(plan.repositoryPath, plan.error, plan.issues);
     const validation = validateLifecyclePlan(context, plan);
@@ -449,7 +405,7 @@ function applyMigrationPlan(context, plan) {
         });
     }
     const repositoryPath = plan.repositoryPath;
-    const backupRoot = path.join(path.dirname((0, state_1.getStateFilePath)(context)), 'repository-backups');
+    const backupRoot = path.join(path.dirname(getStateFilePath(context)), 'repository-backups');
     let backupPath;
     let backupVerified = false;
     try {
@@ -463,10 +419,10 @@ function applyMigrationPlan(context, plan) {
         backupVerified = true;
         const manifestPath = path.join(repositoryPath, 'mcv.yaml');
         const raw = yaml.parse(fs.readFileSync(manifestPath, 'utf8'));
-        if (!(0, objects_1.isRecord)(raw) || raw.schemaVersion !== 1)
+        if (!isRecord(raw) || raw.schemaVersion !== 1)
             throw new Error('The Repository is no longer schema v1.');
         const migrated = migrateV1Manifest(raw);
-        (0, repository_1.validateManifest)(migrated, manifestPath);
+        validateManifest(migrated, manifestPath);
         for (const change of plan.changes) {
             if (change.kind === 'move' && change.sourcePath && change.targetPath) {
                 fs.mkdirSync(path.dirname(change.targetPath), { recursive: true });
@@ -476,11 +432,11 @@ function applyMigrationPlan(context, plan) {
                 const content = readNormalizedMcpRegistry(change.path);
                 if (content === undefined)
                     throw new Error('The MCP registry can no longer be normalized.');
-                (0, files_1.atomicWriteTextFile)(change.path, content);
+                atomicWriteTextFile(change.path, content);
             }
         }
-        (0, files_1.atomicWriteTextFile)(manifestPath, yaml.stringify(migrated));
-        (0, repository_1.readManifest)(repositoryPath);
+        atomicWriteTextFile(manifestPath, yaml.stringify(migrated));
+        readManifest(repositoryPath);
     }
     catch (error) {
         if (backupVerified && backupPath && fs.existsSync(backupPath)) {
@@ -502,9 +458,9 @@ function applyMigrationPlan(context, plan) {
     finally {
         activeLifecyclePlans.delete(plan);
     }
-    const manifest = (0, repository_1.readManifest)(repositoryPath);
+    const manifest = readManifest(repositoryPath);
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'migrate',
         status: 'succeeded',
         repositoryPath,
@@ -514,15 +470,15 @@ function applyMigrationPlan(context, plan) {
         data: {
             repositoryId: manifest.repositoryId,
             previousSchemaVersion: 1,
-            repositorySchemaVersion: repository_1.CURRENT_SCHEMA_VERSION,
+            repositorySchemaVersion: CURRENT_SCHEMA_VERSION,
             backupPath: backupPath,
             backupVerified: true,
         },
     };
 }
-function createBindPlan(context, repositoryPath = process.cwd()) {
+export function createBindPlan(context, repositoryPath = process.cwd()) {
     const resolvedPath = path.resolve(repositoryPath);
-    const operationId = (0, uuid_1.v4)();
+    const operationId = uuidv4();
     const stateSnapshot = readStateSnapshot(context);
     const manifestPath = path.join(resolvedPath, 'mcv.yaml');
     const manifestSnapshot = readManifestSnapshot(manifestPath);
@@ -533,7 +489,7 @@ function createBindPlan(context, repositoryPath = process.cwd()) {
     };
     const identity = manifestSnapshot.identity;
     if (identity.schemaVersion !== null
-        && identity.schemaVersion !== repository_1.CURRENT_SCHEMA_VERSION) {
+        && identity.schemaVersion !== CURRENT_SCHEMA_VERSION) {
         const migratable = identity.schemaVersion === 1;
         const code = migratable
             ? 'repository.migrationRequired'
@@ -545,7 +501,7 @@ function createBindPlan(context, repositoryPath = process.cwd()) {
             ? `Repository schema ${identity.schemaVersion} requires migration.`
             : `Repository schema ${identity.schemaVersion} is not supported by this MCV version.`;
         return freezePlan({
-            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'bind',
             status: 'failed',
             readyToApply: false,
@@ -570,7 +526,7 @@ function createBindPlan(context, repositoryPath = process.cwd()) {
     if (!manifest) {
         const error = manifestSnapshot.error;
         return freezePlan({
-            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'bind',
             status: 'failed',
             readyToApply: false,
@@ -597,7 +553,7 @@ function createBindPlan(context, repositoryPath = process.cwd()) {
     if (state.defaultRepositoryId
         && state.defaultRepositoryId !== manifest.repositoryId) {
         return freezePlan({
-            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'bind',
             status: 'failed',
             readyToApply: false,
@@ -619,7 +575,7 @@ function createBindPlan(context, repositoryPath = process.cwd()) {
         });
     }
     const plan = {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'bind',
         status: 'planned',
         readyToApply: true,
@@ -638,7 +594,7 @@ function createBindPlan(context, repositoryPath = process.cwd()) {
     };
     return registerPlan(plan);
 }
-function applyBindPlan(context, plan) {
+export function applyBindPlan(context, plan) {
     if (plan.status === 'failed')
         return failedResultFromPlan(plan);
     const validation = validateActivePlan(context, plan);
@@ -657,7 +613,7 @@ function applyBindPlan(context, plan) {
     state.repositoryPath = change.repositoryPath;
     state.defaultRepositoryId = change.repositoryId;
     try {
-        (0, state_1.writeState)(context, state);
+        writeState(context, state);
     }
     catch (error) {
         return failedBindResult(plan.repositoryPath, {
@@ -671,7 +627,7 @@ function applyBindPlan(context, plan) {
         activeRepositoryPlans.delete(plan);
     }
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'bind',
         status: 'succeeded',
         repositoryPath: change.repositoryPath,
@@ -680,22 +636,22 @@ function applyBindPlan(context, plan) {
         nextActions: [],
         data: {
             repositoryId: change.repositoryId,
-            repositorySchemaVersion: repository_1.CURRENT_SCHEMA_VERSION,
+            repositorySchemaVersion: CURRENT_SCHEMA_VERSION,
             previousRepositoryPath: change.previousRepositoryPath,
         },
     };
 }
-function createUnbindPlan(context) {
+export function createUnbindPlan(context) {
     const stateSnapshot = readStateSnapshot(context);
     const state = stateSnapshot.state;
     const previousRepositoryPath = state.repositoryPath ?? null;
     const repositoryId = state.defaultRepositoryId ?? null;
     const plan = {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'unbind',
         status: 'planned',
         readyToApply: true,
-        operationId: (0, uuid_1.v4)(),
+        operationId: uuidv4(),
         preconditions: {
             state: stateSnapshot.hash,
             stateTarget: hashText(stateSnapshot.path),
@@ -713,7 +669,7 @@ function createUnbindPlan(context) {
     };
     return registerPlan(plan);
 }
-function applyUnbindPlan(context, plan) {
+export function applyUnbindPlan(context, plan) {
     if (plan.status === 'failed')
         return failedUnbindResult(plan.repositoryPath, plan.error);
     const validation = validateActivePlan(context, plan);
@@ -731,7 +687,7 @@ function applyUnbindPlan(context, plan) {
     delete state.repositoryPath;
     delete state.defaultRepositoryId;
     try {
-        (0, state_1.writeState)(context, state);
+        writeState(context, state);
     }
     catch (error) {
         return failedUnbindResult(plan.repositoryPath, {
@@ -745,7 +701,7 @@ function applyUnbindPlan(context, plan) {
         activeRepositoryPlans.delete(plan);
     }
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'unbind',
         status: 'succeeded',
         repositoryPath: change.previousRepositoryPath,
@@ -817,7 +773,7 @@ function failedResultFromPlan(plan) {
 }
 function failedBindResult(repositoryPath, error, issues = [{ severity: 'error', code: error.code, message: error.message }]) {
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'bind',
         status: 'failed',
         repositoryPath,
@@ -829,7 +785,7 @@ function failedBindResult(repositoryPath, error, issues = [{ severity: 'error', 
 }
 function failedUnbindResult(repositoryPath, error) {
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'unbind',
         status: 'failed',
         repositoryPath,
@@ -841,7 +797,7 @@ function failedUnbindResult(repositoryPath, error) {
 }
 function hashOptionalFile(filePath) {
     try {
-        return (0, crypto_1.createHash)('sha256').update(fs.readFileSync(filePath)).digest('hex');
+        return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
     }
     catch (error) {
         if (error.code === 'ENOENT')
@@ -850,10 +806,10 @@ function hashOptionalFile(filePath) {
     }
 }
 function hashText(value) {
-    return (0, crypto_1.createHash)('sha256').update(value).digest('hex');
+    return createHash('sha256').update(value).digest('hex');
 }
 function readStateSnapshot(context) {
-    const statePath = (0, state_1.getStateFilePath)(context);
+    const statePath = getStateFilePath(context);
     try {
         const content = fs.readFileSync(statePath);
         let state = {};
@@ -865,7 +821,7 @@ function readStateSnapshot(context) {
         }
         return {
             path: statePath,
-            hash: (0, crypto_1.createHash)('sha256').update(content).digest('hex'),
+            hash: createHash('sha256').update(content).digest('hex'),
             state,
         };
     }
@@ -889,10 +845,10 @@ function readManifestSnapshot(manifestPath) {
             error: error instanceof Error ? error.message : String(error),
         };
     }
-    const hash = (0, crypto_1.createHash)('sha256').update(content).digest('hex');
+    const hash = createHash('sha256').update(content).digest('hex');
     try {
         const raw = yaml.parse(content.toString('utf8'));
-        if (!(0, objects_1.isRecord)(raw)) {
+        if (!isRecord(raw)) {
             return {
                 hash,
                 identity: { repositoryId: null, schemaVersion: null },
@@ -903,9 +859,9 @@ function readManifestSnapshot(manifestPath) {
             repositoryId: typeof raw.repositoryId === 'string' ? raw.repositoryId : null,
             schemaVersion: typeof raw.schemaVersion === 'number' ? raw.schemaVersion : null,
         };
-        if (identity.schemaVersion !== repository_1.CURRENT_SCHEMA_VERSION)
+        if (identity.schemaVersion !== CURRENT_SCHEMA_VERSION)
             return { hash, identity };
-        (0, repository_1.validateManifest)(raw, manifestPath);
+        validateManifest(raw, manifestPath);
         return { hash, identity, manifest: raw };
     }
     catch (error) {
@@ -919,7 +875,7 @@ function readManifestSnapshot(manifestPath) {
 function inspectManifestIdentity(repositoryPath) {
     try {
         const raw = yaml.parse(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8'));
-        if (!(0, objects_1.isRecord)(raw))
+        if (!isRecord(raw))
             return { repositoryId: null, schemaVersion: null };
         return {
             repositoryId: typeof raw.repositoryId === 'string' ? raw.repositoryId : null,
@@ -932,7 +888,7 @@ function inspectManifestIdentity(repositoryPath) {
 }
 function createEmptyManifest(repositoryId, initializedAt) {
     return {
-        schemaVersion: repository_1.CURRENT_SCHEMA_VERSION,
+        schemaVersion: CURRENT_SCHEMA_VERSION,
         repositoryId,
         initializedAt,
         targets: {
@@ -950,22 +906,22 @@ function createEmptyManifest(repositoryId, initializedAt) {
     };
 }
 function migrateV1Manifest(raw) {
-    const targets = (0, objects_1.isRecord)(raw.targets) ? raw.targets : {};
-    const gemini = (0, objects_1.isRecord)(targets.gemini) ? targets.gemini : {};
+    const targets = isRecord(raw.targets) ? raw.targets : {};
+    const gemini = isRecord(targets.gemini) ? targets.gemini : {};
     const migrated = {
         ...raw,
-        schemaVersion: repository_1.CURRENT_SCHEMA_VERSION,
+        schemaVersion: CURRENT_SCHEMA_VERSION,
         repositoryId: String(raw.repositoryId),
         initializedAt: typeof raw.initializedAt === 'string' ? raw.initializedAt : new Date().toISOString(),
         targets: {
             ...targets,
             codex: {
-                ...((0, objects_1.isRecord)(targets.codex) ? targets.codex : {}),
-                enabled: (0, objects_1.isRecord)(targets.codex) ? targets.codex.enabled !== false : true,
+                ...(isRecord(targets.codex) ? targets.codex : {}),
+                enabled: isRecord(targets.codex) ? targets.codex.enabled !== false : true,
             },
             claudeCode: {
-                ...((0, objects_1.isRecord)(targets.claudeCode) ? targets.claudeCode : {}),
-                enabled: (0, objects_1.isRecord)(targets.claudeCode) ? targets.claudeCode.enabled !== false : true,
+                ...(isRecord(targets.claudeCode) ? targets.claudeCode : {}),
+                enabled: isRecord(targets.claudeCode) ? targets.claudeCode.enabled !== false : true,
             },
             gemini: {
                 ...gemini,
@@ -973,10 +929,10 @@ function migrateV1Manifest(raw) {
                 surfaces: { geminiCli: 'auto', antigravity: 'auto' },
             },
         },
-        variables: (0, objects_1.isRecord)(raw.variables) ? raw.variables : {},
+        variables: isRecord(raw.variables) ? raw.variables : {},
         security: { scanSecrets: true, allowPlaintextSecrets: false },
         capture: {
-            preserveUnknownNativeFields: !(0, objects_1.isRecord)(raw.capture)
+            preserveUnknownNativeFields: !isRecord(raw.capture)
                 || raw.capture.preserveUnknownNativeFields !== false,
         },
         deploy: { backupBeforeWrite: true, useSymlinks: false },
@@ -997,13 +953,13 @@ function readNormalizedMcpRegistry(registryPath) {
     if (!fs.existsSync(registryPath))
         return undefined;
     const registry = yaml.parse(fs.readFileSync(registryPath, 'utf8'));
-    if (!(0, objects_1.isRecord)(registry) || !(0, objects_1.isRecord)(registry.servers))
+    if (!isRecord(registry) || !isRecord(registry.servers))
         return undefined;
-    const normalized = (0, mcp_1.normalizeMcpServers)(registry.servers, 'codex');
+    const normalized = normalizeMcpServers(registry.servers, 'codex');
     return yaml.stringify({ ...registry, servers: normalized.servers });
 }
 function hashDirectory(root) {
-    const hash = (0, crypto_1.createHash)('sha256');
+    const hash = createHash('sha256');
     const visit = (current, relative) => {
         const stat = fs.lstatSync(current);
         if (stat.isSymbolicLink()) {
@@ -1073,12 +1029,12 @@ function validateLifecyclePlan(context, plan) {
             return { state: stateSnapshot.state };
     }
     else {
-        const backupTarget = path.dirname((0, state_1.getStateFilePath)(context));
+        const backupTarget = path.dirname(getStateFilePath(context));
         const stale = hashText(plan.repositoryPath ?? '') !== plan.preconditions.repositoryTarget
             || hashText(backupTarget) !== plan.preconditions.stateTarget
             || hashDirectory(plan.repositoryPath ?? '') !== plan.preconditions.repository;
         if (!stale)
-            return { state: (0, state_1.readState)(context) };
+            return { state: readState(context) };
     }
     activeLifecyclePlans.delete(plan);
     return { error: {
@@ -1089,7 +1045,7 @@ function validateLifecyclePlan(context, plan) {
 }
 function failedInitResult(repositoryPath, error, issues = [{ severity: 'error', code: error.code, message: error.message }]) {
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'init',
         status: 'failed',
         repositoryPath,
@@ -1101,7 +1057,7 @@ function failedInitResult(repositoryPath, error, issues = [{ severity: 'error', 
 }
 function failedMigrationResult(repositoryPath, error, issues = [{ severity: 'error', code: error.code, message: error.message }]) {
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'migrate',
         status: 'failed',
         repositoryPath,

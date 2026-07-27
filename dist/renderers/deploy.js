@@ -1,9 +1,5 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.renderDeployPlanPlain = renderDeployPlanPlain;
-exports.renderDeployResultPlain = renderDeployResultPlain;
-const color_1 = require("./color");
-function renderDeployPlanPlain(plan) {
+import { renderIssuePlain } from './color.js';
+export function renderDeployPlanPlain(plan) {
     const lines = [`Deploy Plan: ${plan.repositoryPath ?? 'not bound'}`];
     let currentGroup = '';
     for (const change of plan.changes.filter((item) => item.group === 'standard')) {
@@ -27,19 +23,19 @@ function renderDeployPlanPlain(plan) {
     }
     lines.push(`Summary: ${plan.changes.length} item(s).`);
     for (const issue of plan.issues) {
-        lines.push((0, color_1.renderIssuePlain)(issue));
+        lines.push(renderIssuePlain(issue));
     }
     for (const action of plan.nextActions)
         lines.push(`Next: ${action}`);
     return lines;
 }
-function renderDeployResultPlain(result) {
+export function renderDeployResultPlain(result) {
     if (result.status === 'succeeded') {
         return [`Deployed ${result.data?.appliedChangeIds.length ?? 0} selected item(s) from ${result.repositoryPath}.`];
     }
     const lines = [`Deploy ${result.status}.`];
     for (const issue of result.issues) {
-        lines.push((0, color_1.renderIssuePlain)(issue));
+        lines.push(renderIssuePlain(issue));
     }
     if (result.status === 'failed')
         lines.push(`Error: ${result.error.message}`);

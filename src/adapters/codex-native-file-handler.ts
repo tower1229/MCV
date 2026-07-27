@@ -1,16 +1,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { atomicWriteFile } from '../utils/files';
-import { sanitizeConfig } from '../utils/sanitize';
+import { atomicWriteFile } from '../utils/files.js';
+import { sanitizeConfig } from '../utils/sanitize.js';
 import {
   deleteObjectPath,
   parseStructuredObject,
   splitOwnedFields,
   stringifyStructuredObject,
-} from '../utils/structured-config';
-import { resolvePortableValue } from '../utils/variables';
-import { readCanonicalSource, readDeployTarget, repositoryFileForPlatform } from './adapter-utils';
-import { CODEX_MANAGED_PATHS } from './overlay-policies';
+} from '../utils/structured-config.js';
+import { resolvePortableValue } from '../utils/variables.js';
+import { readCanonicalSource, readDeployTarget, repositoryFileForPlatform } from './adapter-utils.js';
+import { CODEX_MANAGED_PATHS } from './overlay-policies.js';
 import type {
   CanonicalDeploySource,
   DetectedConfigDirectory,
@@ -20,7 +20,7 @@ import type {
   DeviceContext,
   NativeCaptureResult,
   NativeFileHandler,
-} from './types';
+} from './types.js';
 
 const LOCAL_PATHS = [
   '$.projects', '$.notify', '$.marketplaces',

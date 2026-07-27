@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse as parseYaml } from 'yaml';
-import { createProgram } from '../index';
+import { createProgram } from '../index.js';
 
 describe('mcv init', () => {
   const originalCwd = process.cwd();

@@ -3,32 +3,32 @@ import { isUtf8 } from 'buffer';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { createAdapterDefinitions, type TargetId } from '../adapters';
+import { createAdapterDefinitions, type TargetId } from '../adapters/index.js';
 import {
   CLAUDE_CODE_MCP_PATH,
   CODEX_MCP_PATH,
   GEMINI_MCP_PATH,
-} from '../adapters/overlay-policies';
-import type { ConfigurationCapability, DeployFile, DeviceContext } from '../adapters/types';
-import { atomicWriteFile, findSymbolicLinkAncestor, hashFile } from '../utils/files';
-import { isRecord } from '../utils/objects';
-import { readManifest, resolveBoundRepository } from '../utils/repository';
-import { scanTextForSecrets } from '../utils/sanitize';
-import { getStateFilePath, readState, writeState } from '../utils/state';
+} from '../adapters/overlay-policies.js';
+import type { ConfigurationCapability, DeployFile, DeviceContext } from '../adapters/types.js';
+import { atomicWriteFile, findSymbolicLinkAncestor, hashFile } from '../utils/files.js';
+import { isRecord } from '../utils/objects.js';
+import { readManifest, resolveBoundRepository } from '../utils/repository.js';
+import { scanTextForSecrets } from '../utils/sanitize.js';
+import { getStateFilePath, readState, writeState } from '../utils/state.js';
 import {
   parseStructuredObject,
   stringifyStructuredObject,
   type StructuredFormat,
-} from '../utils/structured-config';
-import { resolveVariableDefinitions } from '../utils/variables';
-import { findLegacyCodexSkillDuplicates } from '../utils/deploy-skills';
+} from '../utils/structured-config.js';
+import { resolveVariableDefinitions } from '../utils/variables.js';
+import { findLegacyCodexSkillDuplicates } from '../utils/deploy-skills.js';
 import {
   OPERATION_SCHEMA_VERSION,
   type Issue,
   type McvError,
   type Plan,
   type Result,
-} from './contracts';
+} from './contracts.js';
 
 export type DeployChangeKind = 'add' | 'modify' | 'delete';
 export type DeployStrategy = 'managed-merge' | 'replace-entire-file';

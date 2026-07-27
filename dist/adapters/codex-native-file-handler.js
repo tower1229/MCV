@@ -1,53 +1,17 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.CodexNativeFileHandler = void 0;
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-const files_1 = require("../utils/files");
-const sanitize_1 = require("../utils/sanitize");
-const structured_config_1 = require("../utils/structured-config");
-const variables_1 = require("../utils/variables");
-const adapter_utils_1 = require("./adapter-utils");
-const overlay_policies_1 = require("./overlay-policies");
+import * as fs from 'fs';
+import * as path from 'path';
+import { atomicWriteFile } from '../utils/files.js';
+import { sanitizeConfig } from '../utils/sanitize.js';
+import { deleteObjectPath, parseStructuredObject, splitOwnedFields, stringifyStructuredObject, } from '../utils/structured-config.js';
+import { resolvePortableValue } from '../utils/variables.js';
+import { readCanonicalSource, readDeployTarget, repositoryFileForPlatform } from './adapter-utils.js';
+import { CODEX_MANAGED_PATHS } from './overlay-policies.js';
 const LOCAL_PATHS = [
     '$.projects', '$.notify', '$.marketplaces',
     '$.shell_environment_policy.set.NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S',
     '$.shell_environment_policy.set.NODE_REPL_TRUSTED_CODE_PATHS',
 ];
-class CodexNativeFileHandler {
+export class CodexNativeFileHandler {
     root(context) {
         return context.env?.CODEX_HOME || path.join(context.homeDir, '.codex');
     }
@@ -76,7 +40,7 @@ class CodexNativeFileHandler {
         };
         for (const file of files.filter((candidate) => candidate.exists)) {
             if (file.id === 'user-instructions') {
-                const sanitized = (0, sanitize_1.sanitizeConfig)(fs.readFileSync(file.path, 'utf8'), context);
+                const sanitized = sanitizeConfig(fs.readFileSync(file.path, 'utf8'), context);
                 result.summary.sensitiveFieldCount += sanitized.sensitiveFieldCount;
                 result.summary.parameterizedPathCount += sanitized.parameterizedPathCount;
                 result.managedFiles.push({
@@ -89,23 +53,23 @@ class CodexNativeFileHandler {
             if (file.id !== 'user-settings')
                 continue;
             try {
-                const parsed = (0, structured_config_1.parseStructuredObject)(fs.readFileSync(file.path, 'utf8'), 'toml', file.path);
-                const owned = (0, structured_config_1.splitOwnedFields)(parsed, overlay_policies_1.CODEX_MANAGED_PATHS, LOCAL_PATHS);
+                const parsed = parseStructuredObject(fs.readFileSync(file.path, 'utf8'), 'toml', file.path);
+                const owned = splitOwnedFields(parsed, CODEX_MANAGED_PATHS, LOCAL_PATHS);
                 removeCodexRuntimeFields(owned.native);
-                const native = (0, sanitize_1.sanitizeConfig)(owned.native, context);
+                const native = sanitizeConfig(owned.native, context);
                 result.summary.sensitiveFieldCount += native.sensitiveFieldCount;
                 result.summary.parameterizedPathCount += native.parameterizedPathCount;
                 if (Object.keys(native.value).length > 0) {
                     result.files.push({
                         sourcePath: file.path,
                         repositoryPath: 'ide/codex/native/config.toml',
-                        content: (0, structured_config_1.stringifyStructuredObject)(native.value, 'toml'),
+                        content: stringifyStructuredObject(native.value, 'toml'),
                         ownership: 'native',
                         localPaths: LOCAL_PATHS,
                     });
                 }
                 for (const field of owned.managed) {
-                    const sanitized = (0, sanitize_1.sanitizeConfig)(field.value, context);
+                    const sanitized = sanitizeConfig(field.value, context);
                     result.summary.sensitiveFieldCount += sanitized.sensitiveFieldCount;
                     result.summary.parameterizedPathCount += sanitized.parameterizedPathCount;
                     result.managedFields.push({
@@ -122,27 +86,26 @@ class CodexNativeFileHandler {
         return result;
     }
     async deploy(repositoryPath, context) {
-        const sourcePath = (0, adapter_utils_1.repositoryFileForPlatform)(repositoryPath, 'ide/codex/native/config.toml', context);
+        const sourcePath = repositoryFileForPlatform(repositoryPath, 'ide/codex/native/config.toml', context);
         const targetPath = path.join(this.root(context), 'config.toml');
         const files = [];
         if (fs.existsSync(sourcePath)) {
-            const parsed = (0, structured_config_1.parseStructuredObject)(fs.readFileSync(sourcePath, 'utf8'), 'toml', sourcePath);
-            const resolved = (0, variables_1.resolvePortableValue)(parsed, context.variables ?? {}, context.platform);
+            const parsed = parseStructuredObject(fs.readFileSync(sourcePath, 'utf8'), 'toml', sourcePath);
+            const resolved = resolvePortableValue(parsed, context.variables ?? {}, context.platform);
             for (const localPath of LOCAL_PATHS)
-                (0, structured_config_1.deleteObjectPath)(resolved, localPath);
+                deleteObjectPath(resolved, localPath);
             removeCodexRuntimeFields(resolved);
-            files.push({ targetPath, content: (0, structured_config_1.stringifyStructuredObject)(resolved, 'toml') });
+            files.push({ targetPath, content: stringifyStructuredObject(resolved, 'toml') });
         }
-        return { files, write: (file) => (0, files_1.atomicWriteFile)(file.targetPath, file.content) };
+        return { files, write: (file) => atomicWriteFile(file.targetPath, file.content) };
     }
     async readCanonical(repositoryPath, context) {
-        return (0, adapter_utils_1.readCanonicalSource)(repositoryPath, context);
+        return readCanonicalSource(repositoryPath, context);
     }
     readDeployTarget(targetPath) {
-        return (0, adapter_utils_1.readDeployTarget)(targetPath);
+        return readDeployTarget(targetPath);
     }
 }
-exports.CodexNativeFileHandler = CodexNativeFileHandler;
 function removeCodexRuntimeFields(value) {
     const policy = value.shell_environment_policy;
     if (!policy || typeof policy !== 'object' || Array.isArray(policy))

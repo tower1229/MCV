@@ -1,24 +1,30 @@
 #!/usr/bin/env node
 
 import { Command, CommanderError, Option } from 'commander';
+import { readFileSync, realpathSync } from 'fs';
 import * as os from 'os';
-import type { DeviceContext } from './adapters/types';
-import { askInTerminal } from './cli/prompt';
-import { discoverConfigurations } from './commands/discover';
+import { fileURLToPath } from 'url';
+import type { DeviceContext } from './adapters/types.js';
+import { askInTerminal } from './cli/prompt.js';
+import { discoverConfigurations } from './commands/discover.js';
 import {
   captureConfigurations,
   type CaptureDependencies,
-} from './commands/capture';
-import { initRepository } from './commands/init';
+} from './commands/capture.js';
+import { initRepository } from './commands/init.js';
 import {
   deployConfigurations,
   type DeployDependencies,
-} from './commands/deploy';
-import { showStatus } from './commands/status';
-import { restoreLatestBackup } from './commands/restore';
-import { bind, migrate, showRepository, unbind } from './commands/binding';
+} from './commands/deploy.js';
+import { showStatus } from './commands/status.js';
+import { restoreLatestBackup } from './commands/restore.js';
+import { bind, migrate, showRepository, unbind } from './commands/binding.js';
 // package.json is the single version source for both npm and the CLI.
-const packageVersion = (require('../package.json') as { version: string }).version;
+const packageVersion = (
+  JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  ) as { version: string }
+).version;
 
 export function createDefaultDeviceContext(): DeviceContext {
   return {
@@ -227,6 +233,17 @@ function normalizeCommanderExitCode(error: CommanderError): number {
   return error.code.startsWith('commander.') ? 2 : 1;
 }
 
-if (require.main === module) {
+if (isMainModule()) {
   void runCli();
+}
+
+function isMainModule(): boolean {
+  const entryPoint = process.argv[1];
+  if (!entryPoint) return false;
+
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entryPoint);
+  } catch {
+    return false;
+  }
 }

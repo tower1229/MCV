@@ -1,13 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { atomicWriteFile } from '../utils/files';
-import { sanitizeConfig } from '../utils/sanitize';
-import { deleteObjectPath, parseJsonc, parseStructuredObject, splitOwnedFields, stringifyStructuredObject } from '../utils/structured-config';
-import { resolvePortableValue } from '../utils/variables';
-import { mergeRecords } from '../utils/objects';
-import { readCanonicalSource, readDeployTarget, repositoryFileForPlatform } from './adapter-utils';
-import { GEMINI_MANAGED_PATHS } from './overlay-policies';
-import type { CanonicalDeploySource, DetectedConfigDirectory, DetectedConfigFile, DeployFile, DeployOperation, DeviceContext, NativeCaptureResult, NativeFileHandler } from './types';
+import { atomicWriteFile } from '../utils/files.js';
+import { sanitizeConfig } from '../utils/sanitize.js';
+import { deleteObjectPath, parseJsonc, parseStructuredObject, splitOwnedFields, stringifyStructuredObject } from '../utils/structured-config.js';
+import { resolvePortableValue } from '../utils/variables.js';
+import { mergeRecords } from '../utils/objects.js';
+import { readCanonicalSource, readDeployTarget, repositoryFileForPlatform } from './adapter-utils.js';
+import { GEMINI_MANAGED_PATHS } from './overlay-policies.js';
+import type { CanonicalDeploySource, DetectedConfigDirectory, DetectedConfigFile, DeployFile, DeployOperation, DeviceContext, NativeCaptureResult, NativeFileHandler } from './types.js';
 
 const LOCAL_KEYS = new Set([
   '$.installationId', '$.installation_id', '$.recentProjects', '$.windowState', '$.telemetry',

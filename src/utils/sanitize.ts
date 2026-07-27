@@ -1,5 +1,5 @@
 import * as path from 'path';
-import type { DeviceContext } from '../adapters/types';
+import type { DeviceContext } from '../adapters/types.js';
 
 const SENSITIVE_FIELD_PATTERN = /(secret|token|password|credential|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?key|\.key$)/i;
 const REFERENCE_FIELD_PATTERN = /(env_var|env_vars|variable|reference)$/i;

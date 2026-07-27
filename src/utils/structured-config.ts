@@ -1,6 +1,6 @@
 import * as yaml from 'yaml';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
-import { isRecord, mergeRecords } from './objects';
+import { isRecord, mergeRecords } from './objects.js';
 
 export type StructuredFormat = 'json' | 'yaml' | 'toml';
 

@@ -1,9 +1,9 @@
 import * as path from 'path';
-import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObject } from '../utils/structured-config';
-import { hasExecutable } from './adapter-utils';
-import { GeminiCanonicalTransformer } from './gemini-canonical-transformer';
-import { GeminiNativeFileHandler } from './gemini-native-file-handler';
-import { GEMINI_MANAGED_PATHS } from './overlay-policies';
+import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObject } from '../utils/structured-config.js';
+import { hasExecutable } from './adapter-utils.js';
+import { GeminiCanonicalTransformer } from './gemini-canonical-transformer.js';
+import { GeminiNativeFileHandler } from './gemini-native-file-handler.js';
+import { GEMINI_MANAGED_PATHS } from './overlay-policies.js';
 import type {
   CanonicalTransformer,
   CaptureResult,
@@ -14,7 +14,7 @@ import type {
   DeviceContext,
   IdeAdapter,
   NativeFileHandler,
-} from './types';
+} from './types.js';
 
 export class GeminiAdapter implements IdeAdapter {
   constructor(

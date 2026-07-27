@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isSensitiveFile, sanitizeConfig } from './sanitize';
+import { isSensitiveFile, sanitizeConfig } from './sanitize.js';
 
 describe('sanitizeConfig', () => {
   it('replaces sensitive fields and home paths with portable references', () => {

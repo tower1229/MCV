@@ -1,10 +1,10 @@
-import { createAdapterDefinitions } from '../adapters';
-import type { DeviceContext } from '../adapters/types';
-import { askInTerminal, withInterruptsIgnored } from '../cli/prompt';
-import { readManifest } from '../utils/repository';
-import { applyDeployPlan, createDeployPlan } from '../operations/deploy';
-import { renderDeployPlanPlain, renderDeployResultPlain } from '../renderers/deploy';
-import { renderJson } from '../renderers/json';
+import { createAdapterDefinitions } from '../adapters/index.js';
+import type { DeviceContext } from '../adapters/types.js';
+import { askInTerminal, withInterruptsIgnored } from '../cli/prompt.js';
+import { readManifest } from '../utils/repository.js';
+import { applyDeployPlan, createDeployPlan } from '../operations/deploy.js';
+import { renderDeployPlanPlain, renderDeployResultPlain } from '../renderers/deploy.js';
+import { renderJson } from '../renderers/json.js';
 
 export interface DeployDependencies {
   confirmDeploy?: () => Promise<boolean | undefined>;

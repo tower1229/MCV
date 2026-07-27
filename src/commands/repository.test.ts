@@ -3,8 +3,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createProgram } from '../index';
-import { readState, writeState } from '../utils/state';
+import { createProgram } from '../index.js';
+import { readState, writeState } from '../utils/state.js';
 
 describe('mcv Repository routes', () => {
   const originalCwd = process.cwd();

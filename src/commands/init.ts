@@ -1,12 +1,12 @@
-import type { DeviceContext } from '../adapters/types';
+import type { DeviceContext } from '../adapters/types.js';
 import {
   applyInitPlan,
   createInitPlan,
   type InitPlan,
   type InitResult,
-} from '../operations/repository';
-import { renderJson } from '../renderers/json';
-import { renderInitPlain } from '../renderers/repository';
+} from '../operations/repository.js';
+import { renderJson } from '../renderers/json.js';
+import { renderInitPlain } from '../renderers/repository.js';
 
 export interface InitOptions {
   dryRun?: boolean;

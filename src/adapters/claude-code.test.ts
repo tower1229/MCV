@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ClaudeCodeAdapter } from './claude-code';
+import { ClaudeCodeAdapter } from './claude-code.js';
 import { parse as parseYaml } from 'yaml';
 
 describe('ClaudeCodeAdapter', () => {

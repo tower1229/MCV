@@ -1,9 +1,9 @@
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { isRecord } from '../utils/objects';
-import { stringifyStructuredObject } from '../utils/structured-config';
-import { CODEX_MCP_PATH } from './overlay-policies';
-import { normalizeMcpServers, toNativeMcpServers } from '../core/mcp';
+import { isRecord } from '../utils/objects.js';
+import { stringifyStructuredObject } from '../utils/structured-config.js';
+import { CODEX_MCP_PATH } from './overlay-policies.js';
+import { normalizeMcpServers, toNativeMcpServers } from '../core/mcp.js';
 import type {
   CanonicalDeploySource,
   CanonicalTransformer,
@@ -12,7 +12,7 @@ import type {
   DeployFile,
   DeviceContext,
   NativeCaptureResult,
-} from './types';
+} from './types.js';
 
 export class CodexCanonicalTransformer implements CanonicalTransformer {
   transform(capture: NativeCaptureResult, _context: DeviceContext): CaptureResult {

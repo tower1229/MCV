@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { inspectEnvironment } from './environment';
+import { inspectEnvironment } from './environment.js';
 
 describe('inspectEnvironment', () => {
   let homeDir: string;

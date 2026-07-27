@@ -1,9 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createProgram } from '../index';
-import { findSymbolicLinkAncestor } from '../utils/files';
-import { restoreLatestBackup } from './restore';
+import { createProgram } from '../index.js';
+import { findSymbolicLinkAncestor } from '../utils/files.js';
+import { restoreLatestBackup } from './restore.js';
 
 describe('mcv deploy', () => {
   const originalCwd = process.cwd();

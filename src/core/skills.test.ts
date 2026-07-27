@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { collectSkills } from './skills';
+import { collectSkills } from './skills.js';
 
 describe('Skill package collection', () => {
   const roots: string[] = [];

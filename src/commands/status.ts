@@ -1,10 +1,10 @@
-import type { DeviceContext } from '../adapters/types';
+import type { DeviceContext } from '../adapters/types.js';
 import {
   inspectStatus,
   type StatusReport,
-} from '../operations/status';
-import { renderJson } from '../renderers/json';
-import { renderStatusPlain } from '../renderers/status';
+} from '../operations/status.js';
+import { renderJson } from '../renderers/json.js';
+import { renderStatusPlain } from '../renderers/status.js';
 
 export interface StatusOptions {
   json?: boolean;

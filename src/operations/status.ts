@@ -1,29 +1,29 @@
 import * as fs from 'fs';
-import type { DeviceContext } from '../adapters/types';
-import { hashFile } from '../utils/files';
+import type { DeviceContext } from '../adapters/types.js';
+import { hashFile } from '../utils/files.js';
 import {
   readManifest,
   resolveBoundRepository,
   type McvManifest,
-} from '../utils/repository';
-import { readState } from '../utils/state';
+} from '../utils/repository.js';
+import { readState } from '../utils/state.js';
 import {
   createDeployPlan,
   type DeployChange,
-} from './deploy';
+} from './deploy.js';
 import {
   OPERATION_SCHEMA_VERSION,
   type Report,
-} from './contracts';
+} from './contracts.js';
 import {
   inspectEnvironment,
   type EnvironmentDetails,
   type EnvironmentReport,
-} from './environment';
+} from './environment.js';
 import {
   inspectRepository,
   type GitRepositoryStatus,
-} from './repository';
+} from './repository.js';
 
 export interface RepositoryStatusSummary {
   path: string;

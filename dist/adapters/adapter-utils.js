@@ -1,47 +1,8 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.hasExecutable = hasExecutable;
-exports.readCanonicalSource = readCanonicalSource;
-exports.readDeployTarget = readDeployTarget;
-exports.repositoryFileForPlatform = repositoryFileForPlatform;
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-const yaml = __importStar(require("yaml"));
-const variables_1 = require("../utils/variables");
-function hasExecutable(executable, context) {
+import * as fs from 'fs';
+import * as path from 'path';
+import * as yaml from 'yaml';
+import { resolvePortableValue } from '../utils/variables.js';
+export function hasExecutable(executable, context) {
     const platform = context.platform;
     const pathEnv = context.pathEnv ?? context.env.PATH ?? '';
     const delimiter = platform === 'win32' ? ';' : ':';
@@ -65,7 +26,7 @@ function hasExecutable(executable, context) {
         }
     }));
 }
-function readCanonicalSource(repositoryPath, context) {
+export function readCanonicalSource(repositoryPath, context) {
     const commonRoot = path.join(repositoryPath, 'common');
     const platformDirectory = context.platform === 'win32' ? 'windows' : 'macos';
     const overrideRoot = path.join(repositoryPath, 'overrides', platformDirectory, 'common');
@@ -84,7 +45,7 @@ function readCanonicalSource(repositoryPath, context) {
     if (fs.existsSync(rulesPath))
         source.rules = fs.readFileSync(rulesPath, 'utf8');
     if (fs.existsSync(mcpPath)) {
-        source.mcp = (0, variables_1.resolvePortableValue)(yaml.parse(fs.readFileSync(mcpPath, 'utf8')), context.variables ?? {}, context.platform);
+        source.mcp = resolvePortableValue(yaml.parse(fs.readFileSync(mcpPath, 'utf8')), context.variables ?? {}, context.platform);
     }
     const overridePaths = {
         codex: 'ide/codex/mcp-overrides.yaml',
@@ -104,12 +65,12 @@ function readCanonicalSource(repositoryPath, context) {
     }
     return source;
 }
-function readDeployTarget(targetPath) {
+export function readDeployTarget(targetPath) {
     if (!fs.existsSync(targetPath))
         return undefined;
     return { targetPath, content: fs.readFileSync(targetPath) };
 }
-function repositoryFileForPlatform(repositoryPath, relativePath, context) {
+export function repositoryFileForPlatform(repositoryPath, relativePath, context) {
     const platformDirectory = context.platform === 'win32' ? 'windows' : 'macos';
     const override = path.join(repositoryPath, 'overrides', platformDirectory, ...relativePath.split('/'));
     return fs.existsSync(override) ? override : path.join(repositoryPath, ...relativePath.split('/'));

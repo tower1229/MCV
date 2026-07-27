@@ -3,7 +3,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse as parseToml } from 'smol-toml';
 import { parse as parseYaml } from 'yaml';
-import { CodexAdapter } from './codex';
+import { CodexAdapter } from './codex.js';
 
 describe('CodexAdapter', () => {
   let homeDir: string;

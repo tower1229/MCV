@@ -1,62 +1,25 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.createDeployPlan = createDeployPlan;
-exports.applyDeployPlan = applyDeployPlan;
-const crypto = __importStar(require("crypto"));
-const buffer_1 = require("buffer");
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-const uuid_1 = require("uuid");
-const adapters_1 = require("../adapters");
-const overlay_policies_1 = require("../adapters/overlay-policies");
-const files_1 = require("../utils/files");
-const objects_1 = require("../utils/objects");
-const repository_1 = require("../utils/repository");
-const sanitize_1 = require("../utils/sanitize");
-const state_1 = require("../utils/state");
-const structured_config_1 = require("../utils/structured-config");
-const variables_1 = require("../utils/variables");
-const deploy_skills_1 = require("../utils/deploy-skills");
-const contracts_1 = require("./contracts");
+import * as crypto from 'crypto';
+import { isUtf8 } from 'buffer';
+import * as fs from 'fs';
+import * as path from 'path';
+import { v4 as uuidv4 } from 'uuid';
+import { createAdapterDefinitions } from '../adapters/index.js';
+import { CLAUDE_CODE_MCP_PATH, CODEX_MCP_PATH, GEMINI_MCP_PATH, } from '../adapters/overlay-policies.js';
+import { atomicWriteFile, findSymbolicLinkAncestor, hashFile } from '../utils/files.js';
+import { isRecord } from '../utils/objects.js';
+import { readManifest, resolveBoundRepository } from '../utils/repository.js';
+import { scanTextForSecrets } from '../utils/sanitize.js';
+import { getStateFilePath, readState, writeState } from '../utils/state.js';
+import { parseStructuredObject, stringifyStructuredObject, } from '../utils/structured-config.js';
+import { resolveVariableDefinitions } from '../utils/variables.js';
+import { findLegacyCodexSkillDuplicates } from '../utils/deploy-skills.js';
+import { OPERATION_SCHEMA_VERSION, } from './contracts.js';
 const activeDeployPlans = new WeakMap();
-async function createDeployPlan(context) {
-    const operationId = (0, uuid_1.v4)();
+export async function createDeployPlan(context) {
+    const operationId = uuidv4();
     let repositoryPath = null;
     try {
-        repositoryPath = (0, repository_1.resolveBoundRepository)(context);
+        repositoryPath = resolveBoundRepository(context);
         const mutations = new Map();
         const plan = await buildDeployPlan(context, repositoryPath, operationId, mutations);
         registerDeployPlan(plan, mutations);
@@ -64,7 +27,7 @@ async function createDeployPlan(context) {
     }
     catch {
         return freezeDeployPlan({
-            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'deploy',
             status: 'failed',
             readyToApply: false,
@@ -87,11 +50,11 @@ async function createDeployPlan(context) {
     }
 }
 async function buildDeployPlan(context, repositoryPath, operationId, mutations) {
-    const manifest = (0, repository_1.readManifest)(repositoryPath);
-    const definitions = (0, adapters_1.createAdapterDefinitions)().filter(({ targetId }) => manifest.targets[targetId]?.enabled === true);
+    const manifest = readManifest(repositoryPath);
+    const definitions = createAdapterDefinitions().filter(({ targetId }) => manifest.targets[targetId]?.enabled === true);
     if (definitions.length === 0) {
         return {
-            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'deploy',
             status: 'planned',
             readyToApply: true,
@@ -125,7 +88,7 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
     }))).flat();
     const issues = [];
     const safeDesired = desired.filter((file) => {
-        const linkPath = (0, files_1.findSymbolicLinkAncestor)(file.targetPath);
+        const linkPath = findSymbolicLinkAncestor(file.targetPath);
         if (!linkPath)
             return true;
         issues.push({
@@ -160,7 +123,7 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
                 preview: filePreview,
             }];
     });
-    const legacyDuplicates = (0, deploy_skills_1.findLegacyCodexSkillDuplicates)(context, safeDesired, definitions.some(({ targetId }) => targetId === 'codex'));
+    const legacyDuplicates = findLegacyCodexSkillDuplicates(context, safeDesired, definitions.some(({ targetId }) => targetId === 'codex'));
     if (legacyDuplicates.names.length > 0) {
         issues.push({
             severity: 'notice',
@@ -185,7 +148,7 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
     }
     const sourcePreconditions = new Map();
     const desiredPaths = new Set(safeDesired.map((file) => path.resolve(file.targetPath)));
-    const managedInventory = (0, state_1.readState)(context).managedInventory ?? {};
+    const managedInventory = readState(context).managedInventory ?? {};
     for (const [targetPath, inventoryEntry] of Object.entries(managedInventory)) {
         if (desiredPaths.has(path.resolve(targetPath)) || !fs.existsSync(targetPath))
             continue;
@@ -217,12 +180,12 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
     const preconditions = Object.fromEntries(changes.flatMap((change) => {
         return [
             [`source:${change.id}`, sourcePreconditions.get(change.id) ?? repositorySourceHash],
-            [`target:${change.id}`, fs.existsSync(change.targetPath) ? (0, files_1.hashFile)(change.targetPath) : hashText('<missing>')],
+            [`target:${change.id}`, fs.existsSync(change.targetPath) ? hashFile(change.targetPath) : hashText('<missing>')],
         ];
     }));
     const blocked = issues.some((issue) => issue.severity === 'decisionRequired' || issue.severity === 'error');
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'deploy',
         status: 'planned',
         readyToApply: !blocked,
@@ -240,7 +203,7 @@ function registerDeployPlan(plan, mutations) {
     freezeDeployPlan(plan);
     activeDeployPlans.set(plan, { operationId: plan.operationId, mutations });
 }
-async function applyDeployPlan(context, plan, selection, options = {}) {
+export async function applyDeployPlan(context, plan, selection, options = {}) {
     if (plan.status === 'failed')
         return failedDeployResult(plan.repositoryPath, plan.error, plan.issues);
     const active = activeDeployPlans.get(plan);
@@ -260,7 +223,7 @@ async function applyDeployPlan(context, plan, selection, options = {}) {
     const blocking = deployBlockingIssues(plan, selection, options);
     if (blocking.length > 0)
         return blockedDeployResult(plan, blocking);
-    if (!plan.repositoryPath || (0, repository_1.resolveBoundRepository)(context) !== plan.repositoryPath) {
+    if (!plan.repositoryPath || resolveBoundRepository(context) !== plan.repositoryPath) {
         activeDeployPlans.delete(plan);
         return failedDeployResult(plan.repositoryPath, stalePlanError());
     }
@@ -293,7 +256,7 @@ async function applyDeployPlan(context, plan, selection, options = {}) {
         }
         activeDeployPlans.delete(plan);
         return {
-            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'deploy',
             status: 'succeeded',
             repositoryPath: plan.repositoryPath,
@@ -321,13 +284,13 @@ async function applyDeployPlan(context, plan, selection, options = {}) {
     }
     try {
         assertSelectedPreconditions(context, plan, selectedChanges);
-        applyPreparedDeployWrites(prepared, backupPath, options.writeFile ?? ((targetPath, content) => (0, files_1.atomicWriteFile)(targetPath, content)), options.removeFile ?? ((targetPath) => fs.rmSync(targetPath, { force: true })), options.restoreFile ?? ((targetPath, content) => (0, files_1.atomicWriteFile)(targetPath, content)), () => {
+        applyPreparedDeployWrites(prepared, backupPath, options.writeFile ?? ((targetPath, content) => atomicWriteFile(targetPath, content)), options.removeFile ?? ((targetPath) => fs.rmSync(targetPath, { force: true })), options.restoreFile ?? ((targetPath, content) => atomicWriteFile(targetPath, content)), () => {
             finalizeDeployBackup(backupPath);
             updateDeployState(context, plan.repositoryPath, selectedChanges);
         });
         activeDeployPlans.delete(plan);
         return {
-            schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+            schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'deploy',
             status: 'succeeded',
             repositoryPath: plan.repositoryPath,
@@ -424,9 +387,9 @@ function composeSelectedContent(targetPath, changes, desiredContent) {
     if (!format)
         return Buffer.from(desiredContent);
     const current = fs.existsSync(targetPath)
-        ? (0, structured_config_1.parseStructuredObject)(fs.readFileSync(targetPath, 'utf8'), format, targetPath)
+        ? parseStructuredObject(fs.readFileSync(targetPath, 'utf8'), format, targetPath)
         : {};
-    const desired = (0, structured_config_1.parseStructuredObject)(desiredContent.toString('utf8'), format, targetPath);
+    const desired = parseStructuredObject(desiredContent.toString('utf8'), format, targetPath);
     const selectedCapabilities = new Set(changes.map((change) => change.capability));
     const managedKey = managedTopLevelKey(changes[0].ide);
     const result = { ...current };
@@ -438,7 +401,7 @@ function composeSelectedContent(targetPath, changes, desiredContent) {
                 copyStructuredKey(desired, result, key);
         }
     }
-    return Buffer.from((0, structured_config_1.stringifyStructuredObject)(result, format));
+    return Buffer.from(stringifyStructuredObject(result, format));
 }
 function copyStructuredKey(source, target, key) {
     if (key in source)
@@ -448,7 +411,7 @@ function copyStructuredKey(source, target, key) {
 }
 function createDeployBackup(context, plan, changes, copyFile) {
     assertSelectedPreconditions(context, plan, changes);
-    const backupRoot = path.join(path.dirname((0, state_1.getStateFilePath)(context)), 'backups');
+    const backupRoot = path.join(path.dirname(getStateFilePath(context)), 'backups');
     fs.mkdirSync(backupRoot, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupPath = fs.mkdtempSync(path.join(backupRoot, `${timestamp}-`));
@@ -465,7 +428,7 @@ function createDeployBackup(context, plan, changes, copyFile) {
             const relativeBackupPath = path.join('files', `${index}-${path.basename(change.targetPath)}`);
             const copiedPath = path.join(backupPath, relativeBackupPath);
             copyFile(change.targetPath, copiedPath);
-            if ((0, files_1.hashFile)(copiedPath) !== expected || (0, files_1.hashFile)(change.targetPath) !== expected) {
+            if (hashFile(copiedPath) !== expected || hashFile(change.targetPath) !== expected) {
                 throw new StaleDeployPlanError('A selected target changed while its backup was being verified.');
             }
             return {
@@ -481,7 +444,7 @@ function createDeployBackup(context, plan, changes, copyFile) {
             status: 'pending',
             files,
         };
-        (0, files_1.atomicWriteFile)(path.join(backupPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+        atomicWriteFile(path.join(backupPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
         return backupPath;
     }
     catch (error) {
@@ -491,10 +454,10 @@ function createDeployBackup(context, plan, changes, copyFile) {
 }
 function assertSelectedPreconditions(context, plan, changes) {
     const repositoryHash = plan.repositoryPath ? hashRepositoryInputs(plan.repositoryPath) : undefined;
-    const inventory = (0, state_1.readState)(context).managedInventory ?? {};
+    const inventory = readState(context).managedInventory ?? {};
     for (const change of changes) {
         const targetHash = fs.existsSync(change.targetPath)
-            ? (0, files_1.hashFile)(change.targetPath)
+            ? hashFile(change.targetPath)
             : hashText('<missing>');
         const sourceHash = change.change === 'delete' && inventory[change.targetPath] !== undefined
             ? hashText(stableValue(inventory[change.targetPath]))
@@ -551,11 +514,11 @@ function finalizeDeployBackup(backupPath) {
     const manifest = readDeployBackupManifest(backupPath);
     for (const entry of manifest.files) {
         if (fs.existsSync(entry.originalPath))
-            entry.afterHash = (0, files_1.hashFile)(entry.originalPath);
+            entry.afterHash = hashFile(entry.originalPath);
     }
     manifest.status = 'complete';
     manifest.completedAt = new Date().toISOString();
-    (0, files_1.atomicWriteFile)(path.join(backupPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+    atomicWriteFile(path.join(backupPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 function markDeployBackupFailed(backupPath, error) {
     try {
@@ -563,7 +526,7 @@ function markDeployBackupFailed(backupPath, error) {
         manifest.status = 'failed';
         manifest.failedAt = new Date().toISOString();
         manifest.error = errorMessage(error);
-        (0, files_1.atomicWriteFile)(path.join(backupPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+        atomicWriteFile(path.join(backupPath, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
     }
     catch { /* Preserve the primary Deploy failure. */ }
 }
@@ -571,7 +534,7 @@ function readDeployBackupManifest(backupPath) {
     return JSON.parse(fs.readFileSync(path.join(backupPath, 'manifest.json'), 'utf8'));
 }
 function updateDeployState(context, repositoryPath, changes) {
-    const state = (0, state_1.readState)(context);
+    const state = readState(context);
     const baselineFiles = { ...(state.baselineSnapshot?.files ?? {}) };
     const managedInventory = { ...(state.managedInventory ?? {}) };
     for (const change of changes) {
@@ -580,7 +543,7 @@ function updateDeployState(context, repositoryPath, changes) {
             delete managedInventory[change.targetPath];
         }
         else {
-            const hash = (0, files_1.hashFile)(change.targetPath);
+            const hash = hashFile(change.targetPath);
             baselineFiles[change.targetPath] = hash;
             managedInventory[change.targetPath] = { source: repositoryPath, hash };
         }
@@ -596,7 +559,7 @@ function updateDeployState(context, repositoryPath, changes) {
     state.managedInventory = managedInventory;
     state.lastDeploySelection = lastDeploySelection;
     state.lastOperation = { kind: 'deploy', time: new Date().toISOString(), success: true };
-    (0, state_1.writeState)(context, state);
+    writeState(context, state);
 }
 class StaleDeployPlanError extends Error {
 }
@@ -622,7 +585,7 @@ function stalePlanError(technicalDetails) {
 }
 function failedDeployResult(repositoryPath, error, issues = [{ severity: 'error', code: error.code, message: error.message }]) {
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'deploy',
         status: 'failed',
         repositoryPath,
@@ -634,7 +597,7 @@ function failedDeployResult(repositoryPath, error, issues = [{ severity: 'error'
 }
 function blockedDeployResult(plan, issues) {
     return {
-        schemaVersion: contracts_1.OPERATION_SCHEMA_VERSION,
+        schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'deploy',
         status: 'blocked',
         repositoryPath: plan.repositoryPath,
@@ -668,7 +631,7 @@ function preview(targetPath, ide, capability, next, previous, issues) {
         return { targetPath, kind: 'binary', bytes: metadata.length, sha256: hashBuffer(metadata) };
     }
     const diff = renderSafeDiff(targetPath, ide, capability, previous?.toString('utf8'), next.toString('utf8'));
-    if ((0, sanitize_1.scanTextForSecrets)(diff).length > 0) {
+    if (scanTextForSecrets(diff).length > 0) {
         issues.push({
             severity: 'error',
             code: `deploy.unsafeDiffWithheld.${issues.length + 1}`,
@@ -692,8 +655,8 @@ function renderSafeDiff(targetPath, ide, capability, previous, next) {
     if (!format)
         return renderChangedLines(previous, next);
     try {
-        const before = previous === undefined ? {} : (0, structured_config_1.parseStructuredObject)(previous, format, targetPath);
-        const after = (0, structured_config_1.parseStructuredObject)(next, format, targetPath);
+        const before = previous === undefined ? {} : parseStructuredObject(previous, format, targetPath);
+        const after = parseStructuredObject(next, format, targetPath);
         const managedKey = managedTopLevelKey(ide);
         const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])]
             .filter((key) => capability === 'mcp' ? key === managedKey : key !== managedKey)
@@ -722,9 +685,9 @@ function structuredFormat(targetPath) {
     return undefined;
 }
 const MCP_PATH_BY_IDE = {
-    codex: overlay_policies_1.CODEX_MCP_PATH,
-    'claude-code': overlay_policies_1.CLAUDE_CODE_MCP_PATH,
-    gemini: overlay_policies_1.GEMINI_MCP_PATH,
+    codex: CODEX_MCP_PATH,
+    'claude-code': CLAUDE_CODE_MCP_PATH,
+    gemini: GEMINI_MCP_PATH,
 };
 function managedTopLevelKey(ide) {
     return MCP_PATH_BY_IDE[ide].slice(2);
@@ -732,7 +695,7 @@ function managedTopLevelKey(ide) {
 function stableValue(value) {
     if (Array.isArray(value))
         return `[${value.map(stableValue).join(',')}]`;
-    if ((0, objects_1.isRecord)(value)) {
+    if (isRecord(value)) {
         return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableValue(value[key])}`).join(',')}}`;
     }
     if (value instanceof Date)
@@ -891,13 +854,13 @@ function resolveManifestVariables(declarations, context, repositoryPath) {
     for (const [name, declaration] of Object.entries(declarations ?? {})) {
         const value = typeof declaration === 'string'
             ? declaration
-            : (0, objects_1.isRecord)(declaration) && typeof declaration[platformKey] === 'string'
+            : isRecord(declaration) && typeof declaration[platformKey] === 'string'
                 ? declaration[platformKey]
                 : undefined;
         if (value !== undefined)
             definitions[name] = value;
     }
-    return (0, variables_1.resolveVariableDefinitions)(definitions, {
+    return resolveVariableDefinitions(definitions, {
         ...context.variables,
         HOME: context.homeDir,
         MCV_REPO: repositoryPath,
@@ -907,7 +870,7 @@ function toBuffer(value) {
     return Buffer.isBuffer(value) ? Buffer.from(value) : Buffer.from(value);
 }
 function isText(value) {
-    return value.length === 0 || ((0, buffer_1.isUtf8)(value) && !value.includes(0));
+    return value.length === 0 || (isUtf8(value) && !value.includes(0));
 }
 function lines(value) {
     const result = value.replace(/\r\n?/g, '\n').split('\n');

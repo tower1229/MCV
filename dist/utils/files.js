@@ -1,49 +1,10 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.hashFile = hashFile;
-exports.findSymbolicLinkAncestor = findSymbolicLinkAncestor;
-exports.atomicWriteTextFile = atomicWriteTextFile;
-exports.atomicWriteFile = atomicWriteFile;
-const crypto_1 = require("crypto");
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-function hashFile(filePath) {
-    return (0, crypto_1.createHash)('sha256').update(fs.readFileSync(filePath)).digest('hex');
+import { createHash } from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
+export function hashFile(filePath) {
+    return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
-function findSymbolicLinkAncestor(targetPath) {
+export function findSymbolicLinkAncestor(targetPath) {
     let current = path.resolve(targetPath);
     while (true) {
         try {
@@ -57,10 +18,10 @@ function findSymbolicLinkAncestor(targetPath) {
         current = parent;
     }
 }
-function atomicWriteTextFile(targetPath, content) {
+export function atomicWriteTextFile(targetPath, content) {
     atomicWriteFile(targetPath, content);
 }
-function atomicWriteFile(targetPath, content) {
+export function atomicWriteFile(targetPath, content) {
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
     const temporaryPath = `${targetPath}.mcv-${process.pid}-${Date.now()}.tmp`;
     try {

@@ -1,5 +1,5 @@
-import type { DeployPlan, DeployResult } from '../operations/deploy';
-import { renderIssuePlain } from './color';
+import type { DeployPlan, DeployResult } from '../operations/deploy.js';
+import { renderIssuePlain } from './color.js';
 
 export function renderDeployPlanPlain(plan: DeployPlan): string[] {
   const lines = [`Deploy Plan: ${plan.repositoryPath ?? 'not bound'}`];

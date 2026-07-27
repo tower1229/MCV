@@ -1,35 +1,32 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.captureConfigurations = captureConfigurations;
-const prompt_1 = require("../cli/prompt");
-const state_1 = require("../utils/state");
-const capture_1 = require("../operations/capture");
-const capture_2 = require("../renderers/capture");
-const json_1 = require("../renderers/json");
-async function captureConfigurations(context, dependencies = {}, options = {}) {
-    const capturePlan = await (0, capture_1.createCapturePlan)(context);
+import { askInTerminal, withInterruptsIgnored } from '../cli/prompt.js';
+import { readState, writeState } from '../utils/state.js';
+import { applyCapturePlan, createCapturePlan } from '../operations/capture.js';
+import { renderCapturePlanPlain, renderCaptureResultPlain } from '../renderers/capture.js';
+import { renderJson } from '../renderers/json.js';
+export async function captureConfigurations(context, dependencies = {}, options = {}) {
+    const capturePlan = await createCapturePlan(context);
     if (options.dryRun) {
         if (options.json)
-            console.log((0, json_1.renderJson)(capturePlan));
+            console.log(renderJson(capturePlan));
         else
-            for (const line of (0, capture_2.renderCapturePlanPlain)(capturePlan))
+            for (const line of renderCapturePlanPlain(capturePlan))
                 console.log(line);
         if (capturePlan.status === 'failed')
             process.exitCode = 1;
         return;
     }
     if (capturePlan.status === 'failed') {
-        const result = await (0, capture_1.applyCapturePlan)(context, capturePlan, { changeIds: [] });
+        const result = await applyCapturePlan(context, capturePlan, { changeIds: [] });
         if (options.json)
-            console.log((0, json_1.renderJson)(result));
+            console.log(renderJson(result));
         else
-            for (const line of (0, capture_2.renderCaptureResultPlain)(result))
+            for (const line of renderCaptureResultPlain(result))
                 console.log(line);
         process.exitCode = 1;
         return;
     }
     if (!options.json && !options.yes) {
-        for (const line of (0, capture_2.renderCapturePlanPlain)(capturePlan))
+        for (const line of renderCapturePlanPlain(capturePlan))
             console.log(line);
     }
     const changeIds = capturePlan.changes
@@ -86,7 +83,7 @@ async function captureConfigurations(context, dependencies = {}, options = {}) {
             return;
         }
     }
-    const result = await (0, prompt_1.withInterruptsIgnored)(() => (0, capture_1.applyCapturePlan)(context, capturePlan, {
+    const result = await withInterruptsIgnored(() => applyCapturePlan(context, capturePlan, {
         changeIds,
         confirmedIssueCodes: options.yes
             ? []
@@ -95,27 +92,27 @@ async function captureConfigurations(context, dependencies = {}, options = {}) {
                 .map((issue) => issue.code),
     }, { nonInteractive: options.yes }));
     if (result.status === 'succeeded') {
-        const state = (0, state_1.readState)(context);
+        const state = readState(context);
         state.lastOperation = { kind: 'capture', time: new Date().toISOString(), success: true };
-        (0, state_1.writeState)(context, state);
+        writeState(context, state);
     }
     else {
         process.exitCode = result.status === 'blocked' ? 3 : 1;
     }
     if (options.json)
-        console.log((0, json_1.renderJson)(result));
+        console.log(renderJson(result));
     else
-        for (const line of (0, capture_2.renderCaptureResultPlain)(result))
+        for (const line of renderCaptureResultPlain(result))
             console.log(line);
 }
 async function confirmInTerminal() {
-    const outcome = await (0, prompt_1.askInTerminal)('Write these changes to the repository? [y/N] ');
+    const outcome = await askInTerminal('Write these changes to the repository? [y/N] ');
     return outcome.interrupted ? undefined : /^(y|yes)$/i.test(outcome.answer.trim());
 }
 async function selectConflictInTerminal(name, candidates) {
     console.log(`Conflict: ${name}`);
     candidates.forEach((candidate, index) => console.log(`  ${index + 1}. ${candidate}`));
-    const outcome = await (0, prompt_1.askInTerminal)('Choose authoritative source (blank to skip): ');
+    const outcome = await askInTerminal('Choose authoritative source (blank to skip): ');
     if (outcome.interrupted)
         return { interrupted: true };
     const answer = Number(outcome.answer);

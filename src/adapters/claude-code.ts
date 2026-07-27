@@ -4,9 +4,9 @@ import {
   mergeStructuredOverlay,
   parseStructuredObject,
   stringifyStructuredObject,
-} from '../utils/structured-config';
-import { ClaudeCodeNativeFileHandler } from './claude-code-native-file-handler';
-import { ClaudeCodeCanonicalTransformer } from './claude-code-canonical-transformer';
+} from '../utils/structured-config.js';
+import { ClaudeCodeNativeFileHandler } from './claude-code-native-file-handler.js';
+import { ClaudeCodeCanonicalTransformer } from './claude-code-canonical-transformer.js';
 import type {
   CanonicalTransformer,
   CaptureResult,
@@ -16,8 +16,8 @@ import type {
   DeviceContext,
   IdeAdapter,
   NativeFileHandler,
-} from './types';
-import { CLAUDE_CODE_MANAGED_PATHS } from './overlay-policies';
+} from './types.js';
+import { CLAUDE_CODE_MANAGED_PATHS } from './overlay-policies.js';
 
 export class ClaudeCodeAdapter implements IdeAdapter {
   constructor(

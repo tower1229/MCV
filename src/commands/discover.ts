@@ -1,10 +1,10 @@
-import type { DeviceContext } from '../adapters/types';
+import type { DeviceContext } from '../adapters/types.js';
 import {
   inspectEnvironment,
   type EnvironmentReport,
-} from '../operations/environment';
-import { renderEnvironmentPlain } from '../renderers/environment';
-import { renderJson } from '../renderers/json';
+} from '../operations/environment.js';
+import { renderEnvironmentPlain } from '../renderers/environment.js';
+import { renderJson } from '../renderers/json.js';
 
 export interface DiscoverOptions {
   json?: boolean;

@@ -13,7 +13,7 @@ vi.mock('readline/promises', () => ({
   createInterface: vi.fn(() => terminalPrompt),
 }));
 
-import { createProgram } from './index';
+import { createProgram } from './index.js';
 
 describe('mcv init interaction', () => {
   const originalCwd = process.cwd();

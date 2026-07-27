@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeMcpServers, toNativeMcpServers } from './mcp';
+import { normalizeMcpServers, toNativeMcpServers } from './mcp.js';
 
 describe('Canonical MCP conversion', () => {
   it('normalizes transports, secret references, overrides, and runtime exclusions', () => {

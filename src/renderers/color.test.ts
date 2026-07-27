@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { styleText } from './color';
+import { styleText } from './color.js';
 
 describe('plain renderer color detection', () => {
   it('adds ANSI color only for a color-capable TTY', () => {

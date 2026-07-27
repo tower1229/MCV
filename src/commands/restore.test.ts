@@ -2,8 +2,8 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createProgram } from '../index';
-import { writeState } from '../utils/state';
+import { createProgram } from '../index.js';
+import { writeState } from '../utils/state.js';
 
 describe('mcv restore', () => {
   const originalCwd = process.cwd();

@@ -6,6 +6,7 @@ import { spawn, spawnSync } from 'child_process';
 import { describe, expect, it } from 'vitest';
 
 const cliPath = path.join(process.cwd(), 'dist', 'index.js');
+const packagePath = path.join(process.cwd(), 'package.json');
 
 function isolatedEnvironment(homeDir: string): NodeJS.ProcessEnv {
   return {
@@ -19,6 +20,18 @@ function isolatedEnvironment(homeDir: string): NodeJS.ProcessEnv {
 }
 
 describe('packaged mcv CLI', () => {
+  it('ships one native ESM CLI entry', () => {
+    const packageMetadata = JSON.parse(fs.readFileSync(packagePath, 'utf8')) as {
+      type?: string;
+    };
+    const cliSource = fs.readFileSync(cliPath, 'utf8');
+
+    expect(packageMetadata.type).toBe('module');
+    expect(cliSource).toMatch(/^#!\/usr\/bin\/env node\s+import /);
+    expect(cliSource).toContain('import.meta.url');
+    expect(cliSource).not.toMatch(/\brequire\s*\(|\bmodule\.exports\b|\bexports\./);
+  });
+
   it('prints help and succeeds when invoked without arguments outside a TTY', () => {
     const result = spawnSync(process.execPath, [cliPath], {
       encoding: 'utf8',

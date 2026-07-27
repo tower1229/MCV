@@ -1,10 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { isRecord } from '../utils/objects';
-import { atomicWriteFile } from '../utils/files';
-import { isSensitiveFile, sanitizeConfig } from '../utils/sanitize';
-import { deleteObjectPath } from '../utils/structured-config';
-import { resolvePortableValue } from '../utils/variables';
+import { isRecord } from '../utils/objects.js';
+import { atomicWriteFile } from '../utils/files.js';
+import { isSensitiveFile, sanitizeConfig } from '../utils/sanitize.js';
+import { deleteObjectPath } from '../utils/structured-config.js';
+import { resolvePortableValue } from '../utils/variables.js';
 import type {
   CaptureFile,
   CanonicalDeploySource,
@@ -17,9 +17,9 @@ import type {
   DeviceContext,
   NativeFileHandler,
   NativeCaptureResult,
-} from './types';
-import { CLAUDE_CODE_MANAGED_PATHS } from './overlay-policies';
-import { readCanonicalSource, repositoryFileForPlatform } from './adapter-utils';
+} from './types.js';
+import { CLAUDE_CODE_MANAGED_PATHS } from './overlay-policies.js';
+import { readCanonicalSource, repositoryFileForPlatform } from './adapter-utils.js';
 
 interface JsonCapturePolicy {
   repositoryPath: string;

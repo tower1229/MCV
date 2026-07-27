@@ -4,8 +4,8 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { execFileSync } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { DeviceContext } from '../adapters/types';
-import { readState, writeState } from '../utils/state';
+import type { DeviceContext } from '../adapters/types.js';
+import { readState, writeState } from '../utils/state.js';
 import {
   applyInitPlan,
   applyMigrationPlan,
@@ -16,7 +16,7 @@ import {
   createMigrationPlan,
   createUnbindPlan,
   inspectRepository,
-} from './repository';
+} from './repository.js';
 
 describe('Repository operations', () => {
   const originalCwd = process.cwd();
