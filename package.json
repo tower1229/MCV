@@ -15,6 +15,7 @@
     "test": "vitest run src",
     "test:watch": "vitest src",
     "typecheck": "tsc --noEmit",
+    "prototype:deploy-selection": "node .scratch/deploy-selection-tree/prototype/run.mjs",
     "prepack": "npm run typecheck && npm test && npm run build"
   },
   "repository": {
