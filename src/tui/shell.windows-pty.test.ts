@@ -73,16 +73,7 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
       const terminal = pty.spawn('powershell.exe', [
         '-NoLogo',
         '-NoProfile',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-File',
-        wrapperPath,
-        '-Node',
-        process.execPath,
-        '-Cli',
-        cliPath,
-        '-Route',
-        route,
+        '-NoExit',
       ], {
         cols: 100,
         rows: 30,
@@ -112,6 +103,19 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
         clearTimeout(timeout);
         resolve({ code: exitCode, output });
       });
+      const quotePowerShell = (value: string): string =>
+        `'${value.replaceAll("'", "''")}'`;
+      const invocation = [
+        '&',
+        quotePowerShell(wrapperPath),
+        '-Node',
+        quotePowerShell(process.execPath),
+        '-Cli',
+        quotePowerShell(cliPath),
+        '-Route',
+        quotePowerShell(route),
+      ].join(' ');
+      setTimeout(() => terminal.write(`${invocation}\r`), 100);
     });
   }
 });

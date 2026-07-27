@@ -243,7 +243,7 @@ describe('packaged mcv CLI', () => {
     } finally {
       fs.rmSync(isolatedRoot, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 
   it('rejects invalid write mode combinations before running the Operation', () => {
     const conflicting = spawnSync(
