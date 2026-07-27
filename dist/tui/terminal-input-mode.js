@@ -41,6 +41,7 @@ function runPowerShell(spawn, script) {
         script,
     ], {
         encoding: 'utf8',
+        stdio: ['inherit', 'pipe', 'pipe'],
         timeout: 5_000,
         windowsHide: true,
     });

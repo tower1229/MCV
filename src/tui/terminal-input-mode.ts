@@ -8,6 +8,7 @@ type Spawn = (
   args: readonly string[],
   options: {
     encoding: 'utf8';
+    stdio: ['inherit', 'pipe', 'pipe'];
     timeout: number;
     windowsHide: boolean;
   },
@@ -67,6 +68,7 @@ function runPowerShell(
     ],
     {
       encoding: 'utf8',
+      stdio: ['inherit', 'pipe', 'pipe'],
       timeout: 5_000,
       windowsHide: true,
     },
