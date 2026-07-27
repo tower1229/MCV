@@ -118,3 +118,47 @@ Pre-restore backup: /Users/张涛/.mcv/restore-backups/before-restore-success
 Enter Refresh Overview   q Quit",
 }
 `;
+
+exports[`TUI Shell view > snapshots an expanded large Deploy tree at desktop and narrow widths 1`] = `
+{
+  "desktop": "MCV
+Deploy · Select Changes
+
+Repository: /Users/张涛/Configuration Repository
+28 changes · 14 selected
+
+  … 3 earlier
+      [x]   [add] file-1.md
+      [x]   [add] file-2.md
+      [x]   [add] file-3.md
+      [x]   [add] file-4.md
+      [x]   [add] file-5.md
+      [x]   [add] file-6.md
+    > [x]   [add] file-7.md
+      [x]   [add] file-8.md
+      [x]   [add] file-9.md
+      [x]   [add] file-10.md
+      [x]   [add] file-11.md
+      [x]   [add] file-12.md
+  … 2 more
+
+↑↓ Move   ←→ Expand/Collapse   Space Select   PgUp/PgDn Page   Home/End   d Diff   a Cleanup   Enter
+ Continue   q Quit   Ctrl+C Cancel",
+  "narrow": "MCV
+Deploy · Select Changes
+
+Repository: /Users/张涛/Configuration Repository
+28 changes · 14 selected
+
+  … 7 earlier
+      [x]   [add] file-5.md
+      [x]   [add] file-6.md
+    > [x]   [add] file-7.md
+      [x]   [add] file-8.md
+  … 6 more
+
+↑↓ Move   ←→ Expand/Collapse   Space Select
+PgUp/PgDn Page   Home/End   d Diff   a Cleanup
+ Enter Continue   q Quit   Ctrl+C Cancel",
+}
+`;

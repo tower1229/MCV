@@ -1,5 +1,5 @@
 import { jsx as _jsx } from "react/jsx-runtime";
-import { render, useApp, useInput, } from 'ink';
+import { render, useApp, useInput, useWindowSize, } from 'ink';
 import { useEffect, useReducer, useRef } from 'react';
 import { applyCapturePlan, createCapturePlan, } from '../operations/capture.js';
 import { inspectEnvironment, } from '../operations/environment.js';
@@ -42,6 +42,7 @@ export async function runTuiShell(context, initialRoute, dependencies = {}, runt
 function Shell({ context, initialRoute, dependencies }) {
     const [state, dispatch] = useReducer(shellReducer, initialRoute, createInitialShellState);
     const { exit } = useApp();
+    const windowSize = useWindowSize();
     const repositoryEntry = useRef(dependencies.repositoryEntry);
     useEffect(() => {
         if (state.page.status !== 'loading')
@@ -433,8 +434,31 @@ function Shell({ context, initialRoute, dependencies }) {
                 return;
             }
             if (deployWorkflow?.status === 'selection') {
-                if (input === ' ')
+                if (key.rightArrow)
+                    dispatch({ type: 'deploy.expand' });
+                else if (key.leftArrow)
+                    dispatch({ type: 'deploy.collapse' });
+                else if (key.pageUp) {
+                    dispatch({
+                        type: 'deploy.move',
+                        delta: -Math.max(1, windowSize.rows - 12),
+                    });
+                }
+                else if (key.pageDown) {
+                    dispatch({
+                        type: 'deploy.move',
+                        delta: Math.max(1, windowSize.rows - 12),
+                    });
+                }
+                else if (key.home) {
+                    dispatch({ type: 'deploy.focus', position: 'first' });
+                }
+                else if (key.end) {
+                    dispatch({ type: 'deploy.focus', position: 'last' });
+                }
+                else if (input === ' ') {
                     dispatch({ type: 'deploy.toggleSelection' });
+                }
                 else if (input === 'a')
                     dispatch({ type: 'deploy.toggleAdvanced' });
                 else if (input === 'd')
@@ -524,7 +548,7 @@ function Shell({ context, initialRoute, dependencies }) {
             return;
         exit(createOutcome(state, initialRoute));
     }, [exit, initialRoute, state]);
-    return _jsx(ShellView, { state: state });
+    return _jsx(ShellView, { state: state, terminalRows: windowSize.rows });
 }
 function createRepositoryEntryAction(context, entry, dependencies) {
     switch (entry.operation) {

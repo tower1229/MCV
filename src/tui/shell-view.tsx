@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink';
+import { Box, Text, useWindowSize } from 'ink';
 import type { ReactNode } from 'react';
 import type { EnvironmentReport } from '../operations/environment.js';
 import type {
@@ -10,7 +10,6 @@ import type {
 import type { StatusReport } from '../operations/status.js';
 import type { RepositoryReport } from '../operations/repository.js';
 import type {
-  DeployChange,
   DeployPreview,
   DeployResult,
 } from '../operations/deploy.js';
@@ -19,9 +18,12 @@ import type {
   RestoreResult,
 } from '../operations/restore.js';
 import {
+  buildDeploySelectionTree,
+  flattenDeploySelectionTree,
+} from './deploy-selection-tree.js';
+import {
   captureDecisionGroups,
   captureWarnings,
-  deployVisibleChanges,
   deployWarnings,
   type CaptureWorkflowState,
   type DeployWorkflowState,
@@ -35,12 +37,15 @@ import {
 
 export interface ShellViewProps {
   state: ShellState;
+  terminalRows?: number;
 }
 
-export function ShellView({ state }: ShellViewProps): ReactNode {
+export function ShellView({ state, terminalRows }: ShellViewProps): ReactNode {
+  const windowSize = useWindowSize();
+  const rows = terminalRows ?? windowSize.rows;
   const { page } = state;
   const title = pageTitle(state);
-  const controls = pageControls(state);
+  const controls = pageControls(state, rows);
 
   return (
     <Box flexDirection="column">
@@ -63,7 +68,7 @@ export function ShellView({ state }: ShellViewProps): ReactNode {
         <CaptureWorkflow workflow={page.workflow} />
       )}
       {page.status === 'ready' && page.route === 'deploy' && (
-        <DeployWorkflow workflow={page.workflow} />
+        <DeployWorkflow workflow={page.workflow} terminalRows={rows} />
       )}
       {page.status === 'ready' && page.route === 'restore' && (
         <RestoreWorkflow workflow={page.workflow} />
@@ -125,7 +130,10 @@ function pageTitle(state: ShellState): string {
   }
 }
 
-function pageControls(state: ShellState): string | undefined {
+function pageControls(
+  state: ShellState,
+  terminalRows: number,
+): string | undefined {
   const { page } = state;
   if (page.route === 'repository') {
     if (page.status !== 'ready') return 'q Quit   Ctrl+C Cancel';
@@ -165,7 +173,9 @@ function pageControls(state: ShellState): string | undefined {
   if (page.route === 'deploy') {
     switch (page.workflow.status) {
       case 'selection':
-        return '↑↓ Move   Space Select   d Diff   a Advanced Cleanup   Enter Continue   q Quit   Ctrl+C Cancel';
+        return terminalRows <= 12
+          ? '↑↓/Pg Move   ←→ Expand   Space Select   q Quit'
+          : '↑↓ Move   ←→ Expand/Collapse   Space Select   PgUp/PgDn Page   Home/End   d Diff   a Cleanup   Enter Continue   q Quit   Ctrl+C Cancel';
       case 'diff':
         return 'Escape Back   q Quit   Ctrl+C Cancel';
       case 'confirmation':
@@ -692,12 +702,14 @@ function displayGroup(change: CaptureChange): string {
 
 function DeployWorkflow({
   workflow,
+  terminalRows,
 }: {
   workflow: DeployWorkflowState;
+  terminalRows: number;
 }): ReactNode {
   switch (workflow.status) {
     case 'selection':
-      return <DeploySelection workflow={workflow} />;
+      return <DeploySelection workflow={workflow} terminalRows={terminalRows} />;
     case 'diff':
       return <DeployDiff workflow={workflow} />;
     case 'confirmation':
@@ -731,50 +743,71 @@ function DeployWorkflow({
 
 function DeploySelection({
   workflow,
+  terminalRows,
 }: {
   workflow: Extract<DeployWorkflowState, { status: 'selection' }>;
+  terminalRows: number;
 }): ReactNode {
-  const visibleChanges = deployVisibleChanges(workflow);
+  const tree = buildDeploySelectionTree(workflow.plan);
+  const visible = flattenDeploySelectionTree(tree, workflow.expandedNodeIds);
   const advanced = workflow.plan.changes.filter(
     (change) => change.group === 'advanced',
   );
-  let previousGroup = '';
+  const viewport = deployViewport(
+    visible,
+    workflow.cursor,
+    Math.max(1, terminalRows - (terminalRows <= 12 ? 8 : 10)),
+  );
 
   return (
     <Box flexDirection="column">
-      <Text>Repository: {workflow.plan.repositoryPath ?? 'not bound'}</Text>
+      <Text wrap="truncate-middle">
+        Repository: {workflow.plan.repositoryPath ?? 'not bound'}
+      </Text>
       <Text>
         {workflow.plan.changes.length} changes · {workflow.selectedIds.length} selected
       </Text>
       <Text> </Text>
-      {visibleChanges.map((change, index) => {
-        const group = `${change.group}/${change.ide}/${change.capability}`;
-        const showGroup = group !== previousGroup;
-        previousGroup = group;
-        return (
-          <Box key={change.id} flexDirection="column">
-            {showGroup && change.group === 'standard' && (
-              <Text>{displayDeployGroup(change)}</Text>
-            )}
-            {showGroup && change.group === 'advanced' && (
-              <Text>Advanced Cleanup / {displayDeployGroup(change)}</Text>
-            )}
-            <Text>
-              {index === workflow.cursor ? '>' : ' '}{' '}
-              [{workflow.selectedIds.includes(change.id) ? 'x' : ' '}] [{change.change}] {change.name}
+      {!viewport.combinedIndicator && viewport.hiddenBefore > 0 && (
+        <Text dimColor>  … {viewport.hiddenBefore} earlier</Text>
+      )}
+      {viewport.items.map(({ item: { node, depth } }, index) => {
+        const visibleIndex = viewport.start + index;
+        const expanded = workflow.expandedNodeIds.includes(node.id);
+        const disclosure = node.children.length === 0
+          ? ' '
+          : expanded ? '▼' : '▶';
+        if (node.kind === 'advanced') {
+          return (
+            <Text key={node.id} wrap="truncate-middle">
+              {visibleIndex === workflow.cursor ? '>' : ' '}{' '}
+              {deployNodeSelectionMarker(node.changeIds, workflow.selectedIds)}{' '}
+              {disclosure} Advanced Cleanup: {expanded ? 'expanded' : 'collapsed'} ({advanced.length}{' '}
+              {advanced.length === 1 ? 'deletion' : 'deletions'},{' '}
+              {advanced.filter((change) => workflow.selectedIds.includes(change.id)).length || 'none'} selected)
             </Text>
-          </Box>
+          );
+        }
+        return (
+          <Text key={node.id} wrap="truncate-middle">
+            {'  '.repeat(depth)}
+            {visibleIndex === workflow.cursor ? '>' : ' '}{' '}
+            {deployNodeSelectionMarker(node.changeIds, workflow.selectedIds)}{' '}
+            {disclosure} {node.label}
+            {node.kind !== 'file' && (
+              <> · {node.changeIds.length}{' '}
+                {node.changeIds.length === 1 ? 'file' : 'files'}</>
+            )}
+          </Text>
         );
       })}
-      {advanced.length > 0 && (
-        <>
-          <Text> </Text>
-          <Text>
-            Advanced Cleanup: {workflow.advancedExpanded ? 'expanded' : 'collapsed'} ({advanced.length}{' '}
-            {advanced.length === 1 ? 'deletion' : 'deletions'},{' '}
-            {advanced.filter((change) => workflow.selectedIds.includes(change.id)).length || 'none'} selected)
-          </Text>
-        </>
+      {!viewport.combinedIndicator && viewport.hiddenAfter > 0 && (
+        <Text dimColor>  … {viewport.hiddenAfter} more</Text>
+      )}
+      {viewport.combinedIndicator && (
+        <Text dimColor>
+          {'  '}… {viewport.hiddenBefore} earlier · {viewport.hiddenAfter} more
+        </Text>
       )}
       {workflow.plan.issues.some((issue) =>
         issue.severity === 'decisionRequired' || issue.severity === 'error') && (
@@ -784,6 +817,56 @@ function DeploySelection({
       )}
     </Box>
   );
+}
+
+function deployViewport<T>(
+  items: T[],
+  cursor: number,
+  maximumRows: number,
+): {
+  items: Array<{ item: T }>;
+  start: number;
+  hiddenBefore: number;
+  hiddenAfter: number;
+  combinedIndicator: boolean;
+} {
+  if (items.length <= maximumRows) {
+    return {
+      items: items.map((item) => ({ item })),
+      start: 0,
+      hiddenBefore: 0,
+      hiddenAfter: 0,
+      combinedIndicator: false,
+    };
+  }
+  const combinedIndicator = maximumRows === 2;
+  const indicatorRows = maximumRows <= 1 ? 0 : combinedIndicator ? 1 : 2;
+  const itemRows = Math.max(1, maximumRows - indicatorRows);
+  const maximumStart = Math.max(0, items.length - itemRows);
+  const start = maximumRows <= 2
+    ? Math.min(Math.max(cursor, 0), maximumStart)
+    : Math.min(
+      Math.max(cursor - Math.floor(itemRows / 2), 0),
+      maximumStart,
+    );
+  const end = Math.min(start + itemRows, items.length);
+  return {
+    items: items.slice(start, end).map((item) => ({ item })),
+    start,
+    hiddenBefore: maximumRows <= 1 ? 0 : start,
+    hiddenAfter: maximumRows <= 1 ? 0 : items.length - end,
+    combinedIndicator,
+  };
+}
+
+function deployNodeSelectionMarker(
+  changeIds: string[],
+  selectedIds: string[],
+): string {
+  const selected = changeIds.filter((id) => selectedIds.includes(id)).length;
+  if (selected === 0) return '[ ]';
+  if (selected === changeIds.length) return '[x]';
+  return '[-]';
 }
 
 function DeployDiff({
@@ -997,17 +1080,4 @@ function RestoreResultView({ result }: { result: RestoreResult }): ReactNode {
       ))}
     </Box>
   );
-}
-
-function displayDeployGroup(change: DeployChange): string {
-  const ide = change.ide === 'claude-code'
-    ? 'Claude Code'
-    : change.ide.charAt(0).toUpperCase() + change.ide.slice(1);
-  const capability: Record<DeployChange['capability'], string> = {
-    rules: 'Shared Rules',
-    skills: 'Skills',
-    mcp: 'MCP',
-    native: 'IDE Configuration',
-  };
-  return `${ide} / ${capability[change.capability]}`;
 }
