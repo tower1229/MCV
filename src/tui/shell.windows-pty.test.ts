@@ -136,6 +136,7 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
           HOME: testRoot,
           USERPROFILE: testRoot,
           APPDATA: testRoot,
+          MCV_TEST_TERMINAL_MODE_DIAGNOSTICS: 'true',
         },
       });
       let output = '';
