@@ -69,6 +69,7 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
       '$code = $LASTEXITCODE',
       '[uint32]$after = 0',
       '[void][McvTest.ConsoleMode]::GetConsoleMode($inputHandle, [ref]$after)',
+      'Write-Output "INPUT_MODE_VALUES:$before,$after"',
       'if ($before -eq $after) { Write-Output "INPUT_MODE:restored" } else { Write-Output "INPUT_MODE:changed" }',
       'Write-Output "EXIT_CODE:$code"',
       'exit $code',
