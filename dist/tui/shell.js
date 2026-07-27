@@ -10,9 +10,11 @@ import { applyBindPlan, applyInitPlan, applyMigrationPlan, applyUnbindPlan, crea
 import { readState, recordCaptureSuccess } from '../utils/state.js';
 import { createInitialShellState, shellReducer, } from './shell-state.js';
 import { ShellView } from './shell-view.js';
+import { preserveTerminalInputMode } from './terminal-input-mode.js';
 export async function runTuiShell(context, initialRoute, dependencies = {}, runtime = {}) {
     let instance;
     const wasRaw = Boolean(process.stdin.isRaw);
+    const restoreInputMode = (runtime.preserveTerminalInputMode ?? preserveTerminalInputMode)(context.platform);
     try {
         instance = (runtime.render ?? render)(_jsx(Shell, { context: context, initialRoute: initialRoute, dependencies: dependencies }), {
             alternateScreen: true,
@@ -28,7 +30,12 @@ export async function runTuiShell(context, initialRoute, dependencies = {}, runt
         throw error;
     }
     finally {
-        instance?.unmount();
+        try {
+            instance?.unmount();
+        }
+        finally {
+            restoreInputMode();
+        }
     }
 }
 function Shell({ context, initialRoute, dependencies }) {

@@ -61,6 +61,7 @@ import {
   type ShellState,
 } from './shell-state.js';
 import { ShellView } from './shell-view.js';
+import { preserveTerminalInputMode } from './terminal-input-mode.js';
 
 export interface ShellDependencies {
   repositoryEntry?: RepositoryEntry;
@@ -132,6 +133,9 @@ export interface ShellOutcome {
 export interface ShellRuntime {
   render?: typeof render;
   restoreAfterRenderFailure?: (wasRaw: boolean) => void;
+  preserveTerminalInputMode?: (
+    platform: NodeJS.Platform,
+  ) => () => void;
 }
 
 export async function runTuiShell(
@@ -142,6 +146,9 @@ export async function runTuiShell(
 ): Promise<ShellOutcome> {
   let instance: Instance | undefined;
   const wasRaw = Boolean(process.stdin.isRaw);
+  const restoreInputMode = (
+    runtime.preserveTerminalInputMode ?? preserveTerminalInputMode
+  )(context.platform);
 
   try {
     instance = (runtime.render ?? render)(
@@ -163,7 +170,11 @@ export async function runTuiShell(
     }
     throw error;
   } finally {
-    instance?.unmount();
+    try {
+      instance?.unmount();
+    } finally {
+      restoreInputMode();
+    }
   }
 }
 
