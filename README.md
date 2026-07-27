@@ -42,6 +42,10 @@ MCV 仓库中的配置分为：
 
 ## 快速开始
 
+在完整 TTY 中直接运行 `mcv` 会进入统一的 Ink Shell，并异步打开只读 Overview。`mcv status` deep-link 到同一 Overview，`mcv discover` deep-link 到 Environment Details；Environment Details 中按 `Escape` 返回 Overview，任一页面按 `q` 正常退出，按 `Ctrl+C` 以 130 退出。direct read-only subcommand 正常关闭后会在主屏留下对应 Report 的简洁摘要。Shell 使用 alternate screen，退出、失败、中断和异常后都会恢复主屏、光标和输入模式。
+
+非 TTY 的无参数调用仍立即输出 help。显式使用 `status --plain`、`status --json`、`discover --plain` 或 `discover --json` 时始终执行一次性协议，不进入 alternate screen。
+
 ### 1. 创建私人配置仓库
 
 创建一个空目录，并在其中初始化 MCV：
@@ -125,10 +129,10 @@ mcv repo       检查当前 Repository 绑定；支持 --plain/--json
 mcv bind [PATH] 通过 --dry-run 预览绑定计划，使用 --yes 应用；支持 --json
 mcv unbind     通过 --dry-run 预览解除绑定计划，使用 --yes 应用；支持 --json
 mcv migrate    通过 --dry-run 预览 Migration Plan，使用 --yes 备份并迁移；支持 --json
-mcv discover   检测 Codex、Claude Code、Gemini 及已知配置路径；支持 --plain/--json
+mcv discover   TTY 中 deep-link 到 Environment Details；--plain/--json 强制一次性 Report
 mcv capture    预览并收集本机配置到 MCV 仓库
 mcv deploy     通过 --dry-run 按 IDE/capability 审阅 Deploy Plan；支持 --json，Apply 时校验前置条件并事务备份/写入/回滚
-mcv status     只读 Overview；支持 --plain/--json
+mcv status     TTY 中 deep-link 到只读 Overview；--plain/--json 强制一次性 Report
 mcv restore    通过 --dry-run 审阅并交互确认完整 Restore Plan；审阅后可用 --yes 应用，支持 --json
 ```
 

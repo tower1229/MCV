@@ -3,7 +3,6 @@ import { Command, CommanderError, Option } from 'commander';
 import { readFileSync, realpathSync } from 'fs';
 import * as os from 'os';
 import { fileURLToPath } from 'url';
-import { askInTerminal } from './cli/prompt.js';
 import { discoverConfigurations } from './commands/discover.js';
 import { captureConfigurations, } from './commands/capture.js';
 import { initRepository } from './commands/init.js';
@@ -11,6 +10,7 @@ import { deployConfigurations, } from './commands/deploy.js';
 import { showStatus } from './commands/status.js';
 import { restoreLatestBackup } from './commands/restore.js';
 import { bind, migrate, showRepository, unbind } from './commands/binding.js';
+import { runTuiShell, } from './tui/shell.js';
 // package.json is the single version source for both npm and the CLI.
 const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 export function createDefaultDeviceContext() {
@@ -67,7 +67,12 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         if (options.plain && options.json) {
             discoverCommand.error("options '--plain' and '--json' cannot be used together", { exitCode: 2, code: 'mcv.conflictingOutputModes' });
         }
-        await discoverConfigurations(context, options);
+        if (shouldUseReadOnlyTui(options)) {
+            await runReadOnlyTui(context, 'environment', true);
+        }
+        else {
+            await discoverConfigurations(context, options);
+        }
     });
     const statusCommand = program
         .command('status')
@@ -78,7 +83,12 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         if (options.plain && options.json) {
             statusCommand.error("options '--plain' and '--json' cannot be used together", { exitCode: 2, code: 'mcv.conflictingOutputModes' });
         }
-        await showStatus(context, options);
+        if (shouldUseReadOnlyTui(options)) {
+            await runReadOnlyTui(context, 'overview', true);
+        }
+        else {
+            await showStatus(context, options);
+        }
     });
     const restoreCommand = program
         .command('restore')
@@ -127,36 +137,38 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         migrate(context, repositoryPath, options);
     });
     program.action(async () => {
-        if (!process.stdin.isTTY) {
+        if (!process.stdin.isTTY || !process.stdout.isTTY) {
             program.outputHelp();
             return;
         }
-        let command;
-        let repositoryPath;
-        const menu = await askInTerminal('MCV: 1) discover 2) capture 3) deploy 4) status 5) restore 6) bind  Select: ');
-        if (menu.interrupted) {
-            process.exitCode = 130;
-            console.log('MCV interrupted.');
-            return;
-        }
-        if (menu.answer.trim() === '6') {
-            const pathAnswer = await askInTerminal('Repository path (blank to cancel): ');
-            if (pathAnswer.interrupted) {
-                process.exitCode = 130;
-                console.log('MCV interrupted.');
-                return;
-            }
-            repositoryPath = pathAnswer.answer.trim();
-        }
-        else {
-            command = { '1': 'discover', '2': 'capture', '3': 'deploy', '4': 'status', '5': 'restore' }[menu.answer.trim()];
-        }
-        if (repositoryPath)
-            bind(context, repositoryPath, { yes: true });
-        else if (command)
-            await createProgram(context, captureDependencies, deployDependencies).parseAsync(['node', 'mcv', command]);
+        await runReadOnlyTui(context, 'overview', false);
     });
     return program;
+}
+function shouldUseReadOnlyTui(options) {
+    return Boolean(process.stdin.isTTY
+        && process.stdout.isTTY
+        && !options.plain
+        && !options.json);
+}
+async function runReadOnlyTui(context, route, direct) {
+    const outcome = await runTuiShell(context, route);
+    reportShellOutcome(outcome, route, direct);
+}
+function reportShellOutcome(outcome, initialRoute, direct) {
+    if (outcome.reason === 'interrupted') {
+        process.exitCode = 130;
+        console.log('MCV interrupted.');
+        return;
+    }
+    if (!direct)
+        return;
+    if (outcome.failureMessage) {
+        process.exitCode = 1;
+        console.error(`${outcome.route === 'overview' ? 'Overview' : 'Environment Details'} failed: ${outcome.failureMessage}`);
+        return;
+    }
+    console.log(outcome.summary ?? `${initialRoute === 'overview' ? 'Overview' : 'Environment Details'} closed before its Report was ready.`);
 }
 function validateWriteOutputOptions(command, options) {
     if (options.dryRun && options.yes) {

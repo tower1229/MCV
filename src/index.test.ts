@@ -58,22 +58,15 @@ describe('mcv init interaction', () => {
     });
   });
 
-  it('closes the main menu prompt before a selected command starts reading terminal input', async () => {
+  it('prints help instead of opening the Shell when stdout is not a TTY', async () => {
     const context = { homeDir, platform: 'darwin' as const, env: {}, pathEnv: '' };
-    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: false });
-    await createProgram(context).parseAsync(['node', 'mcv', 'init', '--yes']);
-    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
-    terminalPrompt.question.mockReset().mockResolvedValueOnce('2');
-    terminalPrompt.close.mockReset();
+    const output: string[] = [];
+    const cli = createProgram(context);
+    cli.configureOutput({ writeOut: (text) => output.push(text) });
 
-    await createProgram(
-      context,
-      {
-        confirmCapture: async () => {
-          expect(terminalPrompt.close).toHaveBeenCalledOnce();
-          return false;
-        },
-      },
-    ).parseAsync(['node', 'mcv']);
+    await cli.parseAsync(['node', 'mcv']);
+
+    expect(output.join('')).toContain('Usage: mcv [options] [command]');
+    expect(terminalPrompt.question).not.toHaveBeenCalled();
   });
 });
