@@ -1,11 +1,14 @@
 import { Fragment as _Fragment, jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
-import { Box, Text } from 'ink';
-import { captureDecisionGroups, captureWarnings, deployVisibleChanges, deployWarnings, } from './shell-state.js';
-export function ShellView({ state }) {
+import { Box, Text, useWindowSize } from 'ink';
+import { buildDeploySelectionTree, flattenDeploySelectionTree, } from './deploy-selection-tree.js';
+import { captureDecisionGroups, captureWarnings, deployWarnings, } from './shell-state.js';
+export function ShellView({ state, terminalRows }) {
+    const windowSize = useWindowSize();
+    const rows = terminalRows ?? windowSize.rows;
     const { page } = state;
     const title = pageTitle(state);
-    const controls = pageControls(state);
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { bold: true, children: "MCV" }), _jsx(Text, { children: title }), _jsx(Text, { children: " " }), page.status === 'loading' && _jsxs(Text, { children: ["Loading ", title, "..."] }), page.status === 'failure' && _jsxs(Text, { color: "red", children: ["Failed: ", page.message] }), page.status === 'ready' && page.route === 'overview' && (_jsx(Overview, { report: page.report })), page.status === 'ready' && page.route === 'repository' && (_jsx(RepositoryWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'environment' && (_jsx(EnvironmentDetails, { report: page.report })), page.status === 'ready' && page.route === 'help' && _jsx(Help, {}), page.status === 'ready' && page.route === 'capture' && (_jsx(CaptureWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'deploy' && (_jsx(DeployWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'restore' && (_jsx(RestoreWorkflow, { workflow: page.workflow })), controls && (_jsxs(_Fragment, { children: [_jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: controls })] }))] }));
+    const controls = pageControls(state, rows);
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { bold: true, children: "MCV" }), _jsx(Text, { children: title }), _jsx(Text, { children: " " }), page.status === 'loading' && _jsxs(Text, { children: ["Loading ", title, "..."] }), page.status === 'failure' && _jsxs(Text, { color: "red", children: ["Failed: ", page.message] }), page.status === 'ready' && page.route === 'overview' && (_jsx(Overview, { report: page.report })), page.status === 'ready' && page.route === 'repository' && (_jsx(RepositoryWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'environment' && (_jsx(EnvironmentDetails, { report: page.report })), page.status === 'ready' && page.route === 'help' && _jsx(Help, {}), page.status === 'ready' && page.route === 'capture' && (_jsx(CaptureWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'deploy' && (_jsx(DeployWorkflow, { workflow: page.workflow, terminalRows: rows })), page.status === 'ready' && page.route === 'restore' && (_jsx(RestoreWorkflow, { workflow: page.workflow })), controls && (_jsxs(_Fragment, { children: [_jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: controls })] }))] }));
 }
 function pageTitle(state) {
     const { page } = state;
@@ -60,7 +63,7 @@ function pageTitle(state) {
         case 'result': return 'Capture · Result';
     }
 }
-function pageControls(state) {
+function pageControls(state, terminalRows) {
     const { page } = state;
     if (page.route === 'repository') {
         if (page.status !== 'ready')
@@ -101,7 +104,9 @@ function pageControls(state) {
     if (page.route === 'deploy') {
         switch (page.workflow.status) {
             case 'selection':
-                return '↑↓ Move   Space Select   d Diff   a Advanced Cleanup   Enter Continue   q Quit   Ctrl+C Cancel';
+                return terminalRows <= 12
+                    ? '↑↓/Pg Move   ←→ Expand   Space Select   q Quit'
+                    : '↑↓ Move   ←→ Expand/Collapse   Space Select   PgUp/PgDn Page   Home/End   d Diff   a Cleanup   Enter Continue   q Quit   Ctrl+C Cancel';
             case 'diff':
                 return 'Escape Back   q Quit   Ctrl+C Cancel';
             case 'confirmation':
@@ -305,10 +310,10 @@ function displayGroup(change) {
         : change.itemType.charAt(0).toUpperCase() + change.itemType.slice(1);
     return `${ide} / ${itemType}`;
 }
-function DeployWorkflow({ workflow, }) {
+function DeployWorkflow({ workflow, terminalRows, }) {
     switch (workflow.status) {
         case 'selection':
-            return _jsx(DeploySelection, { workflow: workflow });
+            return _jsx(DeploySelection, { workflow: workflow, terminalRows: terminalRows });
         case 'diff':
             return _jsx(DeployDiff, { workflow: workflow });
         case 'confirmation':
@@ -321,16 +326,56 @@ function DeployWorkflow({ workflow, }) {
             return _jsx(DeployResultView, { result: workflow.result });
     }
 }
-function DeploySelection({ workflow, }) {
-    const visibleChanges = deployVisibleChanges(workflow);
+function DeploySelection({ workflow, terminalRows, }) {
+    const tree = buildDeploySelectionTree(workflow.plan);
+    const visible = flattenDeploySelectionTree(tree, workflow.expandedNodeIds);
     const advanced = workflow.plan.changes.filter((change) => change.group === 'advanced');
-    let previousGroup = '';
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: ["Repository: ", workflow.plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: [workflow.plan.changes.length, " changes \u00B7 ", workflow.selectedIds.length, " selected"] }), _jsx(Text, { children: " " }), visibleChanges.map((change, index) => {
-                const group = `${change.group}/${change.ide}/${change.capability}`;
-                const showGroup = group !== previousGroup;
-                previousGroup = group;
-                return (_jsxs(Box, { flexDirection: "column", children: [showGroup && change.group === 'standard' && (_jsx(Text, { children: displayDeployGroup(change) })), showGroup && change.group === 'advanced' && (_jsxs(Text, { children: ["Advanced Cleanup / ", displayDeployGroup(change)] })), _jsxs(Text, { children: [index === workflow.cursor ? '>' : ' ', ' ', "[", workflow.selectedIds.includes(change.id) ? 'x' : ' ', "] [", change.change, "] ", change.name] })] }, change.id));
-            }), advanced.length > 0 && (_jsxs(_Fragment, { children: [_jsx(Text, { children: " " }), _jsxs(Text, { children: ["Advanced Cleanup: ", workflow.advancedExpanded ? 'expanded' : 'collapsed', " (", advanced.length, ' ', advanced.length === 1 ? 'deletion' : 'deletions', ",", ' ', advanced.filter((change) => workflow.selectedIds.includes(change.id)).length || 'none', " selected)"] })] })), workflow.plan.issues.some((issue) => issue.severity === 'decisionRequired' || issue.severity === 'error') && (_jsx(Text, { color: "red", children: "Apply disabled: regenerate after resolving every required decision and error." }))] }));
+    const viewport = deployViewport(visible, workflow.cursor, Math.max(1, terminalRows - (terminalRows <= 12 ? 8 : 10)));
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: ["Repository: ", workflow.plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: [workflow.plan.changes.length, " changes \u00B7 ", workflow.selectedIds.length, " selected"] }), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: { node, depth } }, index) => {
+                const visibleIndex = viewport.start + index;
+                const expanded = workflow.expandedNodeIds.includes(node.id);
+                const disclosure = node.children.length === 0
+                    ? ' '
+                    : expanded ? '▼' : '▶';
+                if (node.kind === 'advanced') {
+                    return (_jsxs(Text, { wrap: "truncate-middle", children: [visibleIndex === workflow.cursor ? '>' : ' ', ' ', deployNodeSelectionMarker(node.changeIds, workflow.selectedIds), ' ', disclosure, " Advanced Cleanup: ", expanded ? 'expanded' : 'collapsed', " (", advanced.length, ' ', advanced.length === 1 ? 'deletion' : 'deletions', ",", ' ', advanced.filter((change) => workflow.selectedIds.includes(change.id)).length || 'none', " selected)"] }, node.id));
+                }
+                return (_jsxs(Text, { wrap: "truncate-middle", children: ['  '.repeat(depth), visibleIndex === workflow.cursor ? '>' : ' ', ' ', deployNodeSelectionMarker(node.changeIds, workflow.selectedIds), ' ', disclosure, " ", node.label, node.kind !== 'file' && (_jsxs(_Fragment, { children: [" \u00B7 ", node.changeIds.length, ' ', node.changeIds.length === 1 ? 'file' : 'files'] }))] }, node.id));
+            }), !viewport.combinedIndicator && viewport.hiddenAfter > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenAfter, " more"] })), viewport.combinedIndicator && (_jsxs(Text, { dimColor: true, children: ['  ', "\u2026 ", viewport.hiddenBefore, " earlier \u00B7 ", viewport.hiddenAfter, " more"] })), workflow.plan.issues.some((issue) => issue.severity === 'decisionRequired' || issue.severity === 'error') && (_jsx(Text, { color: "red", children: "Apply disabled: regenerate after resolving every required decision and error." }))] }));
+}
+function deployViewport(items, cursor, maximumRows) {
+    if (items.length <= maximumRows) {
+        return {
+            items: items.map((item) => ({ item })),
+            start: 0,
+            hiddenBefore: 0,
+            hiddenAfter: 0,
+            combinedIndicator: false,
+        };
+    }
+    const combinedIndicator = maximumRows === 2;
+    const indicatorRows = maximumRows <= 1 ? 0 : combinedIndicator ? 1 : 2;
+    const itemRows = Math.max(1, maximumRows - indicatorRows);
+    const maximumStart = Math.max(0, items.length - itemRows);
+    const start = maximumRows <= 2
+        ? Math.min(Math.max(cursor, 0), maximumStart)
+        : Math.min(Math.max(cursor - Math.floor(itemRows / 2), 0), maximumStart);
+    const end = Math.min(start + itemRows, items.length);
+    return {
+        items: items.slice(start, end).map((item) => ({ item })),
+        start,
+        hiddenBefore: maximumRows <= 1 ? 0 : start,
+        hiddenAfter: maximumRows <= 1 ? 0 : items.length - end,
+        combinedIndicator,
+    };
+}
+function deployNodeSelectionMarker(changeIds, selectedIds) {
+    const selected = changeIds.filter((id) => selectedIds.includes(id)).length;
+    if (selected === 0)
+        return '[ ]';
+    if (selected === changeIds.length)
+        return '[x]';
+    return '[-]';
 }
 function DeployDiff({ workflow, }) {
     const change = workflow.plan.changes.find((item) => item.id === workflow.changeId);
@@ -386,16 +431,4 @@ function RestoreResultView({ result }) {
         return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { color: "yellow", children: "Restore was blocked; device configuration was not changed." }), result.issues.map((issue) => (_jsxs(Text, { children: [issue.code, ": ", issue.message] }, issue.code)))] }));
     }
     return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { color: "red", children: ["Restore failed: ", result.error.message] }), _jsxs(Text, { children: ["Error code: ", result.error.code] }), result.nextActions.map((action) => (_jsxs(Text, { children: ["Next: ", action] }, action)))] }));
-}
-function displayDeployGroup(change) {
-    const ide = change.ide === 'claude-code'
-        ? 'Claude Code'
-        : change.ide.charAt(0).toUpperCase() + change.ide.slice(1);
-    const capability = {
-        rules: 'Shared Rules',
-        skills: 'Skills',
-        mcp: 'MCP',
-        native: 'IDE Configuration',
-    };
-    return `${ide} / ${capability[change.capability]}`;
 }

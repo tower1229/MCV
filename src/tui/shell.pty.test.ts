@@ -369,6 +369,37 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     expectRestoredTerminal(deepLink.output);
   }, 10_000);
 
+  it('pages through the packaged Deploy tree inside a bounded viewport', async () => {
+    const repositoryPath = createDeployTreeRepository();
+    writeBinding(repositoryPath, 'deploy-tree-pty');
+    const outcome = await runExpect([
+      'set timeout 7',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {stty rows 16 columns 100; "$MCV_TEST_NODE" "$MCV_TEST_CLI" deploy; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Codex / Skills}',
+      'send "\\033\\[C"',
+      'expect -exact {hatch-pet · 20 files}',
+      'send "\\033\\[C"',
+      'expect -exact {> [x] ▶ hatch-pet}',
+      'send "\\033\\[C"',
+      'expect -exact {> [x] ▼ hatch-pet}',
+      'send "\\033\\[B"',
+      'expect -exact {file-0.md}',
+      'send "\\033\\[6~"',
+      'expect -exact {file-4.md}',
+      'send "q"',
+      'expect -exact {Deploy closed without applying changes.}',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ]);
+
+    expect(outcome.code).toBe(0);
+    expect(outcome.output).toContain('…');
+    expectRestoredTerminal(outcome.output);
+  }, 10_000);
+
   it('keeps Deploy transactional while partial selection fails after warning review', async () => {
     const fixturePath = createDeployWorkflowFixture();
     const outcome = await runExpect([
@@ -980,6 +1011,38 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       '',
     ].join('\n'));
     return fixturePath;
+  }
+
+  function createDeployTreeRepository(): string {
+    const repositoryPath = path.join(testRoot, 'deploy-tree-repository');
+    const skillPath = path.join(
+      repositoryPath,
+      'common',
+      'skills',
+      'hatch-pet',
+    );
+    fs.mkdirSync(skillPath, { recursive: true });
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 2',
+      'repositoryId: deploy-tree-pty',
+      'initializedAt: 2026-07-27T00:00:00.000Z',
+      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets:',
+      '  codex:',
+      '    enabled: true',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(skillPath, 'SKILL.md'), '# Hatch Pet\n');
+    for (let index = 0; index < 19; index += 1) {
+      fs.writeFileSync(
+        path.join(skillPath, `file-${index}.md`),
+        `# File ${index}\n`,
+      );
+    }
+    return repositoryPath;
   }
 
   function validRepositoryReport(): Record<string, unknown> {

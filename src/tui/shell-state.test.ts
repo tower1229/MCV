@@ -411,7 +411,7 @@ describe('TUI Shell reducer', () => {
         status: 'selection',
         cursor: 0,
         selectedIds: ['deploy-rules'],
-        advancedExpanded: false,
+        expandedNodeIds: [],
       },
     });
   });
@@ -433,10 +433,63 @@ describe('TUI Shell reducer', () => {
     });
     expect(cleanupSelected.page).toMatchObject({
       workflow: {
-        advancedExpanded: true,
+        expandedNodeIds: ['advanced'],
         selectedIds: ['deploy-mcp', 'deploy-delete'],
       },
     });
+  });
+
+  it('toggles every immutable leaf ID from a capability node', () => {
+    const plan = deployPlan();
+    plan.changes.splice(1, 0, {
+      ...plan.changes[0],
+      id: 'deploy-rules-extra',
+      name: 'Additional Rules',
+      targetPath: '/tmp/.codex/extra.md',
+    });
+    const loaded = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan,
+    });
+
+    const cleared = shellReducer(loaded, { type: 'deploy.toggleSelection' });
+    expect(cleared.page).toMatchObject({
+      workflow: { selectedIds: ['deploy-mcp'] },
+    });
+    const restored = shellReducer(cleared, { type: 'deploy.toggleSelection' });
+    expect(restored.page).toMatchObject({
+      workflow: {
+        selectedIds: ['deploy-mcp', 'deploy-rules', 'deploy-rules-extra'],
+      },
+    });
+  });
+
+  it('expands, focuses, and collapses visible Deploy tree nodes', () => {
+    let state = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan: deployPlan(),
+    });
+    state = shellReducer(state, { type: 'deploy.expand' });
+    expect(state.page).toMatchObject({
+      workflow: {
+        cursor: 0,
+        expandedNodeIds: ['capability:standard:codex/rules'],
+      },
+    });
+    state = shellReducer(state, { type: 'deploy.expand' });
+    expect(state.page).toMatchObject({ workflow: { cursor: 1 } });
+    state = shellReducer(state, { type: 'deploy.collapse' });
+    expect(state.page).toMatchObject({ workflow: { cursor: 0 } });
+    state = shellReducer(state, {
+      type: 'deploy.focus',
+      position: 'last',
+    });
+    expect(state.page).toMatchObject({ workflow: { cursor: 3 } });
+    state = shellReducer(state, {
+      type: 'deploy.focus',
+      position: 'first',
+    });
+    expect(state.page).toMatchObject({ workflow: { cursor: 0 } });
   });
 
   it('requires Deploy warnings and blocks decisionRequired or error Issues', () => {

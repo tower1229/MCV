@@ -2,6 +2,7 @@ import {
   render,
   useApp,
   useInput,
+  useWindowSize,
   type Instance,
 } from 'ink';
 import { useEffect, useReducer, useRef } from 'react';
@@ -192,6 +193,7 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
     createInitialShellState,
   );
   const { exit } = useApp();
+  const windowSize = useWindowSize();
   const repositoryEntry = useRef(dependencies.repositoryEntry);
 
   useEffect(() => {
@@ -636,7 +638,25 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
         return;
       }
       if (deployWorkflow?.status === 'selection') {
-        if (input === ' ') dispatch({ type: 'deploy.toggleSelection' });
+        if (key.rightArrow) dispatch({ type: 'deploy.expand' });
+        else if (key.leftArrow) dispatch({ type: 'deploy.collapse' });
+        else if (key.pageUp) {
+          dispatch({
+            type: 'deploy.move',
+            delta: -Math.max(1, windowSize.rows - 12),
+          });
+        } else if (key.pageDown) {
+          dispatch({
+            type: 'deploy.move',
+            delta: Math.max(1, windowSize.rows - 12),
+          });
+        } else if (key.home) {
+          dispatch({ type: 'deploy.focus', position: 'first' });
+        } else if (key.end) {
+          dispatch({ type: 'deploy.focus', position: 'last' });
+        } else if (input === ' ') {
+          dispatch({ type: 'deploy.toggleSelection' });
+        }
         else if (input === 'a') dispatch({ type: 'deploy.toggleAdvanced' });
         else if (input === 'd') dispatch({ type: 'deploy.openDiff' });
         else if (key.return) dispatch({ type: 'deploy.continue' });
@@ -707,7 +727,7 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
     exit(createOutcome(state, initialRoute));
   }, [exit, initialRoute, state]);
 
-  return <ShellView state={state} />;
+  return <ShellView state={state} terminalRows={windowSize.rows} />;
 }
 
 function createRepositoryEntryAction(

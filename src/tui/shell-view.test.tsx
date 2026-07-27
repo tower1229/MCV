@@ -437,16 +437,128 @@ describe('TUI Shell view', () => {
         Repository: /Users/张涛/Configuration Repository
         3 changes · 1 selected
 
-        Codex / Shared Rules
-        > [ ] [modify] Shared Rules
-        Codex / MCP
-          [x] [modify] MCP
+        > [ ] ▶ Codex / Shared Rules · 1 file
+          [x] ▶ Codex / MCP · 1 file
+          [ ] ▶ Advanced Cleanup: collapsed (1 deletion, none selected)
 
-        Advanced Cleanup: collapsed (1 deletion, none selected)
-
-        ↑↓ Move   Space Select   d Diff   a Advanced Cleanup   Enter Continue
-        q Quit   Ctrl+C Cancel"
+        ↑↓ Move   ←→ Expand/Collapse   Space Select   PgUp/PgDn Page   Home/End
+          d Diff   a Cleanup   Enter Continue   q Quit   Ctrl+C Cancel"
       `);
+  });
+
+  it('summarizes a large Deploy Plan by capability within a 24-row terminal', () => {
+    const state = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan: largeDeployPlan(),
+    });
+
+    const rendered = renderToString(<ShellView state={state} />, {
+      columns: 80,
+    });
+
+    expect(rendered.split('\n').length).toBeLessThanOrEqual(24);
+    expect(rendered).toContain('Codex / Skills');
+    expect(rendered).toContain('14 files');
+    expect(rendered).not.toContain('hatch-pet');
+    expect(rendered).toContain('Advanced Cleanup: collapsed (14 deletions, none selected)');
+  });
+
+  it('expands a Skill capability into one package summary', () => {
+    const loaded = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan: largeDeployPlan(),
+    });
+    const expanded = shellReducer(loaded, {
+      type: 'deploy.expand',
+    } as never);
+
+    const rendered = renderToString(<ShellView state={expanded} />, {
+      columns: 80,
+    });
+
+    expect(rendered).toContain('hatch-pet · 14 files');
+    expect(rendered.match(/hatch-pet/g)).toHaveLength(1);
+    expect(rendered).not.toContain('file-0.md');
+  });
+
+  it('keeps the focused Skill file visible inside a dynamic terminal viewport', () => {
+    let state = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan: largeDeployPlan(),
+    });
+    state = shellReducer(state, { type: 'deploy.expand' });
+    state = shellReducer(state, { type: 'deploy.expand' });
+    state = shellReducer(state, { type: 'deploy.expand' });
+    state = shellReducer(state, { type: 'deploy.focus', position: 'last' });
+    state = shellReducer(state, { type: 'deploy.move', delta: -1 });
+
+    const rendered = renderToString(
+      <ShellView state={state} terminalRows={16} />,
+      { columns: 80 },
+    );
+
+    expect(rendered.split('\n').length).toBeLessThanOrEqual(16);
+    expect(rendered).toContain('file-13.md');
+    expect(rendered).toContain('earlier');
+    expect(rendered).not.toContain('file-0.md');
+
+    const narrow = renderToString(
+      <ShellView state={state} terminalRows={16} />,
+      { columns: 48 },
+    );
+    expect(narrow.split('\n').length).toBeLessThanOrEqual(16);
+    expect(narrow).toContain('file-13.md');
+
+    const compact = renderToString(
+      <ShellView state={state} terminalRows={10} />,
+      { columns: 60 },
+    );
+    expect(compact.split('\n').length).toBeLessThanOrEqual(10);
+    expect(compact).toContain('file-13.md');
+    expect(compact).toContain('↑↓/Pg Move   ←→ Expand');
+  });
+
+  it('shows partial selection on every ancestor after toggling one Skill file', () => {
+    let state = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan: largeDeployPlan(),
+    });
+    state = shellReducer(state, { type: 'deploy.expand' });
+    state = shellReducer(state, { type: 'deploy.expand' });
+    state = shellReducer(state, { type: 'deploy.expand' });
+    state = shellReducer(state, { type: 'deploy.move', delta: 1 });
+    state = shellReducer(state, { type: 'deploy.toggleSelection' });
+
+    const rendered = renderToString(
+      <ShellView state={state} terminalRows={30} />,
+      { columns: 100 },
+    );
+
+    expect(rendered).toContain('[-] ▼ Codex / Skills · 14 files');
+    expect(rendered).toContain('[-] ▼ hatch-pet · 14 files');
+    expect(rendered).toContain('[ ]   [add] file-0.md');
+  });
+
+  it('snapshots an expanded large Deploy tree at desktop and narrow widths', () => {
+    let state = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan: largeDeployPlan(),
+    });
+    state = shellReducer(state, { type: 'deploy.expand' });
+    state = shellReducer(state, { type: 'deploy.expand' });
+    state = shellReducer(state, { type: 'deploy.expand' });
+    state = shellReducer(state, { type: 'deploy.move', delta: 8 });
+
+    expect({
+      desktop: renderToString(
+        <ShellView state={state} terminalRows={24} />,
+        { columns: 100 },
+      ),
+      narrow: renderToString(
+        <ShellView state={state} terminalRows={16} />,
+        { columns: 48 },
+      ),
+    }).toMatchSnapshot();
   });
 
   it('snapshots Deploy replacement Diff, warning, applying, stale, and failure Result', () => {
@@ -454,7 +566,9 @@ describe('TUI Shell view', () => {
       type: 'deploy.loaded',
       plan: deployPlan(),
     });
-    const diff = shellReducer(loaded, { type: 'deploy.openDiff' });
+    const expanded = shellReducer(loaded, { type: 'deploy.expand' });
+    const leafFocused = shellReducer(expanded, { type: 'deploy.expand' });
+    const diff = shellReducer(leafFocused, { type: 'deploy.openDiff' });
     const confirmation = shellReducer(loaded, { type: 'deploy.continue' });
     const confirmed = shellReducer(confirmation, { type: 'deploy.toggleWarning' });
     const applying = shellReducer(confirmed, { type: 'deploy.apply' });
@@ -624,6 +738,57 @@ function deployPlan(): DeployPlan {
       code: 'deploy.warning',
       message: 'A target needs explicit review.',
     }],
+    nextActions: [],
+  };
+}
+
+function largeDeployPlan(): DeployPlan {
+  const standard = Array.from({ length: 14 }, (_, index): DeployPlan['changes'][number] => {
+    const relativePath = index === 13
+      ? 'references/a-very-long-directory-name/another-long-directory/file-13.md'
+      : `file-${index}.md`;
+    const targetPath = `/Users/张涛/.agents/skills/hatch-pet/${relativePath}`;
+    return {
+    id: `deploy-skill-${index}`,
+    ide: 'codex',
+    capability: 'skills',
+    name: 'hatch-pet',
+    targetPath,
+    change: 'add',
+    defaultSelected: true,
+    group: 'standard',
+    strategy: 'replace-entire-file',
+    preview: {
+      targetPath,
+      kind: 'text',
+      bytes: 20,
+      sha256: 'd'.repeat(64),
+      diff: `+ file ${index}`,
+    },
+    };
+  });
+  const advanced = standard.map((change, index): DeployPlan['changes'][number] => ({
+    ...change,
+    id: `deploy-delete-${index}`,
+    targetPath: `/Users/张涛/.codex/skills/hatch-pet/file-${index}.md`,
+    change: 'delete',
+    defaultSelected: false,
+    group: 'advanced',
+    preview: {
+      ...change.preview,
+      targetPath: `/Users/张涛/.codex/skills/hatch-pet/file-${index}.md`,
+    },
+  }));
+  return {
+    schemaVersion: 1,
+    operation: 'deploy',
+    status: 'planned',
+    readyToApply: true,
+    operationId: 'large-deploy-view',
+    preconditions: {},
+    repositoryPath: '/Users/张涛/Configuration Repository',
+    changes: [...standard, ...advanced],
+    issues: [],
     nextActions: [],
   };
 }

@@ -18,10 +18,13 @@ import type {
 } from '../operations/repository.js';
 import type { StatusReport } from '../operations/status.js';
 import type {
-  DeployChange,
   DeployPlan,
   DeployResult,
 } from '../operations/deploy.js';
+import {
+  buildDeploySelectionTree,
+  flattenDeploySelectionTree,
+} from './deploy-selection-tree.js';
 import type {
   RestorePlan,
   RestoreResult,
@@ -153,7 +156,7 @@ interface DeploySelectionState {
   plan: DeployPlan;
   cursor: number;
   selectedIds: string[];
-  advancedExpanded: boolean;
+  expandedNodeIds: string[];
 }
 
 interface DeployDiffState {
@@ -161,7 +164,7 @@ interface DeployDiffState {
   plan: DeployPlan;
   cursor: number;
   selectedIds: string[];
-  advancedExpanded: boolean;
+  expandedNodeIds: string[];
   changeId: string;
 }
 
@@ -171,7 +174,7 @@ interface DeployConfirmationState {
   selectedIds: string[];
   confirmedIssueCodes: string[];
   warningCursor: number;
-  advancedExpanded: boolean;
+  expandedNodeIds: string[];
 }
 
 interface DeployApplyingState {
@@ -315,6 +318,9 @@ export type ShellAction =
     lastSelection?: LastDeploySelection;
   }
   | { type: 'deploy.move'; delta: number }
+  | { type: 'deploy.focus'; position: 'first' | 'last' }
+  | { type: 'deploy.expand' }
+  | { type: 'deploy.collapse' }
   | { type: 'deploy.toggleSelection' }
   | { type: 'deploy.toggleAdvanced' }
   | { type: 'deploy.openDiff' }
@@ -602,13 +608,20 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
               action.plan,
               action.lastSelection,
             ),
-            advancedExpanded: false,
+            expandedNodeIds: [],
           },
         },
       };
     case 'deploy.move':
       return updateDeployWorkflow(state, (workflow) =>
         moveDeployCursor(workflow, action.delta));
+    case 'deploy.focus':
+      return updateDeployWorkflow(state, (workflow) =>
+        focusDeployCursor(workflow, action.position));
+    case 'deploy.expand':
+      return updateDeployWorkflow(state, expandDeployNode);
+    case 'deploy.collapse':
+      return updateDeployWorkflow(state, collapseDeployNode);
     case 'deploy.toggleSelection':
       return updateDeployWorkflow(state, toggleDeploySelection);
     case 'deploy.toggleAdvanced':
@@ -1070,11 +1083,12 @@ function initialDeploySelection(
     .map((change) => change.id);
 }
 
-export function deployVisibleChanges(
-  workflow: Pick<DeploySelectionState, 'plan' | 'advancedExpanded'>,
-): DeployChange[] {
-  return workflow.plan.changes.filter(
-    (change) => change.group === 'standard' || workflow.advancedExpanded,
+export function deployVisibleNodes(
+  workflow: Pick<DeploySelectionState, 'plan' | 'expandedNodeIds'>,
+) {
+  return flattenDeploySelectionTree(
+    buildDeploySelectionTree(workflow.plan),
+    workflow.expandedNodeIds,
   );
 }
 
@@ -1087,12 +1101,10 @@ function moveDeployCursor(
   delta: number,
 ): DeployWorkflowState {
   if (workflow.status === 'selection') {
+    const visible = deployVisibleNodes(workflow);
     return {
       ...workflow,
-      cursor: wrapIndex(
-        workflow.cursor + delta,
-        deployVisibleChanges(workflow).length,
-      ),
+      cursor: clampIndex(workflow.cursor + delta, visible.length),
     };
   }
   if (workflow.status === 'confirmation') {
@@ -1107,26 +1119,93 @@ function moveDeployCursor(
   return workflow;
 }
 
+function focusDeployCursor(
+  workflow: DeployWorkflowState,
+  position: 'first' | 'last',
+): DeployWorkflowState {
+  if (workflow.status !== 'selection') return workflow;
+  return {
+    ...workflow,
+    cursor: position === 'first'
+      ? 0
+      : Math.max(0, deployVisibleNodes(workflow).length - 1),
+  };
+}
+
 function toggleDeploySelection(
   workflow: DeployWorkflowState,
 ): DeployWorkflowState {
   if (workflow.status !== 'selection') return workflow;
-  const change = deployVisibleChanges(workflow)[workflow.cursor];
-  if (!change) return workflow;
+  const node = deployVisibleNodes(workflow)[workflow.cursor]?.node;
+  if (!node) return workflow;
+  const selected = new Set(workflow.selectedIds);
+  const allSelected = node.changeIds.every((id) => selected.has(id));
+  for (const id of node.changeIds) {
+    if (allSelected) selected.delete(id);
+    else selected.add(id);
+  }
   return {
     ...workflow,
-    selectedIds: toggleId(workflow.selectedIds, change.id),
+    selectedIds: [...selected],
   };
+}
+
+function expandDeployNode(
+  workflow: DeployWorkflowState,
+): DeployWorkflowState {
+  if (workflow.status !== 'selection') return workflow;
+  const node = deployVisibleNodes(workflow)[workflow.cursor]?.node;
+  if (!node || node.children.length === 0) return workflow;
+  if (workflow.expandedNodeIds.includes(node.id)) {
+    return {
+      ...workflow,
+      cursor: clampIndex(
+        workflow.cursor + 1,
+        deployVisibleNodes(workflow).length,
+      ),
+    };
+  }
+  return {
+    ...workflow,
+    expandedNodeIds: [...workflow.expandedNodeIds, node.id],
+  };
+}
+
+function collapseDeployNode(
+  workflow: DeployWorkflowState,
+): DeployWorkflowState {
+  if (workflow.status !== 'selection') return workflow;
+  const visible = deployVisibleNodes(workflow);
+  const focused = visible[workflow.cursor];
+  if (!focused) return workflow;
+  if (workflow.expandedNodeIds.includes(focused.node.id)) {
+    return {
+      ...workflow,
+      expandedNodeIds: workflow.expandedNodeIds.filter(
+        (id) => id !== focused.node.id,
+      ),
+    };
+  }
+  if (!focused.parentId) return workflow;
+  const parentIndex = visible.findIndex(
+    ({ node }) => node.id === focused.parentId,
+  );
+  return parentIndex < 0 ? workflow : { ...workflow, cursor: parentIndex };
 }
 
 function toggleDeployAdvanced(
   workflow: DeployWorkflowState,
 ): DeployWorkflowState {
   if (workflow.status !== 'selection') return workflow;
+  const visible = deployVisibleNodes(workflow);
+  const advancedIndex = visible.findIndex(({ node }) => node.id === 'advanced');
+  const expanded = workflow.expandedNodeIds.includes('advanced');
   return {
     ...workflow,
-    cursor: 0,
-    advancedExpanded: !workflow.advancedExpanded,
+    cursor: advancedIndex < 0 ? workflow.cursor : advancedIndex,
+    expandedNodeIds: expanded
+      ? workflow.expandedNodeIds.filter((id) => id !== 'advanced')
+      : [...workflow.expandedNodeIds, 'advanced'],
   };
 }
 
@@ -1134,14 +1213,15 @@ function openDeployDiff(
   workflow: DeployWorkflowState,
 ): DeployWorkflowState {
   if (workflow.status !== 'selection') return workflow;
-  const change = deployVisibleChanges(workflow)[workflow.cursor];
+  const node = deployVisibleNodes(workflow)[workflow.cursor]?.node;
+  const change = node?.change;
   if (!change) return workflow;
   return {
     status: 'diff',
     plan: workflow.plan,
     cursor: workflow.cursor,
     selectedIds: workflow.selectedIds,
-    advancedExpanded: workflow.advancedExpanded,
+    expandedNodeIds: workflow.expandedNodeIds,
     changeId: change.id,
   };
 }
@@ -1155,7 +1235,7 @@ function closeDeployDiff(
     plan: workflow.plan,
     cursor: workflow.cursor,
     selectedIds: workflow.selectedIds,
-    advancedExpanded: workflow.advancedExpanded,
+    expandedNodeIds: workflow.expandedNodeIds,
   };
 }
 
@@ -1188,7 +1268,7 @@ function continueDeployWorkflow(
     selectedIds: workflow.selectedIds,
     confirmedIssueCodes: [],
     warningCursor: 0,
-    advancedExpanded: workflow.advancedExpanded,
+    expandedNodeIds: workflow.expandedNodeIds,
   };
 }
 
@@ -1202,7 +1282,7 @@ function backDeployWorkflow(
     plan: workflow.plan,
     cursor: 0,
     selectedIds: workflow.selectedIds,
-    advancedExpanded: workflow.advancedExpanded,
+    expandedNodeIds: workflow.expandedNodeIds,
   };
 }
 
@@ -1224,4 +1304,9 @@ function beginDeployApply(
     selectedIds: workflow.selectedIds,
     confirmedIssueCodes: workflow.confirmedIssueCodes,
   };
+}
+
+function clampIndex(index: number, length: number): number {
+  if (length === 0) return 0;
+  return Math.min(Math.max(index, 0), length - 1);
 }
