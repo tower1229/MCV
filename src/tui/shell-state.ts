@@ -209,6 +209,8 @@ export type RestoreWorkflowState =
   | {
     status: 'review';
     plan: RestorePlan;
+    cursor: number;
+    detailChangeId?: string;
   }
   | {
     status: 'applying';
@@ -286,6 +288,7 @@ export interface ShellState {
   postInitOnboarding: boolean;
   repositoryResumeRoute: Exclude<ShellRoute, 'repository'>;
   overviewFocusId: PrimaryDestinationId;
+  scrollOffset: number;
   exitReason: 'completed' | 'interrupted' | null;
 }
 
@@ -338,8 +341,12 @@ export type ShellAction =
   | { type: 'deploy.apply' }
   | { type: 'deploy.applied'; result: DeployResult }
   | { type: 'restore.loaded'; plan: RestorePlan }
+  | { type: 'restore.move'; delta: number }
+  | { type: 'restore.openDetail' }
+  | { type: 'restore.back' }
   | { type: 'restore.apply' }
   | { type: 'restore.applied'; result: RestoreResult }
+  | { type: 'page.scroll'; delta: number; maximum: number }
   | { type: 'page.failed'; route: ShellRoute; message: string }
   | { type: 'navigate'; route: ShellRoute }
   | { type: 'exit' }
@@ -354,11 +361,18 @@ export function createInitialShellState(route: ShellRoute): ShellState {
     postInitOnboarding: false,
     repositoryResumeRoute: route === 'repository' ? 'overview' : route,
     overviewFocusId: 'overview',
+    scrollOffset: 0,
     exitReason: null,
   };
 }
 
 export function shellReducer(state: ShellState, action: ShellAction): ShellState {
+  if (
+    isTransactionApplying(state)
+    && !isTransactionCompletion(action)
+    && action.type !== 'page.failed'
+  ) return state;
+
   switch (action.type) {
     case 'repository.loaded':
       return {
@@ -482,6 +496,7 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       ) return state;
       return {
         ...state,
+        scrollOffset: 0,
         page: { route: 'capture', status: 'loading' },
         postInitOnboarding: false,
       };
@@ -512,6 +527,7 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       if (state.page.route !== 'overview') return state;
       return {
         ...state,
+        scrollOffset: 0,
         ...(state.overviewFocusId === 'repository'
           ? { repositoryResumeRoute: 'overview' as const }
           : {}),
@@ -547,6 +563,7 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       }
       return {
         ...state,
+        scrollOffset: 0,
         page: {
           route: 'capture',
           status: 'ready',
@@ -601,6 +618,7 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       }
       return {
         ...state,
+        scrollOffset: 0,
         captureResult: action.result,
         page: {
           route: 'capture',
@@ -625,6 +643,7 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       }
       return {
         ...state,
+        scrollOffset: 0,
         page: {
           route: 'deploy',
           status: 'ready',
@@ -687,6 +706,7 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       }
       return {
         ...state,
+        scrollOffset: 0,
         deployResult: action.result,
         page: {
           route: 'deploy',
@@ -701,14 +721,62 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       if (state.page.route !== 'restore') return state;
       return {
         ...state,
+        scrollOffset: 0,
         page: {
           route: 'restore',
           status: 'ready',
           workflow: {
             status: 'review',
             plan: action.plan,
+            cursor: 0,
           },
         },
+      };
+    case 'restore.move':
+      return updateRestoreWorkflow(state, (workflow) => {
+        if (workflow.status !== 'review' || workflow.detailChangeId) {
+          return workflow;
+        }
+        return {
+          ...workflow,
+          cursor: wrapIndex(
+            workflow.cursor + action.delta,
+            workflow.plan.changes.length,
+          ),
+        };
+      });
+    case 'restore.openDetail':
+      return updateRestoreWorkflow(state, (workflow) => {
+        if (workflow.status !== 'review' || workflow.detailChangeId) {
+          return workflow;
+        }
+        const change = workflow.plan.changes[workflow.cursor];
+        return change
+          ? { ...workflow, detailChangeId: change.id }
+          : workflow;
+      });
+    case 'restore.back':
+      if (
+        state.page.route !== 'restore'
+        || state.page.status !== 'ready'
+        || state.page.workflow.status !== 'review'
+      ) return state;
+      if (state.page.workflow.detailChangeId) {
+        return {
+          ...state,
+          page: {
+            ...state.page,
+            workflow: {
+              ...state.page.workflow,
+              detailChangeId: undefined,
+            },
+          },
+        };
+      }
+      return {
+        ...state,
+        scrollOffset: 0,
+        page: { route: 'overview', status: 'loading' },
       };
     case 'restore.apply':
       return updateRestoreWorkflow(state, (workflow) =>
@@ -739,6 +807,7 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       }
       return {
         ...state,
+        scrollOffset: 0,
         restoreResult: action.result,
         page: {
           route: 'restore',
@@ -759,9 +828,18 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
           message: action.message,
         },
       };
+    case 'page.scroll':
+      return {
+        ...state,
+        scrollOffset: Math.min(
+          Math.max(0, action.maximum),
+          Math.max(0, state.scrollOffset + action.delta),
+        ),
+      };
     case 'navigate':
       return {
         ...state,
+        scrollOffset: 0,
         ...(action.route === 'repository' && state.page.route !== 'repository'
           ? { repositoryResumeRoute: state.page.route }
           : {}),
@@ -783,6 +861,24 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       ) return state;
       return { ...state, exitReason: 'interrupted' };
   }
+}
+
+function isTransactionApplying(state: ShellState): boolean {
+  return state.page.status === 'ready'
+    && (
+      state.page.route === 'capture'
+      || state.page.route === 'deploy'
+      || state.page.route === 'restore'
+      || state.page.route === 'repository'
+    )
+    && state.page.workflow.status === 'applying';
+}
+
+function isTransactionCompletion(action: ShellAction): boolean {
+  return action.type === 'capture.applied'
+    || action.type === 'deploy.applied'
+    || action.type === 'restore.applied'
+    || action.type === 'repository.applied';
 }
 
 function updateRepositoryWorkflow(

@@ -106,7 +106,7 @@ Deploy · Result
 Deploy failed: deploy.transactionFailed
 Next: Generate and review a new Deploy Plan.
 
-Enter Refresh Overview   q Quit",
+↑↓ Scroll   Enter/← Refresh Overview   q Quit",
   "stale": "MCV
 Deploy · Regenerating
 
@@ -131,16 +131,36 @@ Repository: /Users/张涛/Configuration Repository
 Backup time: 2026-07-27T08:30:00.000Z
 Impact: 1 file(s) to write, 1 file(s) to delete
 
-[write] /Users/张涛/.codex/config.toml
-[delete] /Users/张涛/.codex/added.toml
-Restore Conflict: Restore would overwrite files that changed after the
-deployment.
+> [write] /Users/张涛/.codex/config.toml
+  [delete] /Users/张涛/.codex/added.toml
+× Restore Conflict: Blocked · Restore would overwrite files that changed after
+the deployment.
   /Users/张涛/.codex/config.toml
 Apply disabled: resolve the blocking Restore error, then regenerate the Plan.
 Next: Back up or manually resolve every Restore Conflict, then generate a new
 Restore Plan.
 
-Escape Overview   q Quit   Ctrl+C Cancel",
+↑↓ Browse   → Detail   ←/Escape Overview   q Quit   Ctrl+C Cancel",
+  "deleteFocused": "MCV
+Restore Latest Deployment · Review
+
+Repository: /Users/张涛/Configuration Repository
+Backup time: 2026-07-27T08:30:00.000Z
+Impact: 1 file(s) to write, 1 file(s) to delete
+
+  [write] /Users/张涛/.codex/config.toml
+> [delete] /Users/张涛/.codex/added.toml
+
+↑↓ Browse   → Detail   Enter Apply   ←/Escape Overview   q Quit   Ctrl+C Cancel",
+  "detail": "MCV
+Restore Latest Deployment · Review
+
+Focused Restore detail
+Action: delete
+Target: /Users/张涛/.codex/added.toml
+Restore will delete this file because it did not exist in the deployment backup.
+
+←/Escape Close Detail   q Quit   Ctrl+C Cancel",
   "noBackup": "MCV
 Restore Latest Deployment · Review
 
@@ -148,11 +168,11 @@ Repository: /Users/张涛/Configuration Repository
 Backup time: not available
 Impact: 0 file(s) to write, 0 file(s) to delete
 
-Error: No complete and verified deployment backup is available.
+× Error: Blocked · No complete and verified deployment backup is available.
 Apply disabled: resolve the blocking Restore error, then regenerate the Plan.
 Next: Run a successful Deploy before trying Restore again.
 
-Escape Overview   q Quit   Ctrl+C Cancel",
+↑↓ Browse   → Detail   ←/Escape Overview   q Quit   Ctrl+C Cancel",
   "review": "MCV
 Restore Latest Deployment · Review
 
@@ -160,10 +180,10 @@ Repository: /Users/张涛/Configuration Repository
 Backup time: 2026-07-27T08:30:00.000Z
 Impact: 1 file(s) to write, 1 file(s) to delete
 
-[write] /Users/张涛/.codex/config.toml
-[delete] /Users/张涛/.codex/added.toml
+> [write] /Users/张涛/.codex/config.toml
+  [delete] /Users/张涛/.codex/added.toml
 
-Enter Apply   Escape Overview   q Quit   Ctrl+C Cancel",
+↑↓ Browse   → Detail   Enter Apply   ←/Escape Overview   q Quit   Ctrl+C Cancel",
   "rollbackFailure": "MCV
 Restore Latest Deployment · Result
 
@@ -171,7 +191,7 @@ Restore failed: restore.rollbackFailed
 Error code: restore.rollbackFailed
 Next: Generate a new Restore Plan.
 
-Enter Refresh Overview   q Quit",
+↑↓ Scroll   Enter/← Refresh Overview   q Quit",
   "stale": "MCV
 Restore Latest Deployment · Regenerating
 
@@ -186,7 +206,7 @@ Written: 1 paths
 Deleted: 1 paths
 Pre-restore backup: /Users/张涛/.mcv/restore-backups/before-restore-success
 
-Enter Refresh Overview   q Quit",
+↑↓ Scroll   Enter/← Refresh Overview   q Quit",
 }
 `;
 

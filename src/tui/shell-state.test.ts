@@ -392,6 +392,36 @@ describe('TUI Shell reducer', () => {
     });
   });
 
+  it('scrolls read-only pages and resets their viewport when returning to Overview', () => {
+    const help = shellReducer(createInitialShellState('help'), {
+      type: 'page.scroll',
+      delta: 3,
+      maximum: 9,
+    });
+    const scrolledBack = shellReducer(help, {
+      type: 'page.scroll',
+      delta: -1,
+      maximum: 9,
+    });
+    const overview = shellReducer(scrolledBack, {
+      type: 'navigate',
+      route: 'overview',
+    });
+    const end = shellReducer(help, {
+      type: 'page.scroll',
+      delta: 1_000,
+      maximum: 9,
+    });
+
+    expect(help.scrollOffset).toBe(3);
+    expect(scrolledBack.scrollOffset).toBe(2);
+    expect(overview).toMatchObject({
+      page: { route: 'overview', status: 'loading' },
+      scrollOffset: 0,
+    });
+    expect(end.scrollOffset).toBe(9);
+  });
+
   it('loads Capture with safe defaults and keeps deletions unselected', () => {
     const ready = shellReducer(createInitialShellState('capture'), {
       type: 'capture.loaded',
@@ -669,6 +699,36 @@ describe('TUI Shell reducer', () => {
     );
   });
 
+  it('browses Restore impact, opens detail, and closes detail before leaving review', () => {
+    const loaded = shellReducer(createInitialShellState('restore'), {
+      type: 'restore.loaded',
+      plan: restorePlan(),
+    });
+    const moved = shellReducer(loaded, {
+      type: 'restore.move',
+      delta: 1,
+    });
+    const detail = shellReducer(moved, { type: 'restore.openDetail' });
+    const review = shellReducer(detail, { type: 'restore.back' });
+    const overview = shellReducer(review, { type: 'restore.back' });
+
+    expect(moved.page).toMatchObject({
+      workflow: { status: 'review', cursor: 1 },
+    });
+    expect(detail.page).toMatchObject({
+      workflow: {
+        status: 'review',
+        cursor: 1,
+        detailChangeId: 'restore-added',
+      },
+    });
+    expect(review.page).toMatchObject({
+      route: 'restore',
+      workflow: { status: 'review', detailChangeId: undefined },
+    });
+    expect(overview.page).toEqual({ route: 'overview', status: 'loading' });
+  });
+
   it('applies a complete Restore Plan, ignores cancellation, and records success', () => {
     const loaded = shellReducer(createInitialShellState('restore'), {
       type: 'restore.loaded',
@@ -688,6 +748,26 @@ describe('TUI Shell reducer', () => {
     expect(result.restoreResult?.status).toBe('succeeded');
   });
 
+  it('rejects every navigation action while a Restore transaction is applying', () => {
+    const loaded = shellReducer(createInitialShellState('restore'), {
+      type: 'restore.loaded',
+      plan: restorePlan(),
+    });
+    const applying = shellReducer(loaded, { type: 'restore.apply' });
+
+    for (const action of [
+      { type: 'restore.move', delta: 1 },
+      { type: 'restore.openDetail' },
+      { type: 'restore.back' },
+      { type: 'page.scroll', delta: 1, maximum: 9 },
+      { type: 'navigate', route: 'overview' },
+      { type: 'exit' },
+      { type: 'cancel' },
+    ] as const) {
+      expect(shellReducer(applying, action)).toBe(applying);
+    }
+  });
+
   it('regenerates a stale Restore Plan and preserves rollback failure Results', () => {
     const loaded = shellReducer(createInitialShellState('restore'), {
       type: 'restore.loaded',
@@ -703,6 +783,110 @@ describe('TUI Shell reducer', () => {
       type: 'restore.applied',
       result: restoreResult('failed', 'restore.rollbackFailed'),
     }), 'result');
+  });
+
+  it('returns every operation Result surface to a freshly loading Overview', () => {
+    const captureSelection = shellReducer(createInitialShellState('capture'), {
+      type: 'capture.loaded',
+      plan: capturePlan(),
+    });
+    const captureDecision = shellReducer(captureSelection, {
+      type: 'capture.continue',
+    });
+    const captureConfirmation = shellReducer(
+      shellReducer(captureDecision, { type: 'capture.chooseDecision' }),
+      { type: 'capture.continue' },
+    );
+    const captureApplying = shellReducer(
+      shellReducer(captureConfirmation, { type: 'capture.toggleWarning' }),
+      { type: 'capture.apply' },
+    );
+    const failedCapture = staleResult();
+    if (failedCapture.status !== 'failed') {
+      throw new Error('Expected the stale Capture fixture to fail.');
+    }
+    const captureResult = shellReducer(captureApplying, {
+      type: 'capture.applied',
+      result: {
+        ...failedCapture,
+        error: {
+          code: 'capture.transactionFailed',
+          message: failedCapture.error.message,
+          nextActions: failedCapture.error.nextActions,
+        },
+      },
+    });
+
+    const deploySelection = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan: deployPlan(),
+    });
+    const deployConfirmation = shellReducer(deploySelection, {
+      type: 'deploy.continue',
+    });
+    const deployApplying = shellReducer(
+      shellReducer(deployConfirmation, { type: 'deploy.toggleWarning' }),
+      { type: 'deploy.apply' },
+    );
+    const deployResultState = shellReducer(deployApplying, {
+      type: 'deploy.applied',
+      result: deployResult('deploy.transactionFailed'),
+    });
+
+    const restoreReview = shellReducer(createInitialShellState('restore'), {
+      type: 'restore.loaded',
+      plan: restorePlan(),
+    });
+    const restoreResultState = shellReducer(
+      shellReducer(restoreReview, { type: 'restore.apply' }),
+      {
+        type: 'restore.applied',
+        result: restoreResult('succeeded'),
+      },
+    );
+
+    const repositoryMenu = repositoryManagementState('capture');
+    const repositoryPlanState = shellReducer(repositoryMenu, {
+      type: 'repository.plan',
+      operation: 'bind',
+      plan: bindPlan(),
+    });
+    const repositoryResultState = shellReducer(
+      shellReducer(repositoryPlanState, { type: 'repository.apply' }),
+      {
+        type: 'repository.applied',
+        operation: 'bind',
+        result: {
+          schemaVersion: 1,
+          operation: 'bind',
+          status: 'failed',
+          repositoryPath: '/tmp/repository',
+          changes: [],
+          issues: [],
+          nextActions: ['Choose a valid Repository.'],
+          error: {
+            code: 'repository.invalidManifest',
+            message: 'The selected directory is not a valid Repository.',
+            nextActions: ['Choose a valid Repository.'],
+          },
+        },
+      },
+    );
+
+    for (const resultState of [
+      captureResult,
+      deployResultState,
+      restoreResultState,
+      repositoryResultState,
+    ]) {
+      expect(shellReducer(resultState, {
+        type: 'navigate',
+        route: 'overview',
+      })).toMatchObject({
+        page: { route: 'overview', status: 'loading' },
+        scrollOffset: 0,
+      });
+    }
   });
 });
 

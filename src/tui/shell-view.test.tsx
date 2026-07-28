@@ -4,7 +4,10 @@ import type { CapturePlan, CaptureResult } from '../operations/capture.js';
 import type { DeployPlan, DeployResult } from '../operations/deploy.js';
 import type { RestorePlan, RestoreResult } from '../operations/restore.js';
 import type { StatusReport } from '../operations/status.js';
-import { ShellView } from './shell-view.js';
+import {
+  maximumPageScrollOffset,
+  ShellView,
+} from './shell-view.js';
 import {
   createInitialShellState,
   shellReducer,
@@ -169,15 +172,36 @@ describe('TUI Shell view', () => {
       Direct commands open the same Shell when attached to a terminal.
       Use --dry-run, --yes, --plain, or --json for one-shot output.
 
-      Escape Overview   q Quit   Ctrl+C Cancel"
+      ↑↓ Scroll   ←/Escape Overview   q Quit   Ctrl+C Cancel"
     `);
+  });
+
+  it('clips and scrolls long read-only content inside the terminal viewport', () => {
+    const initial = createInitialShellState('help');
+    const maximum = maximumPageScrollOffset(initial, 9, 80);
+    const help = shellReducer(initial, {
+      type: 'page.scroll',
+      delta: 3,
+      maximum,
+    });
+    const rendered = renderToString(
+      <ShellView state={help} terminalRows={9} />,
+      { columns: 80 },
+    );
+
+    expect(rendered).not.toContain('Primary navigation:');
+    expect(rendered).not.toContain('  Capture');
+    expect(rendered).toContain('Repository');
+    expect(rendered).toContain('↑↓ Scroll');
+    expect(rendered.split('\n').length).toBeLessThanOrEqual(9);
+    expect(maximumPageScrollOffset(initial, 9, 12)).toBeGreaterThan(maximum);
   });
 
   it('sends Repository write Results back to Overview', () => {
     const state = repositoryFailureResultState();
 
     expect(renderToString(<ShellView state={state} />)).toContain(
-      'Enter Overview   q Quit',
+      'Enter/← Refresh Overview   q Quit',
     );
   });
 
@@ -303,6 +327,12 @@ describe('TUI Shell view', () => {
         nextActions: [],
       },
     });
+    expect(maximumPageScrollOffset({
+      ...environment,
+      postInitOnboarding: true,
+    }, 8, 80)).toBe(
+      maximumPageScrollOffset(environment, 8, 80) + 1,
+    );
 
     const previousNoColor = process.env.NO_COLOR;
     process.env.NO_COLOR = '1';
@@ -409,7 +439,7 @@ describe('TUI Shell view', () => {
         [missing] /Users/张涛/Configuration Repository/very-long-directory/config.toml
       Missing variables: OPENAI_API_KEY
 
-      Escape Overview   q Quit   Ctrl+C Cancel",
+      ↑↓ Scroll   ←/Escape Overview   q Quit   Ctrl+C Cancel",
       }
     `);
     expect(Object.values(rendered).join('')).not.toMatch(/\u001b\[/);
@@ -570,7 +600,7 @@ describe('TUI Shell view', () => {
       Written: 2 paths
       Deleted: 0 paths
 
-      Enter Refresh Overview   q Quit",
+      ↑↓ Scroll   Enter/← Refresh Overview   q Quit",
       }
     `);
     expect(Object.values(rendered).join('')).not.toMatch(/\u001b\[/);
@@ -782,6 +812,13 @@ describe('TUI Shell view', () => {
       type: 'restore.loaded',
       plan: restorePlan(),
     });
+    const deleteFocused = shellReducer(review, {
+      type: 'restore.move',
+      delta: 1,
+    });
+    const detail = shellReducer(deleteFocused, {
+      type: 'restore.openDetail',
+    });
     const applying = shellReducer(review, { type: 'restore.apply' });
     const stale = shellReducer(applying, {
       type: 'restore.applied',
@@ -800,6 +837,8 @@ describe('TUI Shell view', () => {
       noBackup: renderToString(<ShellView state={noBackup} />, { columns: 80 }),
       conflict: renderToString(<ShellView state={conflict} />, { columns: 80 }),
       review: renderToString(<ShellView state={review} />, { columns: 80 }),
+      deleteFocused: renderToString(<ShellView state={deleteFocused} />, { columns: 80 }),
+      detail: renderToString(<ShellView state={detail} />, { columns: 80 }),
       applying: renderToString(<ShellView state={applying} />, { columns: 80 }),
       stale: renderToString(<ShellView state={stale} />, { columns: 80 }),
       success: renderToString(<ShellView state={success} />, { columns: 80 }),
@@ -808,16 +847,20 @@ describe('TUI Shell view', () => {
 
     expect(rendered.noBackup).toContain('No complete and verified deployment backup');
     expect(rendered.noBackup).toContain('Apply disabled');
-    expect(rendered.conflict).toContain('Restore Conflict');
+    expect(rendered.conflict).toContain('× Restore Conflict: Blocked');
     expect(rendered.conflict).toContain('/Users/张涛/.codex/config.toml');
     expect(rendered.conflict).not.toContain('force');
     expect(rendered.review).toContain('Backup time: 2026-07-27T08:30:00.000Z');
     expect(rendered.review).toContain('1 file(s) to write, 1 file(s) to delete');
+    expect(rendered.review).toContain('> [write] /Users/张涛/.codex/config.toml');
+    expect(rendered.deleteFocused).toContain('> [delete] /Users/张涛/.codex/added.toml');
+    expect(rendered.detail).toContain('Focused Restore detail');
+    expect(rendered.detail).toContain('Action: delete');
     expect(rendered.applying).toContain('input is disabled during backup, Apply, and rollback');
     expect(rendered.stale).toContain('Regenerating');
     expect(rendered.success).toContain('Restore succeeded');
     expect(rendered.rollbackFailure).toContain('restore.rollbackFailed');
-    expect(rendered.success).toContain('Enter Refresh Overview');
+    expect(rendered.success).toContain('Enter/← Refresh Overview');
     expect(rendered.rollbackFailure).toContain('q Quit');
     expect(rendered).toMatchSnapshot();
   });

@@ -63,7 +63,8 @@ export function ShellView({
   const compactOverview = page.status === 'ready'
     && page.route === 'overview'
     && rows <= 16;
-
+  const scrollable = isScrollablePage(state);
+  const contentRows = pageContentRows(state, rows, columns);
   return (
     <Box flexDirection="column">
       {!compactOverview && (
@@ -73,46 +74,329 @@ export function ShellView({
           <Text> </Text>
         </>
       )}
-      {page.status === 'loading' && (
-        <StatusLine tone="info" label="Loading">
-          {title}...
-        </StatusLine>
-      )}
-      {page.status === 'failure' && (
-        <StatusLine tone="error" label="Error">
-          {page.message}
-        </StatusLine>
-      )}
-      {page.status === 'ready' && page.route === 'overview' && (
-        <Overview
-          report={page.report}
-          focusId={state.overviewFocusId}
-          terminalColumns={columns}
-          terminalRows={rows}
-        />
-      )}
-      {page.status === 'ready' && page.route === 'repository' && (
-        <RepositoryWorkflow workflow={page.workflow} />
-      )}
-      {page.status === 'ready' && page.route === 'environment' && (
-        <EnvironmentDetails report={page.report} />
-      )}
-      {page.status === 'ready' && page.route === 'help' && <Help />}
-      {page.status === 'ready' && page.route === 'capture' && (
-        <CaptureWorkflow workflow={page.workflow} />
-      )}
-      {page.status === 'ready' && page.route === 'deploy' && (
-        <DeployWorkflow workflow={page.workflow} terminalRows={rows} />
-      )}
-      {page.status === 'ready' && page.route === 'restore' && (
-        <RestoreWorkflow workflow={page.workflow} />
-      )}
+      <Box
+        flexDirection="column"
+        maxHeight={scrollable ? contentRows : undefined}
+        overflowY={scrollable ? 'hidden' : undefined}
+      >
+        <Box
+          flexDirection="column"
+          marginTop={scrollable ? -state.scrollOffset : undefined}
+        >
+          {page.status === 'loading' && (
+            <StatusLine tone="info" label="Loading">
+              {title}...
+            </StatusLine>
+          )}
+          {page.status === 'failure' && (
+            <StatusLine tone="error" label="Error">
+              {page.message}
+            </StatusLine>
+          )}
+          {page.status === 'ready' && page.route === 'overview' && (
+            <Overview
+              report={page.report}
+              focusId={state.overviewFocusId}
+              terminalColumns={columns}
+              terminalRows={rows}
+            />
+          )}
+          {page.status === 'ready' && page.route === 'repository' && (
+            page.workflow.status === 'result'
+              ? <ScrollablePageContent state={state} />
+              : <RepositoryWorkflow workflow={page.workflow} />
+          )}
+          {page.status === 'ready' && page.route === 'environment' && (
+            <ScrollablePageContent state={state} />
+          )}
+          {page.status === 'ready' && page.route === 'help' && (
+            <ScrollablePageContent state={state} />
+          )}
+          {page.status === 'ready' && page.route === 'capture' && (
+            page.workflow.status === 'result'
+              ? <ScrollablePageContent state={state} />
+              : <CaptureWorkflow workflow={page.workflow} />
+          )}
+          {page.status === 'ready' && page.route === 'deploy' && (
+            page.workflow.status === 'result'
+              ? <ScrollablePageContent state={state} />
+              : (
+                <DeployWorkflow
+                  workflow={page.workflow}
+                  terminalRows={rows}
+                />
+              )
+          )}
+          {page.status === 'ready' && page.route === 'restore' && (
+            page.workflow.status === 'result'
+              ? <ScrollablePageContent state={state} />
+              : (
+                <RestoreWorkflow
+                  workflow={page.workflow}
+                  terminalRows={rows}
+                />
+              )
+          )}
+        </Box>
+      </Box>
       {controls && (
         <>
           {!compactOverview && <Text> </Text>}
           <Text dimColor>{controls}</Text>
         </>
       )}
+    </Box>
+  );
+}
+
+function isScrollablePage(state: ShellState): boolean {
+  const { page } = state;
+  if (page.status !== 'ready') return false;
+  if (page.route === 'help' || page.route === 'environment') return true;
+  if (page.route === 'overview') return false;
+  return page.workflow.status === 'result';
+}
+
+export function maximumPageScrollOffset(
+  state: ShellState,
+  terminalRows: number,
+  terminalColumns: number,
+): number {
+  if (!isScrollablePage(state)) return 0;
+  const renderedLines = scrollablePageLines(state).reduce(
+    (total, line) =>
+      total + wrappedLineCount(line.text, Math.max(1, terminalColumns)),
+    0,
+  );
+  return Math.max(
+    0,
+    renderedLines - pageContentRows(state, terminalRows, terminalColumns),
+  );
+}
+
+function pageContentRows(
+  state: ShellState,
+  terminalRows: number,
+  terminalColumns: number,
+): number {
+  const controls = pageControls(state, terminalRows);
+  const compactOverview = state.page.status === 'ready'
+    && state.page.route === 'overview'
+    && terminalRows <= 16;
+  return Math.max(
+    1,
+    terminalRows
+      - (compactOverview ? 0 : 4)
+      - (controls
+        ? wrappedLineCount(controls, Math.max(1, terminalColumns))
+        : 0),
+  );
+}
+
+function wrappedLineCount(value: string, columns: number): number {
+  return value.split('\n').reduce(
+    (total, line) => total + wrappedParagraphLineCount(line, columns),
+    0,
+  );
+}
+
+function wrappedParagraphLineCount(value: string, columns: number): number {
+  if (value.length === 0) return 1;
+  const tokens = value.match(/\s+|\S+/gu) ?? [];
+  let lines = 1;
+  let width = 0;
+  for (const token of tokens) {
+    const tokenWidth = textWidth(token);
+    if (/^\s+$/u.test(token)) {
+      for (const character of token) {
+        const characterWidth = textWidth(character);
+        if (width + characterWidth > columns) {
+          lines += 1;
+          width = characterWidth;
+        } else {
+          width += characterWidth;
+        }
+      }
+      continue;
+    }
+    if (tokenWidth <= columns && width + tokenWidth <= columns) {
+      width += tokenWidth;
+      continue;
+    }
+    if (width > 0) {
+      lines += 1;
+      width = 0;
+    }
+    const fullWordLines = Math.floor(tokenWidth / columns);
+    lines += fullWordLines;
+    width = tokenWidth % columns;
+    if (width === 0) {
+      lines -= 1;
+      width = columns;
+    }
+  }
+  return lines;
+}
+
+function textWidth(value: string): number {
+  return Array.from(value).reduce(
+    (width, character) =>
+      width + (character.codePointAt(0)! > 0xff ? 2 : 1),
+    0,
+  );
+}
+
+interface ScrollablePageLine {
+  key: string;
+  text: string;
+  color?: 'green' | 'yellow' | 'red';
+}
+
+function scrollablePageLines(state: ShellState): ScrollablePageLine[] {
+  const { page } = state;
+  if (page.status !== 'ready') return [];
+  if (page.route === 'help') {
+    return pageLines('help', [
+      'Primary navigation:',
+      '  Overview',
+      '  Capture',
+      '  Deploy',
+      '  Restore Latest Deployment',
+      '  Repository',
+      '  Help',
+      ' ',
+      'Direct commands open the same Shell when attached to a terminal.',
+      'Use --dry-run, --yes, --plain, or --json for one-shot output.',
+    ]);
+  }
+  if (page.route === 'environment') {
+    return pageLines('environment', [
+      ...page.report.environments.flatMap((environment) => [
+        `${environment.name}: ${environment.detected ? 'detected' : 'not detected'}`,
+        ...[
+          ...environment.configDirectories,
+          ...environment.configFiles,
+        ].map((item) =>
+          `  [${item.exists ? 'found' : 'missing'}] ${item.path}`),
+      ]),
+      ...(page.report.missingVariables.length > 0
+        ? [`Missing variables: ${page.report.missingVariables.join(', ')}`]
+        : []),
+    ]);
+  }
+  if (page.route === 'overview') return [];
+  if (page.route === 'repository') {
+    if (page.workflow.status !== 'result') return [];
+    const { operation, result } = page.workflow.step;
+    if (result.status === 'succeeded') {
+      return pageLines(
+        'repository-success',
+        [`${operationLabel(operation)} succeeded.`],
+        () => 'green',
+      );
+    }
+    const message = result.status === 'failed'
+      ? result.error.message
+      : result.issues[0]?.message ?? 'The operation was blocked.';
+    return pageLines('repository-failure', [
+      `${operationLabel(operation)} failed: ${message}`,
+      ...result.nextActions.map((action) => `Next: ${action}`),
+    ], (index) => index === 0 ? 'red' : undefined);
+  }
+  if (page.workflow.status !== 'result') return [];
+  if (page.route === 'capture') {
+    const result = page.workflow.result;
+    if (result.status === 'succeeded') {
+      return pageLines('capture-success', [
+        'Capture succeeded.',
+        `Applied: ${result.data?.appliedChangeIds.length ?? 0} changes`,
+        `Written: ${result.data?.writtenPaths.length ?? 0} paths`,
+        `Deleted: ${result.data?.deletedPaths.length ?? 0} paths`,
+        ...result.issues.map((issue) => `Warning: ${issue.message}`),
+      ], (index) => index === 0
+        ? 'green'
+        : index >= 4 ? 'yellow' : undefined);
+    }
+    if (result.status === 'blocked') {
+      return pageLines('capture-blocked', [
+        'Capture was blocked; Repository was not changed.',
+        ...result.issues.map((issue) => issue.message),
+      ], (index) => index === 0 ? 'yellow' : undefined);
+    }
+    return pageLines('capture-failed', [
+      `Capture failed: ${result.error.message}`,
+      'Repository transaction was not completed.',
+    ], (index) => index === 0 ? 'red' : undefined);
+  }
+  if (page.route === 'deploy') {
+    const result = page.workflow.result;
+    if (result.status === 'succeeded') {
+      return pageLines('deploy-success', [
+        'Deploy succeeded.',
+        `Applied: ${result.data?.appliedChangeIds.length ?? 0} changes`,
+        `Written: ${result.data?.writtenPaths.length ?? 0} paths`,
+        `Deleted: ${result.data?.deletedPaths.length ?? 0} paths`,
+      ], (index) => index === 0 ? 'green' : undefined);
+    }
+    if (result.status === 'blocked') {
+      return pageLines('deploy-blocked', [
+        'Deploy was blocked; device configuration was not changed.',
+        ...result.issues.map((issue) => issue.message),
+      ], (index) => index === 0 ? 'yellow' : undefined);
+    }
+    return pageLines('deploy-failed', [
+      `Deploy failed: ${result.error.message}`,
+      ...result.nextActions.map((action) => `Next: ${action}`),
+    ], (index) => index === 0 ? 'red' : undefined);
+  }
+  const result = page.workflow.result;
+  if (result.status === 'succeeded') {
+    return pageLines('restore-success', [
+      'Restore succeeded.',
+      `Written: ${result.data?.restoredPaths.length ?? 0} paths`,
+      `Deleted: ${result.data?.deletedPaths.length ?? 0} paths`,
+      `Pre-restore backup: ${result.data?.backupPath}`,
+    ], (index) => index === 0 ? 'green' : undefined);
+  }
+  if (result.status === 'blocked') {
+    return pageLines('restore-blocked', [
+      'Restore was blocked; device configuration was not changed.',
+      ...result.issues.map((issue) => `${issue.code}: ${issue.message}`),
+    ], (index) => index === 0 ? 'yellow' : undefined);
+  }
+  return pageLines('restore-failed', [
+    `Restore failed: ${result.error.message}`,
+    `Error code: ${result.error.code}`,
+    ...result.nextActions.map((action) => `Next: ${action}`),
+  ], (index) => index === 0 ? 'red' : undefined);
+}
+
+function pageLines(
+  prefix: string,
+  texts: string[],
+  colorForIndex: (
+    index: number,
+  ) => ScrollablePageLine['color'] = () => undefined,
+): ScrollablePageLine[] {
+  return texts.map((text, index) => ({
+    key: `${prefix}:${index}`,
+    text,
+    color: colorForIndex(index),
+  }));
+}
+
+function ScrollablePageContent({
+  state,
+}: {
+  state: ShellState;
+}): ReactNode {
+  return (
+    <Box flexDirection="column">
+      {scrollablePageLines(state).map((line) => (
+        <Text key={line.key} color={line.color} wrap="wrap">
+          {line.text}
+        </Text>
+      ))}
     </Box>
   );
 }
@@ -183,7 +467,7 @@ function pageControls(
       case 'applying':
         return undefined;
       case 'result':
-        return 'Enter Overview   q Quit';
+        return '↑↓ Scroll   Enter/← Refresh Overview   q Quit';
     }
   }
   if (page.status !== 'ready') {
@@ -197,12 +481,12 @@ function pageControls(
     return primaryNavigationControls();
   }
   if (page.route === 'help') {
-    return 'Escape Overview   q Quit   Ctrl+C Cancel';
+    return '↑↓ Scroll   ←/Escape Overview   q Quit   Ctrl+C Cancel';
   }
   if (page.route === 'environment') {
     return state.postInitOnboarding
-      ? 'Enter Continue to Capture   Escape Overview   q Quit   Ctrl+C Cancel'
-      : 'Escape Overview   q Quit   Ctrl+C Cancel';
+      ? '↑↓ Scroll   Enter Continue to Capture   ←/Escape Overview   q Quit   Ctrl+C Cancel'
+      : '↑↓ Scroll   ←/Escape Overview   q Quit   Ctrl+C Cancel';
   }
   if (page.route === 'deploy') {
     switch (page.workflow.status) {
@@ -218,21 +502,24 @@ function pageControls(
       case 'regenerating':
         return undefined;
       case 'result':
-        return 'Enter Refresh Overview   q Quit';
+        return '↑↓ Scroll   Enter/← Refresh Overview   q Quit';
     }
   }
   if (page.route === 'restore') {
     switch (page.workflow.status) {
       case 'review':
+        if (page.workflow.detailChangeId) {
+          return '←/Escape Close Detail   q Quit   Ctrl+C Cancel';
+        }
         return page.workflow.plan.status === 'planned'
           && page.workflow.plan.readyToApply
-          ? 'Enter Apply   Escape Overview   q Quit   Ctrl+C Cancel'
-          : 'Escape Overview   q Quit   Ctrl+C Cancel';
+          ? '↑↓ Browse   → Detail   Enter Apply   ←/Escape Overview   q Quit   Ctrl+C Cancel'
+          : '↑↓ Browse   → Detail   ←/Escape Overview   q Quit   Ctrl+C Cancel';
       case 'applying':
       case 'regenerating':
         return undefined;
       case 'result':
-        return 'Enter Refresh Overview   q Quit';
+        return '↑↓ Scroll   Enter/← Refresh Overview   q Quit';
     }
   }
   switch (page.workflow.status) {
@@ -249,7 +536,7 @@ function pageControls(
     case 'regenerating':
       return undefined;
     case 'result':
-      return 'Enter Refresh Overview   q Quit';
+      return '↑↓ Scroll   Enter/← Refresh Overview   q Quit';
   }
 }
 
@@ -258,23 +545,6 @@ function primaryNavigationControls(): string {
     '↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel',
     'Accelerators: c Capture   d Deploy   s Restore   r Repository   h Help',
   ].join('\n');
-}
-
-function Help(): ReactNode {
-  return (
-    <Box flexDirection="column">
-      <Text>Primary navigation:</Text>
-      <Text>  Overview</Text>
-      <Text>  Capture</Text>
-      <Text>  Deploy</Text>
-      <Text>  Restore Latest Deployment</Text>
-      <Text>  Repository</Text>
-      <Text>  Help</Text>
-      <Text> </Text>
-      <Text>Direct commands open the same Shell when attached to a terminal.</Text>
-      <Text>Use --dry-run, --yes, --plain, or --json for one-shot output.</Text>
-    </Box>
-  );
 }
 
 function RepositoryWorkflow({
@@ -804,28 +1074,6 @@ function StatusLine({
   );
 }
 
-function EnvironmentDetails({ report }: { report: EnvironmentReport }): ReactNode {
-  return (
-    <Box flexDirection="column">
-      {report.environments.map((environment) => (
-        <Box key={environment.id} flexDirection="column">
-          <Text>
-            {environment.name}: {environment.detected ? 'detected' : 'not detected'}
-          </Text>
-          {[...environment.configDirectories, ...environment.configFiles].map((item) => (
-            <Text key={`${environment.id}:${item.path}`}>
-              {'  '}[{item.exists ? 'found' : 'missing'}] {item.path}
-            </Text>
-          ))}
-        </Box>
-      ))}
-      {report.missingVariables.length > 0 && (
-        <Text>Missing variables: {report.missingVariables.join(', ')}</Text>
-      )}
-    </Box>
-  );
-}
-
 function CaptureWorkflow({
   workflow,
 }: {
@@ -859,7 +1107,7 @@ function CaptureWorkflow({
         </Box>
       );
     case 'result':
-      return <CaptureResultView result={workflow.result} />;
+      return null;
   }
 }
 
@@ -1016,36 +1264,6 @@ function CaptureConfirmation({
   );
 }
 
-function CaptureResultView({ result }: { result: CaptureResult }): ReactNode {
-  if (result.status === 'succeeded') {
-    return (
-      <Box flexDirection="column">
-        <Text color="green">Capture succeeded.</Text>
-        <Text>Applied: {result.data?.appliedChangeIds.length ?? 0} changes</Text>
-        <Text>Written: {result.data?.writtenPaths.length ?? 0} paths</Text>
-        <Text>Deleted: {result.data?.deletedPaths.length ?? 0} paths</Text>
-        {result.issues.map((issue) => (
-          <Text key={issue.code} color="yellow">Warning: {issue.message}</Text>
-        ))}
-      </Box>
-    );
-  }
-  if (result.status === 'blocked') {
-    return (
-      <Box flexDirection="column">
-        <Text color="yellow">Capture was blocked; Repository was not changed.</Text>
-        {result.issues.map((issue) => <Text key={issue.code}>{issue.message}</Text>)}
-      </Box>
-    );
-  }
-  return (
-    <Box flexDirection="column">
-      <Text color="red">Capture failed: {result.error.message}</Text>
-      <Text>Repository transaction was not completed.</Text>
-    </Box>
-  );
-}
-
 function displayGroup(change: CaptureChange): string {
   const ide = change.ide === 'shared'
     ? 'Shared'
@@ -1095,7 +1313,7 @@ function DeployWorkflow({
         </Box>
       );
     case 'result':
-      return <DeployResultView result={workflow.result} />;
+      return null;
   }
 }
 
@@ -1111,7 +1329,7 @@ function DeploySelection({
   const advanced = workflow.plan.changes.filter(
     (change) => change.group === 'advanced',
   );
-  const viewport = deployViewport(
+  const viewport = listViewport(
     visible,
     workflow.cursor,
     Math.max(1, terminalRows - (terminalRows <= 12 ? 8 : 10)),
@@ -1177,7 +1395,7 @@ function DeploySelection({
   );
 }
 
-function deployViewport<T>(
+function listViewport<T>(
   items: T[],
   cursor: number,
   maximumRows: number,
@@ -1302,43 +1520,21 @@ function DeployConfirmation({
   );
 }
 
-function DeployResultView({ result }: { result: DeployResult }): ReactNode {
-  if (result.status === 'succeeded') {
-    return (
-      <Box flexDirection="column">
-        <Text color="green">Deploy succeeded.</Text>
-        <Text>Applied: {result.data?.appliedChangeIds.length ?? 0} changes</Text>
-        <Text>Written: {result.data?.writtenPaths.length ?? 0} paths</Text>
-        <Text>Deleted: {result.data?.deletedPaths.length ?? 0} paths</Text>
-      </Box>
-    );
-  }
-  if (result.status === 'blocked') {
-    return (
-      <Box flexDirection="column">
-        <Text color="yellow">Deploy was blocked; device configuration was not changed.</Text>
-        {result.issues.map((issue) => <Text key={issue.code}>{issue.message}</Text>)}
-      </Box>
-    );
-  }
-  return (
-    <Box flexDirection="column">
-      <Text color="red">Deploy failed: {result.error.message}</Text>
-      {result.nextActions.map((action) => (
-        <Text key={action}>Next: {action}</Text>
-      ))}
-    </Box>
-  );
-}
-
 function RestoreWorkflow({
   workflow,
+  terminalRows,
 }: {
   workflow: RestoreWorkflowState;
+  terminalRows: number;
 }): ReactNode {
   switch (workflow.status) {
     case 'review':
-      return <RestoreReview plan={workflow.plan} />;
+      return (
+        <RestoreReview
+          workflow={workflow}
+          terminalRows={terminalRows}
+        />
+      );
     case 'applying':
       return (
         <Box flexDirection="column">
@@ -1362,17 +1558,46 @@ function RestoreWorkflow({
         </Box>
       );
     case 'result':
-      return <RestoreResultView result={workflow.result} />;
+      return null;
   }
 }
 
-function RestoreReview({ plan }: { plan: RestorePlan }): ReactNode {
+function RestoreReview({
+  workflow,
+  terminalRows,
+}: {
+  workflow: Extract<RestoreWorkflowState, { status: 'review' }>;
+  terminalRows: number;
+}): ReactNode {
+  const { plan } = workflow;
   const writeCount = plan.changes.filter(
     (change) => change.action === 'restore',
   ).length;
   const deleteCount = plan.changes.length - writeCount;
   const hasConflict = plan.issues.some(
     (issue) => issue.code === 'restore.conflict',
+  );
+  const detail = plan.changes.find(
+    (change) => change.id === workflow.detailChangeId,
+  );
+  if (detail) {
+    return (
+      <Box flexDirection="column">
+        <Text>Focused Restore detail</Text>
+        <Text>Action: {detail.action === 'restore' ? 'write' : 'delete'}</Text>
+        <Text wrap="wrap">Target: {detail.targetPath}</Text>
+        <Text>
+          {detail.action === 'restore'
+            ? 'The deployment backup will replace this file.'
+            : 'Restore will delete this file because it did not exist in the deployment backup.'}
+        </Text>
+      </Box>
+    );
+  }
+  const viewport = listViewport(
+    plan.changes,
+    workflow.cursor,
+    Math.max(1, terminalRows - 13),
   );
   return (
     <Box flexDirection="column">
@@ -1382,17 +1607,28 @@ function RestoreReview({ plan }: { plan: RestorePlan }): ReactNode {
         Impact: {writeCount} file(s) to write, {deleteCount} file(s) to delete
       </Text>
       <Text> </Text>
-      {plan.changes.map((change) => (
+      {viewport.hiddenBefore > 0 && (
+        <Text dimColor>… {viewport.hiddenBefore} earlier changes</Text>
+      )}
+      {viewport.items.map(({ item: change }, visibleIndex) => (
         <Text key={change.id}>
+          {viewport.start + visibleIndex === workflow.cursor ? '>' : ' '}{' '}
           [{change.action === 'restore' ? 'write' : 'delete'}] {change.targetPath}
         </Text>
       ))}
+      {viewport.hiddenAfter > 0 && (
+        <Text dimColor>… {viewport.hiddenAfter} more changes</Text>
+      )}
       {plan.issues.map((issue) => (
         <Box key={issue.code} flexDirection="column">
-          <Text color="red">
-            {issue.code === 'restore.conflict' ? 'Restore Conflict: ' : 'Error: '}
-            {issue.message}
-          </Text>
+          <StatusLine
+            tone="error"
+            label={issue.code === 'restore.conflict'
+              ? 'Restore Conflict'
+              : 'Error'}
+          >
+            Blocked · {issue.message}
+          </StatusLine>
           {issue.details?.split('\n').map((detail) => (
             <Text key={`${issue.code}:${detail}`}>{'  '}{detail}</Text>
           ))}
@@ -1404,38 +1640,6 @@ function RestoreReview({ plan }: { plan: RestorePlan }): ReactNode {
         </Text>
       )}
       {plan.nextActions.map((action) => (
-        <Text key={action}>Next: {action}</Text>
-      ))}
-    </Box>
-  );
-}
-
-function RestoreResultView({ result }: { result: RestoreResult }): ReactNode {
-  if (result.status === 'succeeded') {
-    return (
-      <Box flexDirection="column">
-        <Text color="green">Restore succeeded.</Text>
-        <Text>Written: {result.data?.restoredPaths.length ?? 0} paths</Text>
-        <Text>Deleted: {result.data?.deletedPaths.length ?? 0} paths</Text>
-        <Text>Pre-restore backup: {result.data?.backupPath}</Text>
-      </Box>
-    );
-  }
-  if (result.status === 'blocked') {
-    return (
-      <Box flexDirection="column">
-        <Text color="yellow">Restore was blocked; device configuration was not changed.</Text>
-        {result.issues.map((issue) => (
-          <Text key={issue.code}>{issue.code}: {issue.message}</Text>
-        ))}
-      </Box>
-    );
-  }
-  return (
-    <Box flexDirection="column">
-      <Text color="red">Restore failed: {result.error.message}</Text>
-      <Text>Error code: {result.error.code}</Text>
-      {result.nextActions.map((action) => (
         <Text key={action}>Next: {action}</Text>
       ))}
     </Box>

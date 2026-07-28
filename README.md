@@ -42,7 +42,7 @@ MCV 仓库中的配置分为：
 
 ## 快速开始
 
-在完整 TTY 中直接运行 `mcv` 会进入统一的 Ink Shell，并异步打开只读 Overview。一级导航固定为 Overview、Capture、Deploy、Restore Latest Deployment、Repository 和 Help；Overview 中按 `↑` / `↓` 移动焦点，按 `→` 或 `Enter` 打开焦点目标。`c`、`d`、`s`、`r`、`h` 继续分别作为 Capture、Deploy、Restore Latest Deployment、Repository、Help 的快捷键。所有业务子命令都 deep-link 到同一个持久 Shell：`status` 打开 Overview，`discover` 打开 Environment Details，Capture/Deploy/Restore 打开各自 workflow，Repository 生命周期命令直接打开对应 Repository 页面或 Plan。只读页按 `Escape` 返回 Overview；除 Repository 路径输入页需要保留完整文本输入外，任一非 Apply 页面按 `q` 正常退出，按 `Ctrl+C` 以 130 退出。direct subcommand 正常关闭后会在主屏留下对应摘要和 next action。Shell 使用 alternate screen，退出、失败、中断和异常后都会恢复主屏、光标和输入模式。
+在完整 TTY 中直接运行 `mcv` 会进入统一的 Ink Shell，并异步打开只读 Overview。一级导航固定为 Overview、Capture、Deploy、Restore Latest Deployment、Repository 和 Help；Overview 中按 `↑` / `↓` 移动焦点，按 `→` 或 `Enter` 打开焦点目标。`c`、`d`、`s`、`r`、`h` 继续分别作为 Capture、Deploy、Restore Latest Deployment、Repository、Help 的快捷键。所有业务子命令都 deep-link 到同一个持久 Shell：`status` 打开 Overview，`discover` 打开 Environment Details，Capture/Deploy/Restore 打开各自 workflow，Repository 生命周期命令直接打开对应 Repository 页面或 Plan。Help、Environment Details 和 Result 页按 `↑` / `↓` 滚动；Help 与 Environment Details 按 `←` 或 `Escape` 返回 Overview，Result 页按 `←` 或 `Enter` 返回刷新后的 Overview。除 Repository 路径输入页需要保留完整文本输入外，任一非 Apply 页面按 `q` 正常退出，按 `Ctrl+C` 以 130 退出。direct subcommand 正常关闭后会在主屏留下对应摘要和 next action。Shell 使用 alternate screen，退出、失败、中断和异常后都会恢复主屏、光标和输入模式。
 
 非 TTY 的无参数调用仍立即输出 help。显式使用 `--plain`、`--dry-run`、`--yes` 或 `--json` 的命令始终执行一次性协议，不进入 alternate screen。
 
@@ -126,7 +126,7 @@ mcv restore
 - `status --plain` 从同一份只读 Overview Report 汇总 Repository、可选 Git 状态、Pending Deployment Change、相对 Baseline Snapshot 的 unchanged/Drift/missing、IDE/Surface、缺失变量和最近操作；`status --json` 输出该 Report 的机器可读形式。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
 - `restore --dry-run` 只选择最近一次完整且内容可验证的 Deploy backup，展示备份时间、将恢复或删除的文件，并以独立的 Restore Conflict 阻止覆盖部署后的新变化。
 - `restore` 默认在终端确认完整 Plan；自动化场景可在审阅后使用 `restore --yes`，并可组合 `--json` 取得结构化 Result。为避免无监督删除，包含删除的 Plan 必须交互确认，`--yes` 会在写入前阻断。Apply 会重验 operation ID、完整 selection、backup 来源和目标哈希；事务开始时先创建并验证当前状态 backup。事务前按 Ctrl+C 以 130 退出；写入、删除或本机状态提交失败时自动回滚，backup/commit/rollback 期间忽略普通取消。
-- Restore TTY workflow 展示最近完整 backup 的时间、逐文件 write/delete 影响和 Restore Conflict 路径；冲突或无可用 backup 时 Apply 被禁用，且不提供 force restore。Plan 过期会自动重新生成并要求重新审阅；成功或失败结果页按 `Enter` 返回刷新后的 Overview，按 `q` 退出。
+- Restore TTY workflow 展示最近完整 backup 的时间、逐文件 write/delete 影响和 Restore Conflict 路径；按 `↑` / `↓` 浏览影响，按 `→` 打开焦点文件详情，按 `←` 关闭详情或返回 Overview，最终 Apply 仍只能由 `Enter` 启动。冲突或无可用 backup 时 Apply 被禁用，且不提供 force restore。Plan 过期会自动重新生成并要求重新审阅；成功或失败结果页按 `Enter` 或 `←` 返回刷新后的 Overview，按 `q` 退出。
 
 ## 命令
 

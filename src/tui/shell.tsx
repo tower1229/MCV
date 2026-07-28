@@ -61,7 +61,10 @@ import {
   type ShellRoute,
   type ShellState,
 } from './shell-state.js';
-import { ShellView } from './shell-view.js';
+import {
+  maximumPageScrollOffset,
+  ShellView,
+} from './shell-view.js';
 import { normalizeShellInteraction } from './interaction-intent.js';
 import { primaryDestinationIdForAccelerator } from './overview-navigation.js';
 import { preserveTerminalInputMode } from './terminal-input-mode.js';
@@ -517,6 +520,26 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
       && state.page.status === 'ready'
       ? state.page.workflow
       : undefined;
+    const scrollPage = (delta: number): void => {
+      dispatch({
+        type: 'page.scroll',
+        delta,
+        maximum: maximumPageScrollOffset(
+          state,
+          windowSize.rows,
+          windowSize.columns,
+        ),
+      });
+    };
+    const handleResultInteraction = (): void => {
+      if (intent.type === 'confirm' || intent.type === 'back') {
+        dispatch({ type: 'navigate', route: 'overview' });
+      } else if (intent.type === 'focus.previous') {
+        scrollPage(-1);
+      } else if (intent.type === 'focus.next') {
+        scrollPage(1);
+      }
+    };
     if (
       captureWorkflow?.status === 'applying'
       || deployWorkflow?.status === 'applying'
@@ -585,8 +608,8 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
         }
         return;
       }
-      if (repositoryWorkflow.status === 'result' && intent.type === 'confirm') {
-        dispatch({ type: 'navigate', route: 'overview' });
+      if (repositoryWorkflow.status === 'result') {
+        handleResultInteraction();
       }
       return;
     }
@@ -613,13 +636,19 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
       }
       return;
     }
-    if (state.page.route === 'environment' && intent.type === 'cancel') {
-      dispatch({ type: 'navigate', route: 'overview' });
-      return;
-    }
-    if (state.page.route === 'help' && intent.type === 'cancel') {
-      dispatch({ type: 'navigate', route: 'overview' });
-      return;
+    if (state.page.route === 'environment' || state.page.route === 'help') {
+      if (intent.type === 'cancel' || intent.type === 'back') {
+        dispatch({ type: 'navigate', route: 'overview' });
+        return;
+      }
+      if (intent.type === 'focus.previous') {
+        scrollPage(-1);
+        return;
+      }
+      if (intent.type === 'focus.next') {
+        scrollPage(1);
+        return;
+      }
     }
     if (
       state.page.route === 'environment'
@@ -631,8 +660,8 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
       return;
     }
     if (state.page.route === 'deploy' && state.page.status === 'ready') {
-      if (deployWorkflow?.status === 'result' && intent.type === 'confirm') {
-        dispatch({ type: 'navigate', route: 'overview' });
+      if (deployWorkflow?.status === 'result') {
+        handleResultInteraction();
         return;
       }
       if (intent.type === 'focus.previous') {
@@ -687,21 +716,27 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
       return;
     }
     if (state.page.route === 'restore' && state.page.status === 'ready') {
-      if (restoreWorkflow?.status === 'result' && intent.type === 'confirm') {
-        dispatch({ type: 'navigate', route: 'overview' });
+      if (restoreWorkflow?.status === 'result') {
+        handleResultInteraction();
         return;
       }
       if (restoreWorkflow?.status === 'review') {
         if (intent.type === 'confirm') dispatch({ type: 'restore.apply' });
-        else if (intent.type === 'cancel') {
-          dispatch({ type: 'navigate', route: 'overview' });
+        else if (intent.type === 'focus.previous') {
+          dispatch({ type: 'restore.move', delta: -1 });
+        } else if (intent.type === 'focus.next') {
+          dispatch({ type: 'restore.move', delta: 1 });
+        } else if (intent.type === 'open') {
+          dispatch({ type: 'restore.openDetail' });
+        } else if (intent.type === 'back' || intent.type === 'cancel') {
+          dispatch({ type: 'restore.back' });
         }
       }
       return;
     }
     if (state.page.route !== 'capture' || state.page.status !== 'ready') return;
-    if (captureWorkflow?.status === 'result' && intent.type === 'confirm') {
-      dispatch({ type: 'navigate', route: 'overview' });
+    if (captureWorkflow?.status === 'result') {
+      handleResultInteraction();
       return;
     }
     if (intent.type === 'focus.previous') {
