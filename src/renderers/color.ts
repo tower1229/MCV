@@ -15,19 +15,23 @@ export interface ColorContext {
   env?: NodeJS.ProcessEnv;
 }
 
+export function shouldUseColor(
+  context: ColorContext = {},
+): boolean {
+  const isTTY = context.isTTY ?? Boolean(process.stdout.isTTY);
+  const env = context.env ?? process.env;
+  return isTTY
+    && !Object.prototype.hasOwnProperty.call(env, 'NO_COLOR')
+    && env.TERM !== 'dumb'
+    && env.FORCE_COLOR !== '0';
+}
+
 export function styleText(
   text: string,
   tone: TextTone,
   context: ColorContext = {},
 ): string {
-  const isTTY = context.isTTY ?? Boolean(process.stdout.isTTY);
-  const env = context.env ?? process.env;
-  if (
-    !isTTY
-    || Object.prototype.hasOwnProperty.call(env, 'NO_COLOR')
-    || env.TERM === 'dumb'
-    || env.FORCE_COLOR === '0'
-  ) return text;
+  if (!shouldUseColor(context)) return text;
   return `\u001b[${ANSI_CODES[tone]}m${text}\u001b[0m`;
 }
 

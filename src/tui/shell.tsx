@@ -745,7 +745,13 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
     exit(createOutcome(state, initialRoute));
   }, [exit, initialRoute, state]);
 
-  return <ShellView state={state} terminalRows={windowSize.rows} />;
+  return (
+    <ShellView
+      state={state}
+      terminalColumns={windowSize.columns}
+      terminalRows={windowSize.rows}
+    />
+  );
 }
 
 function createRepositoryEntryAction(

@@ -562,7 +562,7 @@ function Shell({ context, initialRoute, dependencies }) {
             return;
         exit(createOutcome(state, initialRoute));
     }, [exit, initialRoute, state]);
-    return _jsx(ShellView, { state: state, terminalRows: windowSize.rows });
+    return (_jsx(ShellView, { state: state, terminalColumns: windowSize.columns, terminalRows: windowSize.rows }));
 }
 function createRepositoryEntryAction(context, entry, dependencies) {
     switch (entry.operation) {

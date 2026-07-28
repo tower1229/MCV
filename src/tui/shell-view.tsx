@@ -38,30 +38,57 @@ import {
   PRIMARY_DESTINATIONS,
   type PrimaryDestinationId,
 } from './overview-navigation.js';
+import {
+  statusToneStyle,
+  type StatusTone,
+} from './status-tone.js';
 
 export interface ShellViewProps {
   state: ShellState;
+  terminalColumns?: number;
   terminalRows?: number;
 }
 
-export function ShellView({ state, terminalRows }: ShellViewProps): ReactNode {
+export function ShellView({
+  state,
+  terminalColumns,
+  terminalRows,
+}: ShellViewProps): ReactNode {
   const windowSize = useWindowSize();
+  const columns = terminalColumns ?? windowSize.columns;
   const rows = terminalRows ?? windowSize.rows;
   const { page } = state;
   const title = pageTitle(state);
   const controls = pageControls(state, rows);
+  const compactOverview = page.status === 'ready'
+    && page.route === 'overview'
+    && rows <= 16;
 
   return (
     <Box flexDirection="column">
-      <Text bold>MCV</Text>
-      <Text>{title}</Text>
-      <Text> </Text>
-      {page.status === 'loading' && <Text>Loading {title}...</Text>}
-      {page.status === 'failure' && <Text color="red">Failed: {page.message}</Text>}
+      {!compactOverview && (
+        <>
+          <Text bold>MCV</Text>
+          <Text>{title}</Text>
+          <Text> </Text>
+        </>
+      )}
+      {page.status === 'loading' && (
+        <StatusLine tone="info" label="Loading">
+          {title}...
+        </StatusLine>
+      )}
+      {page.status === 'failure' && (
+        <StatusLine tone="error" label="Error">
+          {page.message}
+        </StatusLine>
+      )}
       {page.status === 'ready' && page.route === 'overview' && (
         <Overview
           report={page.report}
           focusId={state.overviewFocusId}
+          terminalColumns={columns}
+          terminalRows={rows}
         />
       )}
       {page.status === 'ready' && page.route === 'repository' && (
@@ -82,7 +109,7 @@ export function ShellView({ state, terminalRows }: ShellViewProps): ReactNode {
       )}
       {controls && (
         <>
-          <Text> </Text>
+          {!compactOverview && <Text> </Text>}
           <Text dimColor>{controls}</Text>
         </>
       )}
@@ -287,9 +314,9 @@ function RepositoryWorkflow({
   }
   if (workflow.status === 'applying') {
     return (
-      <Text>
-        Applying the reviewed {operationLabel(workflow.step.operation)} Plan...
-      </Text>
+      <StatusLine tone="info" label="Applying">
+        Reviewed {operationLabel(workflow.step.operation)} Plan...
+      </StatusLine>
     );
   }
   if (workflow.status === 'result') {
@@ -416,20 +443,59 @@ function repositoryChangeLabel(
 function Overview({
   report,
   focusId,
+  terminalColumns,
+  terminalRows,
 }: {
   report: StatusReport;
   focusId: PrimaryDestinationId;
+  terminalColumns: number;
+  terminalRows: number;
 }): ReactNode {
-  const pending = report.pendingDeployment;
-  const local = report.postDeployLocalState;
+  if (terminalRows <= 16) {
+    return (
+      <CompactOverview
+        report={report}
+        focusId={focusId}
+        terminalColumns={terminalColumns}
+      />
+    );
+  }
+  const wide = terminalColumns >= 90;
 
   return (
-    <Box flexDirection="column">
-      <Text>Primary navigation:</Text>
+    <Box flexDirection={wide ? 'row' : 'column'}>
+      <Box
+        flexDirection="column"
+        width={wide ? 32 : undefined}
+        flexShrink={0}
+      >
+        <Text>Navigation</Text>
+        <PrimaryNavigation focusId={focusId} />
+      </Box>
+      {!wide && <Text> </Text>}
+      <Box flexDirection="column" flexGrow={1}>
+        <Text>Status Overview</Text>
+        <OverviewStatus report={report} />
+      </Box>
+    </Box>
+  );
+}
+
+function PrimaryNavigation({
+  focusId,
+}: {
+  focusId: PrimaryDestinationId;
+}): ReactNode {
+  return (
+    <>
       {PRIMARY_DESTINATIONS.map((destination) => {
         const focused = destination.id === focusId;
+        const focusStyle = statusToneStyle('info');
         return (
-          <Text key={destination.id} color={focused ? 'cyan' : undefined}>
+          <Text
+            key={destination.id}
+            color={focused ? focusStyle.color : undefined}
+          >
             {focused ? '›' : ' '}{' '}
             {destination.label}
             {'accelerator' in destination
@@ -438,38 +504,303 @@ function Overview({
           </Text>
         );
       })}
-      <Text> </Text>
-      <Text>Repository: {report.repository.path}</Text>
-      {report.repository.git && (
-        <Text>
-          Git: {report.repository.git.clean
-            ? 'clean'
-            : `${report.repository.git.uncommittedChanges} uncommitted changes`}
-        </Text>
+    </>
+  );
+}
+
+function OverviewStatus({ report }: { report: StatusReport }): ReactNode {
+  const status = createOverviewStatusViewModel(report);
+
+  return (
+    <>
+      <StatusLine tone={status.repository.tone} label={status.repository.label}>
+        {statusItemText(status.repository)}
+      </StatusLine>
+      <Text wrap="wrap">{'  '}Path: {report.repository.path}</Text>
+      {status.git && (
+        <StatusLine tone={status.git.tone} label={status.git.label}>
+          {statusItemText(status.git)}
+        </StatusLine>
       )}
-      <Text>
-        Pending deployment: {pending.total} changes ({pending.add} add,{' '}
-        {pending.modify} modify, {pending.delete} delete)
-      </Text>
-      <Text>
-        Local managed state: {local.drift} changed, {local.missing} missing
-      </Text>
-      <Text>
-        Environment: {report.environment.missingVariables.length} missing variables
-      </Text>
+      <StatusLine tone={status.pending.tone} label={status.pending.label}>
+        {statusItemText(status.pending)}
+      </StatusLine>
+      <StatusLine tone={status.drift.tone} label={status.drift.label}>
+        {statusItemText(status.drift)}
+      </StatusLine>
+      <StatusLine tone={status.environment.tone} label={status.environment.label}>
+        {statusItemText(status.environment)}
+      </StatusLine>
       <Text>IDE support:</Text>
-      {report.environment.ideSupport.map((ide) => (
-        <Text key={ide.id}>
-          {'  '}{ide.name}: {ide.enabled ? 'enabled' : 'disabled'},{' '}
-          {ide.detected ? 'detected' : 'not detected'}
-        </Text>
+      {status.ideSupport.map((ide) => (
+        <StatusLine
+          key={ide.key}
+          tone={ide.tone}
+          label={ide.label}
+          indent={2}
+        >
+          {statusItemText(ide)}
+        </StatusLine>
       ))}
-      <Text>
-        Last operation: {report.lastOperation
-          ? `${report.lastOperation.kind} · ${report.lastOperation.success ? 'success' : 'failure'}`
-          : 'none'}
+      <StatusLine tone={status.lastOperation.tone} label={status.lastOperation.label}>
+        {statusItemText(status.lastOperation)}
+      </StatusLine>
+      {status.issues.map((issue) => (
+        <StatusLine
+          key={issue.key}
+          tone={issue.tone}
+          label={issue.label}
+        >
+          {statusItemText(issue)}
+        </StatusLine>
+      ))}
+    </>
+  );
+}
+
+function CompactOverview({
+  report,
+  focusId,
+  terminalColumns,
+}: {
+  report: StatusReport;
+  focusId: PrimaryDestinationId;
+  terminalColumns: number;
+}): ReactNode {
+  const status = createOverviewStatusViewModel(report);
+  const pathLength = Math.max(16, Math.min(48, terminalColumns - 28));
+
+  return (
+    <Box flexDirection="column">
+      <Text wrap="wrap">
+        Navigation:
+        {PRIMARY_DESTINATIONS.map((destination) => {
+          const focused = destination.id === focusId;
+          const style = statusToneStyle('info');
+          return (
+            <Text
+              key={destination.id}
+              color={focused ? style.color : undefined}
+            >
+              {'  '}{focused ? '› ' : ''}{destination.label}
+              {'accelerator' in destination
+                ? ` (${destination.accelerator})`
+                : ''}
+            </Text>
+          );
+        })}
+      </Text>
+      <Text>Status Overview</Text>
+      <StatusLine tone={status.repository.tone} label={status.repository.label}>
+        {statusItemText(status.repository)} · Path: {truncateLeading(report.repository.path, pathLength)}
+      </StatusLine>
+      {status.git && (
+        <StatusLine tone={status.git.tone} label={status.git.label}>
+          {statusItemText(status.git)}
+        </StatusLine>
+      )}
+      <StatusLine tone={status.pending.tone} label={status.pending.label}>
+        {statusItemText(status.pending)}
+      </StatusLine>
+      <Text wrap="wrap">
+        <StatusFragment tone={status.drift.tone}>
+          {status.drift.label}: {statusItemText(status.drift)}
+        </StatusFragment>
+        {'  '}
+        <StatusFragment tone={status.environment.tone}>
+          {status.environment.label}: {statusItemText(status.environment)}
+        </StatusFragment>
+      </Text>
+      <Text wrap="wrap">
+        IDE:
+        {status.ideSupport.map((ide) => (
+          <StatusFragment
+            key={ide.key}
+            tone={ide.tone}
+            prefix="  "
+          >
+            {ide.label}: {statusItemText(ide, false)}
+          </StatusFragment>
+        ))}
+      </Text>
+      <Text wrap="wrap">
+        <StatusFragment tone={status.lastOperation.tone}>
+          {status.lastOperation.label}: {statusItemText(status.lastOperation)}
+        </StatusFragment>
+        {status.issues.map((issue) => (
+          <StatusFragment
+            key={issue.key}
+            tone={issue.tone}
+            prefix="  "
+          >
+            {issue.label}: {statusItemText(issue, false)}
+          </StatusFragment>
+        ))}
       </Text>
     </Box>
+  );
+}
+
+interface OverviewStatusItem {
+  key: string;
+  tone: StatusTone;
+  label: string;
+  state: string;
+  details?: string;
+}
+
+interface OverviewStatusViewModel {
+  repository: OverviewStatusItem;
+  git?: OverviewStatusItem;
+  pending: OverviewStatusItem;
+  drift: OverviewStatusItem;
+  environment: OverviewStatusItem;
+  ideSupport: OverviewStatusItem[];
+  lastOperation: OverviewStatusItem;
+  issues: OverviewStatusItem[];
+}
+
+function createOverviewStatusViewModel(
+  report: StatusReport,
+): OverviewStatusViewModel {
+  const pending = report.pendingDeployment;
+  const local = report.postDeployLocalState;
+  const missingVariables = report.environment.missingVariables.length;
+  const git = report.repository.git;
+
+  return {
+    repository: {
+      key: 'repository',
+      tone: 'success',
+      label: 'Repository',
+      state: 'Ready',
+    },
+    ...(git
+      ? {
+        git: {
+          key: 'git',
+          tone: git.clean ? 'success' as const : 'warning' as const,
+          label: 'Git',
+          state: git.clean ? 'Clean' : 'Changes',
+          details: [
+            ...(!git.clean
+              ? [`${git.uncommittedChanges} uncommitted changes`]
+              : []),
+            ...(git.branch ? [git.branch] : []),
+          ].join(' · ') || undefined,
+        },
+      }
+      : {}),
+    pending: {
+      key: 'pending',
+      tone: pending.total > 0 ? 'warning' : 'muted',
+      label: 'Pending Deployment Changes',
+      state: pending.total > 0 ? 'Review' : 'None',
+      details: `${pending.total} changes (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete)`,
+    },
+    drift: {
+      key: 'drift',
+      tone: local.drift > 0 || local.missing > 0 ? 'warning' : 'success',
+      label: 'Drift',
+      state: local.drift > 0 || local.missing > 0 ? 'Review' : 'None',
+      details: `${local.drift} changed, ${local.missing} missing`,
+    },
+    environment: {
+      key: 'environment',
+      tone: missingVariables > 0 ? 'warning' : 'success',
+      label: 'Environment',
+      state: missingVariables > 0 ? 'Warning' : 'Ready',
+      details: `${missingVariables} missing variables`,
+    },
+    ideSupport: report.environment.ideSupport.map((ide) => ({
+      key: ide.id,
+      tone: ide.enabled && ide.detected ? 'success' : 'muted',
+      label: ide.name,
+      state: ide.enabled
+        ? ide.detected ? 'Ready' : 'Not detected'
+        : 'Disabled',
+      details: `${ide.enabled ? 'enabled' : 'disabled'}, ${ide.detected ? 'detected' : 'not detected'}`,
+    })),
+    lastOperation: report.lastOperation
+      ? {
+        key: 'last-operation',
+        tone: report.lastOperation.success ? 'success' : 'error',
+        label: 'Last operation',
+        state: report.lastOperation.success ? 'Succeeded' : 'Failed',
+        details: report.lastOperation.kind,
+      }
+      : {
+        key: 'last-operation',
+        tone: 'muted',
+        label: 'Last operation',
+        state: 'None',
+      },
+    issues: report.issues.map((issue) => ({
+      key: issue.code,
+      tone: issue.severity === 'error'
+        ? 'error'
+        : issue.severity === 'notice'
+          ? 'info'
+          : 'warning',
+      label: issue.severity === 'error'
+        ? 'Error'
+        : issue.severity === 'notice'
+          ? 'Info'
+          : 'Warning',
+      state: issue.code,
+      details: issue.message,
+    })),
+  };
+}
+
+function statusItemText(
+  item: OverviewStatusItem,
+  includeDetails = true,
+): string {
+  return includeDetails && item.details
+    ? `${item.state} · ${item.details}`
+    : item.state;
+}
+
+function StatusFragment({
+  tone,
+  prefix = '',
+  children,
+}: {
+  tone: StatusTone;
+  prefix?: string;
+  children: ReactNode;
+}): ReactNode {
+  const style = statusToneStyle(tone);
+  return (
+    <Text color={style.color} dimColor={style.dimColor}>
+      {prefix}{style.symbol} {children}
+    </Text>
+  );
+}
+
+function truncateLeading(value: string, maximumLength: number): string {
+  const characters = Array.from(value);
+  if (characters.length <= maximumLength) return value;
+  return `…${characters.slice(-(maximumLength - 1)).join('')}`;
+}
+
+function StatusLine({
+  tone,
+  label,
+  indent = 0,
+  children,
+}: {
+  tone: StatusTone;
+  label: string;
+  indent?: number;
+  children: ReactNode;
+}): ReactNode {
+  const style = statusToneStyle(tone);
+  return (
+    <Text color={style.color} dimColor={style.dimColor} wrap="wrap">
+      {' '.repeat(indent)}{style.symbol} {label}: {children}
+    </Text>
   );
 }
 
@@ -512,9 +843,9 @@ function CaptureWorkflow({
     case 'applying':
       return (
         <Box flexDirection="column">
-          <Text>
-            Applying {workflow.selectedIds.length} selected changes transactionally...
-          </Text>
+          <StatusLine tone="info" label="Applying">
+            {workflow.selectedIds.length} selected changes transactionally...
+          </StatusLine>
           <Text> </Text>
           <Text dimColor>Please wait; input is disabled during Apply.</Text>
         </Box>
@@ -744,9 +1075,9 @@ function DeployWorkflow({
     case 'applying':
       return (
         <Box flexDirection="column">
-          <Text>
-            Applying {workflow.selectedIds.length} selected changes transactionally...
-          </Text>
+          <StatusLine tone="info" label="Applying">
+            {workflow.selectedIds.length} selected changes transactionally...
+          </StatusLine>
           <Text> </Text>
           <Text dimColor>
             Please wait; input is disabled during backup, Apply, and rollback.
@@ -1011,7 +1342,9 @@ function RestoreWorkflow({
     case 'applying':
       return (
         <Box flexDirection="column">
-          <Text>Restoring the latest complete deployment backup transactionally...</Text>
+          <StatusLine tone="info" label="Applying">
+            Restoring the latest complete deployment backup transactionally...
+          </StatusLine>
           <Text> </Text>
           <Text dimColor>
             Please wait; input is disabled during backup, Apply, and rollback.

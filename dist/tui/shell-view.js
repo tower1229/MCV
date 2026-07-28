@@ -3,13 +3,18 @@ import { Box, Text, useWindowSize } from 'ink';
 import { buildDeploySelectionTree, flattenDeploySelectionTree, } from './deploy-selection-tree.js';
 import { captureDecisionGroups, captureWarnings, deployWarnings, } from './shell-state.js';
 import { PRIMARY_DESTINATIONS, } from './overview-navigation.js';
-export function ShellView({ state, terminalRows }) {
+import { statusToneStyle, } from './status-tone.js';
+export function ShellView({ state, terminalColumns, terminalRows, }) {
     const windowSize = useWindowSize();
+    const columns = terminalColumns ?? windowSize.columns;
     const rows = terminalRows ?? windowSize.rows;
     const { page } = state;
     const title = pageTitle(state);
     const controls = pageControls(state, rows);
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { bold: true, children: "MCV" }), _jsx(Text, { children: title }), _jsx(Text, { children: " " }), page.status === 'loading' && _jsxs(Text, { children: ["Loading ", title, "..."] }), page.status === 'failure' && _jsxs(Text, { color: "red", children: ["Failed: ", page.message] }), page.status === 'ready' && page.route === 'overview' && (_jsx(Overview, { report: page.report, focusId: state.overviewFocusId })), page.status === 'ready' && page.route === 'repository' && (_jsx(RepositoryWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'environment' && (_jsx(EnvironmentDetails, { report: page.report })), page.status === 'ready' && page.route === 'help' && _jsx(Help, {}), page.status === 'ready' && page.route === 'capture' && (_jsx(CaptureWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'deploy' && (_jsx(DeployWorkflow, { workflow: page.workflow, terminalRows: rows })), page.status === 'ready' && page.route === 'restore' && (_jsx(RestoreWorkflow, { workflow: page.workflow })), controls && (_jsxs(_Fragment, { children: [_jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: controls })] }))] }));
+    const compactOverview = page.status === 'ready'
+        && page.route === 'overview'
+        && rows <= 16;
+    return (_jsxs(Box, { flexDirection: "column", children: [!compactOverview && (_jsxs(_Fragment, { children: [_jsx(Text, { bold: true, children: "MCV" }), _jsx(Text, { children: title }), _jsx(Text, { children: " " })] })), page.status === 'loading' && (_jsxs(StatusLine, { tone: "info", label: "Loading", children: [title, "..."] })), page.status === 'failure' && (_jsx(StatusLine, { tone: "error", label: "Error", children: page.message })), page.status === 'ready' && page.route === 'overview' && (_jsx(Overview, { report: page.report, focusId: state.overviewFocusId, terminalColumns: columns, terminalRows: rows })), page.status === 'ready' && page.route === 'repository' && (_jsx(RepositoryWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'environment' && (_jsx(EnvironmentDetails, { report: page.report })), page.status === 'ready' && page.route === 'help' && _jsx(Help, {}), page.status === 'ready' && page.route === 'capture' && (_jsx(CaptureWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'deploy' && (_jsx(DeployWorkflow, { workflow: page.workflow, terminalRows: rows })), page.status === 'ready' && page.route === 'restore' && (_jsx(RestoreWorkflow, { workflow: page.workflow })), controls && (_jsxs(_Fragment, { children: [!compactOverview && _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: controls })] }))] }));
 }
 function pageTitle(state) {
     const { page } = state;
@@ -170,7 +175,7 @@ function RepositoryWorkflow({ workflow, }) {
         return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "Enter the path to an existing MCV Repository:" }), _jsxs(Text, { children: ['> ', workflow.value] })] }));
     }
     if (workflow.status === 'applying') {
-        return (_jsxs(Text, { children: ["Applying the reviewed ", operationLabel(workflow.step.operation), " Plan..."] }));
+        return (_jsxs(StatusLine, { tone: "info", label: "Applying", children: ["Reviewed ", operationLabel(workflow.step.operation), " Plan..."] }));
     }
     if (workflow.status === 'result') {
         const { operation, result } = workflow.step;
@@ -224,19 +229,144 @@ function repositoryChangeLabel(change) {
     }
     return String(change.id ?? 'Repository change');
 }
-function Overview({ report, focusId, }) {
+function Overview({ report, focusId, terminalColumns, terminalRows, }) {
+    if (terminalRows <= 16) {
+        return (_jsx(CompactOverview, { report: report, focusId: focusId, terminalColumns: terminalColumns }));
+    }
+    const wide = terminalColumns >= 90;
+    return (_jsxs(Box, { flexDirection: wide ? 'row' : 'column', children: [_jsxs(Box, { flexDirection: "column", width: wide ? 32 : undefined, flexShrink: 0, children: [_jsx(Text, { children: "Navigation" }), _jsx(PrimaryNavigation, { focusId: focusId })] }), !wide && _jsx(Text, { children: " " }), _jsxs(Box, { flexDirection: "column", flexGrow: 1, children: [_jsx(Text, { children: "Status Overview" }), _jsx(OverviewStatus, { report: report })] })] }));
+}
+function PrimaryNavigation({ focusId, }) {
+    return (_jsx(_Fragment, { children: PRIMARY_DESTINATIONS.map((destination) => {
+            const focused = destination.id === focusId;
+            const focusStyle = statusToneStyle('info');
+            return (_jsxs(Text, { color: focused ? focusStyle.color : undefined, children: [focused ? '›' : ' ', ' ', destination.label, 'accelerator' in destination
+                        ? ` (${destination.accelerator})`
+                        : ''] }, destination.id));
+        }) }));
+}
+function OverviewStatus({ report }) {
+    const status = createOverviewStatusViewModel(report);
+    return (_jsxs(_Fragment, { children: [_jsx(StatusLine, { tone: status.repository.tone, label: status.repository.label, children: statusItemText(status.repository) }), _jsxs(Text, { wrap: "wrap", children: ['  ', "Path: ", report.repository.path] }), status.git && (_jsx(StatusLine, { tone: status.git.tone, label: status.git.label, children: statusItemText(status.git) })), _jsx(StatusLine, { tone: status.pending.tone, label: status.pending.label, children: statusItemText(status.pending) }), _jsx(StatusLine, { tone: status.drift.tone, label: status.drift.label, children: statusItemText(status.drift) }), _jsx(StatusLine, { tone: status.environment.tone, label: status.environment.label, children: statusItemText(status.environment) }), _jsx(Text, { children: "IDE support:" }), status.ideSupport.map((ide) => (_jsx(StatusLine, { tone: ide.tone, label: ide.label, indent: 2, children: statusItemText(ide) }, ide.key))), _jsx(StatusLine, { tone: status.lastOperation.tone, label: status.lastOperation.label, children: statusItemText(status.lastOperation) }), status.issues.map((issue) => (_jsx(StatusLine, { tone: issue.tone, label: issue.label, children: statusItemText(issue) }, issue.key)))] }));
+}
+function CompactOverview({ report, focusId, terminalColumns, }) {
+    const status = createOverviewStatusViewModel(report);
+    const pathLength = Math.max(16, Math.min(48, terminalColumns - 28));
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "wrap", children: ["Navigation:", PRIMARY_DESTINATIONS.map((destination) => {
+                        const focused = destination.id === focusId;
+                        const style = statusToneStyle('info');
+                        return (_jsxs(Text, { color: focused ? style.color : undefined, children: ['  ', focused ? '› ' : '', destination.label, 'accelerator' in destination
+                                    ? ` (${destination.accelerator})`
+                                    : ''] }, destination.id));
+                    })] }), _jsx(Text, { children: "Status Overview" }), _jsxs(StatusLine, { tone: status.repository.tone, label: status.repository.label, children: [statusItemText(status.repository), " \u00B7 Path: ", truncateLeading(report.repository.path, pathLength)] }), status.git && (_jsx(StatusLine, { tone: status.git.tone, label: status.git.label, children: statusItemText(status.git) })), _jsx(StatusLine, { tone: status.pending.tone, label: status.pending.label, children: statusItemText(status.pending) }), _jsxs(Text, { wrap: "wrap", children: [_jsxs(StatusFragment, { tone: status.drift.tone, children: [status.drift.label, ": ", statusItemText(status.drift)] }), '  ', _jsxs(StatusFragment, { tone: status.environment.tone, children: [status.environment.label, ": ", statusItemText(status.environment)] })] }), _jsxs(Text, { wrap: "wrap", children: ["IDE:", status.ideSupport.map((ide) => (_jsxs(StatusFragment, { tone: ide.tone, prefix: "  ", children: [ide.label, ": ", statusItemText(ide, false)] }, ide.key)))] }), _jsxs(Text, { wrap: "wrap", children: [_jsxs(StatusFragment, { tone: status.lastOperation.tone, children: [status.lastOperation.label, ": ", statusItemText(status.lastOperation)] }), status.issues.map((issue) => (_jsxs(StatusFragment, { tone: issue.tone, prefix: "  ", children: [issue.label, ": ", statusItemText(issue, false)] }, issue.key)))] })] }));
+}
+function createOverviewStatusViewModel(report) {
     const pending = report.pendingDeployment;
     const local = report.postDeployLocalState;
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "Primary navigation:" }), PRIMARY_DESTINATIONS.map((destination) => {
-                const focused = destination.id === focusId;
-                return (_jsxs(Text, { color: focused ? 'cyan' : undefined, children: [focused ? '›' : ' ', ' ', destination.label, 'accelerator' in destination
-                            ? ` (${destination.accelerator})`
-                            : ''] }, destination.id));
-            }), _jsx(Text, { children: " " }), _jsxs(Text, { children: ["Repository: ", report.repository.path] }), report.repository.git && (_jsxs(Text, { children: ["Git: ", report.repository.git.clean
-                        ? 'clean'
-                        : `${report.repository.git.uncommittedChanges} uncommitted changes`] })), _jsxs(Text, { children: ["Pending deployment: ", pending.total, " changes (", pending.add, " add,", ' ', pending.modify, " modify, ", pending.delete, " delete)"] }), _jsxs(Text, { children: ["Local managed state: ", local.drift, " changed, ", local.missing, " missing"] }), _jsxs(Text, { children: ["Environment: ", report.environment.missingVariables.length, " missing variables"] }), _jsx(Text, { children: "IDE support:" }), report.environment.ideSupport.map((ide) => (_jsxs(Text, { children: ['  ', ide.name, ": ", ide.enabled ? 'enabled' : 'disabled', ",", ' ', ide.detected ? 'detected' : 'not detected'] }, ide.id))), _jsxs(Text, { children: ["Last operation: ", report.lastOperation
-                        ? `${report.lastOperation.kind} · ${report.lastOperation.success ? 'success' : 'failure'}`
-                        : 'none'] })] }));
+    const missingVariables = report.environment.missingVariables.length;
+    const git = report.repository.git;
+    return {
+        repository: {
+            key: 'repository',
+            tone: 'success',
+            label: 'Repository',
+            state: 'Ready',
+        },
+        ...(git
+            ? {
+                git: {
+                    key: 'git',
+                    tone: git.clean ? 'success' : 'warning',
+                    label: 'Git',
+                    state: git.clean ? 'Clean' : 'Changes',
+                    details: [
+                        ...(!git.clean
+                            ? [`${git.uncommittedChanges} uncommitted changes`]
+                            : []),
+                        ...(git.branch ? [git.branch] : []),
+                    ].join(' · ') || undefined,
+                },
+            }
+            : {}),
+        pending: {
+            key: 'pending',
+            tone: pending.total > 0 ? 'warning' : 'muted',
+            label: 'Pending Deployment Changes',
+            state: pending.total > 0 ? 'Review' : 'None',
+            details: `${pending.total} changes (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete)`,
+        },
+        drift: {
+            key: 'drift',
+            tone: local.drift > 0 || local.missing > 0 ? 'warning' : 'success',
+            label: 'Drift',
+            state: local.drift > 0 || local.missing > 0 ? 'Review' : 'None',
+            details: `${local.drift} changed, ${local.missing} missing`,
+        },
+        environment: {
+            key: 'environment',
+            tone: missingVariables > 0 ? 'warning' : 'success',
+            label: 'Environment',
+            state: missingVariables > 0 ? 'Warning' : 'Ready',
+            details: `${missingVariables} missing variables`,
+        },
+        ideSupport: report.environment.ideSupport.map((ide) => ({
+            key: ide.id,
+            tone: ide.enabled && ide.detected ? 'success' : 'muted',
+            label: ide.name,
+            state: ide.enabled
+                ? ide.detected ? 'Ready' : 'Not detected'
+                : 'Disabled',
+            details: `${ide.enabled ? 'enabled' : 'disabled'}, ${ide.detected ? 'detected' : 'not detected'}`,
+        })),
+        lastOperation: report.lastOperation
+            ? {
+                key: 'last-operation',
+                tone: report.lastOperation.success ? 'success' : 'error',
+                label: 'Last operation',
+                state: report.lastOperation.success ? 'Succeeded' : 'Failed',
+                details: report.lastOperation.kind,
+            }
+            : {
+                key: 'last-operation',
+                tone: 'muted',
+                label: 'Last operation',
+                state: 'None',
+            },
+        issues: report.issues.map((issue) => ({
+            key: issue.code,
+            tone: issue.severity === 'error'
+                ? 'error'
+                : issue.severity === 'notice'
+                    ? 'info'
+                    : 'warning',
+            label: issue.severity === 'error'
+                ? 'Error'
+                : issue.severity === 'notice'
+                    ? 'Info'
+                    : 'Warning',
+            state: issue.code,
+            details: issue.message,
+        })),
+    };
+}
+function statusItemText(item, includeDetails = true) {
+    return includeDetails && item.details
+        ? `${item.state} · ${item.details}`
+        : item.state;
+}
+function StatusFragment({ tone, prefix = '', children, }) {
+    const style = statusToneStyle(tone);
+    return (_jsxs(Text, { color: style.color, dimColor: style.dimColor, children: [prefix, style.symbol, " ", children] }));
+}
+function truncateLeading(value, maximumLength) {
+    const characters = Array.from(value);
+    if (characters.length <= maximumLength)
+        return value;
+    return `…${characters.slice(-(maximumLength - 1)).join('')}`;
+}
+function StatusLine({ tone, label, indent = 0, children, }) {
+    const style = statusToneStyle(tone);
+    return (_jsxs(Text, { color: style.color, dimColor: style.dimColor, wrap: "wrap", children: [' '.repeat(indent), style.symbol, " ", label, ": ", children] }));
 }
 function EnvironmentDetails({ report }) {
     return (_jsxs(Box, { flexDirection: "column", children: [report.environments.map((environment) => (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: [environment.name, ": ", environment.detected ? 'detected' : 'not detected'] }), [...environment.configDirectories, ...environment.configFiles].map((item) => (_jsxs(Text, { children: ['  ', "[", item.exists ? 'found' : 'missing', "] ", item.path] }, `${environment.id}:${item.path}`)))] }, environment.id))), report.missingVariables.length > 0 && (_jsxs(Text, { children: ["Missing variables: ", report.missingVariables.join(', ')] }))] }));
@@ -252,7 +382,7 @@ function CaptureWorkflow({ workflow, }) {
         case 'confirmation':
             return _jsx(CaptureConfirmation, { workflow: workflow });
         case 'applying':
-            return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: ["Applying ", workflow.selectedIds.length, " selected changes transactionally..."] }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait; input is disabled during Apply." })] }));
+            return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(StatusLine, { tone: "info", label: "Applying", children: [workflow.selectedIds.length, " selected changes transactionally..."] }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait; input is disabled during Apply." })] }));
         case 'regenerating':
             return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "The Capture Plan became stale. Regenerating a safe preview..." }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait." })] }));
         case 'result':
@@ -325,7 +455,7 @@ function DeployWorkflow({ workflow, terminalRows, }) {
         case 'confirmation':
             return _jsx(DeployConfirmation, { workflow: workflow });
         case 'applying':
-            return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: ["Applying ", workflow.selectedIds.length, " selected changes transactionally..."] }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait; input is disabled during backup, Apply, and rollback." })] }));
+            return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(StatusLine, { tone: "info", label: "Applying", children: [workflow.selectedIds.length, " selected changes transactionally..."] }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait; input is disabled during backup, Apply, and rollback." })] }));
         case 'regenerating':
             return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "The Deploy Plan became stale. Regenerating a new preview for review..." }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait." })] }));
         case 'result':
@@ -416,7 +546,7 @@ function RestoreWorkflow({ workflow, }) {
         case 'review':
             return _jsx(RestoreReview, { plan: workflow.plan });
         case 'applying':
-            return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "Restoring the latest complete deployment backup transactionally..." }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait; input is disabled during backup, Apply, and rollback." })] }));
+            return (_jsxs(Box, { flexDirection: "column", children: [_jsx(StatusLine, { tone: "info", label: "Applying", children: "Restoring the latest complete deployment backup transactionally..." }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait; input is disabled during backup, Apply, and rollback." })] }));
         case 'regenerating':
             return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "The Restore Plan became stale. Regenerating a new preview for review..." }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait." })] }));
         case 'result':

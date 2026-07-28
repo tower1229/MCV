@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { CapturePlan, CaptureResult } from '../operations/capture.js';
 import type { DeployPlan, DeployResult } from '../operations/deploy.js';
 import type { RestorePlan, RestoreResult } from '../operations/restore.js';
+import type { StatusReport } from '../operations/status.js';
 import { ShellView } from './shell-view.js';
 import {
   createInitialShellState,
@@ -12,17 +13,139 @@ import {
 
 describe('TUI Shell view', () => {
   it('renders an explicit Overview loading state', () => {
-    expect(renderToString(
+    const rendered = renderToString(
       <ShellView state={createInitialShellState('overview')} />,
-    )).toMatchInlineSnapshot(`
+    );
+
+    expect(rendered).toMatchInlineSnapshot(`
       "MCV
       Overview
 
-      Loading Overview...
+      ● Loading: Overview...
 
       ↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel
       Accelerators: c Capture   d Deploy   s Restore   r Repository   h Help"
     `);
+  });
+
+  it('renders responsive Overview status tones without changing stable focus', () => {
+    let state = overviewState();
+    for (let index = 0; index < 4; index += 1) {
+      state = shellReducer(state, { type: 'overview.move', delta: 1 });
+    }
+
+    const wide = renderToString(
+      <ShellView
+        state={state}
+        terminalColumns={100}
+        terminalRows={24}
+      />,
+      { columns: 100 },
+    );
+    const narrow = renderToString(
+      <ShellView
+        state={state}
+        terminalColumns={44}
+        terminalRows={24}
+      />,
+      { columns: 44 },
+    );
+    const veryShort = renderToString(
+      <ShellView
+        state={state}
+        terminalColumns={120}
+        terminalRows={12}
+      />,
+      { columns: 120 },
+    );
+
+    expect(wide).toMatch(/Navigation\s+Status Overview/);
+    expect(narrow).not.toMatch(/Navigation\s+Status Overview/);
+    expect(veryShort).not.toMatch(/Navigation\s+Status Overview/);
+    expect(veryShort.split('\n').length).toBeLessThanOrEqual(12);
+    for (const rendered of [wide, narrow, veryShort]) {
+      const text = rendered.replace(/\s+/g, ' ');
+      expect(text).toContain('› Repository');
+      expect(text).toContain('✓ Repository: Ready');
+      expect(text).toContain(
+        'Path: /Users/张涛/Configuration Repository/超长路径',
+      );
+      expect(text).toContain('! Git: Changes');
+      expect(text).toContain(
+        '! Pending Deployment Changes: Review · 226542 changes',
+      );
+      expect(text).toContain('! Drift: Review · 9876 changed, 543 missing');
+      expect(text).toContain('! Environment: Warning · 2 missing variables');
+      expect(text).toContain('✓ Codex: Ready');
+      expect(text).toContain('○ Claude Code: Not detected');
+      expect(text).toContain('○ Gemini: Disabled');
+      expect(text).toContain('× Last operation: Failed · deploy');
+      expect(text).toContain('× Error: test.blocked');
+      expect(text).toContain('↑↓ Move');
+    }
+    expect({ wide, narrow, veryShort }).toMatchSnapshot();
+  });
+
+  it('keeps a non-Git Repository neutral while labeling healthy and successful states', () => {
+    const base = overviewState();
+    if (
+      base.page.route !== 'overview'
+      || base.page.status !== 'ready'
+      || base.page.report.status !== 'reported'
+    ) {
+      throw new Error('Expected a ready Overview fixture.');
+    }
+    const state = shellReducer(createInitialShellState('overview'), {
+      type: 'overview.loaded',
+      report: {
+        ...base.page.report,
+        ready: true,
+        repository: {
+          path: base.page.report.repository.path,
+          id: base.page.report.repository.id,
+          schemaVersion: base.page.report.repository.schemaVersion,
+        },
+        pendingDeployment: {
+          add: 0,
+          modify: 0,
+          delete: 0,
+          total: 0,
+        },
+        postDeployLocalState: {
+          unchanged: 3,
+          drift: 0,
+          missing: 0,
+          total: 3,
+          files: [],
+        },
+        environment: {
+          ...base.page.report.environment,
+          missingVariables: [],
+        },
+        lastOperation: {
+          kind: 'deploy',
+          time: '2026-07-27T00:00:00.000Z',
+          success: true,
+        },
+        issues: [],
+      },
+    });
+
+    const rendered = renderToString(
+      <ShellView
+        state={state}
+        terminalColumns={100}
+        terminalRows={24}
+      />,
+      { columns: 100 },
+    ).replace(/\s+/g, ' ');
+
+    expect(rendered).toContain('✓ Repository: Ready');
+    expect(rendered).not.toContain(' Git:');
+    expect(rendered).toContain('○ Pending Deployment Changes: None');
+    expect(rendered).toContain('✓ Drift: None');
+    expect(rendered).toContain('✓ Environment: Ready');
+    expect(rendered).toContain('✓ Last operation: Succeeded · deploy');
   });
 
   it('renders Help inside the Shell with only the six primary destinations', () => {
@@ -72,7 +195,7 @@ describe('TUI Shell view', () => {
       "MCV
       Environment Details
 
-      Failed: Environment probe failed.
+      × Error: Environment probe failed.
 
       Escape Overview   q Quit   Ctrl+C Cancel"
     `);
@@ -184,9 +307,23 @@ describe('TUI Shell view', () => {
     const previousNoColor = process.env.NO_COLOR;
     process.env.NO_COLOR = '1';
     const rendered = {
-      macos100: renderToString(<ShellView state={overview} />, { columns: 100 }),
+      macos100: renderToString(
+        <ShellView
+          state={overview}
+          terminalColumns={100}
+          terminalRows={24}
+        />,
+        { columns: 100 },
+      ),
       windows120: renderToString(<ShellView state={environment} />, { columns: 120 }),
-      narrow44: renderToString(<ShellView state={overview} />, { columns: 44 }),
+      narrow44: renderToString(
+        <ShellView
+          state={overview}
+          terminalColumns={44}
+          terminalRows={24}
+        />,
+        { columns: 44 },
+      ),
       noColorFailure: renderToString(<ShellView state={{
         ...createInitialShellState('overview'),
         page: {
@@ -204,31 +341,27 @@ describe('TUI Shell view', () => {
         "macos100": "MCV
       Overview
 
-      Primary navigation:
-      › Overview
-        Capture (c)
-        Deploy (d)
-        Restore Latest Deployment (s)
-        Repository (r)
-        Help (h)
-
-      Repository: /Users/张涛/Configuration Repository/long-path
-      Git: 1234 uncommitted changes
-      Pending deployment: 226542 changes (123456 add, 98765 modify, 4321 delete)
-      Local managed state: 9876 changed, 543 missing
-      Environment: 2 missing variables
-      IDE support:
-        Codex: enabled, detected
-        Claude Code: enabled, not detected
-        Gemini: disabled, not detected
-      Last operation: deploy · failure
+      Navigation                      Status Overview
+      › Overview                      ✓ Repository: Ready
+        Capture (c)                     Path: /Users/张涛/Configuration Repository/long-path
+        Deploy (d)                    ! Git: Changes · 1234 uncommitted changes · main
+        Restore Latest Deployment (s) ! Pending Deployment Changes: Review · 226542 changes (123456 add,
+        Repository (r)                98765 modify, 4321 delete)
+        Help (h)                      ! Drift: Review · 9876 changed, 543 missing
+                                      ! Environment: Warning · 2 missing variables
+                                      IDE support:
+                                        ✓ Codex: Ready · enabled, detected
+                                        ○ Claude Code: Not detected · enabled, not detected
+                                        ○ Gemini: Disabled · disabled, not detected
+                                      × Last operation: Failed · deploy
+                                      × Error: test.redacted · Sensitive source content was excluded.
 
       ↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel
       Accelerators: c Capture   d Deploy   s Restore   r Repository   h Help",
         "narrow44": "MCV
       Overview
 
-      Primary navigation:
+      Navigation
       › Overview
         Capture (c)
         Deploy (d)
@@ -236,19 +369,26 @@ describe('TUI Shell view', () => {
         Repository (r)
         Help (h)
 
-      Repository: /Users/张涛/Configuration
+      Status Overview
+      ✓ Repository: Ready
+        Path: /Users/张涛/Configuration
       Repository/long-path
-      Git: 1234 uncommitted changes
-      Pending deployment: 226542 changes (123456
-      add, 98765 modify, 4321 delete)
-      Local managed state: 9876 changed, 543
-      missing
-      Environment: 2 missing variables
+      ! Git: Changes · 1234 uncommitted changes ·
+      main
+      ! Pending Deployment Changes: Review ·
+      226542 changes (123456 add, 98765 modify,
+      4321 delete)
+      ! Drift: Review · 9876 changed, 543 missing
+      ! Environment: Warning · 2 missing variables
       IDE support:
-        Codex: enabled, detected
-        Claude Code: enabled, not detected
-        Gemini: disabled, not detected
-      Last operation: deploy · failure
+        ✓ Codex: Ready · enabled, detected
+        ○ Claude Code: Not detected · enabled, not
+       detected
+        ○ Gemini: Disabled · disabled, not
+      detected
+      × Last operation: Failed · deploy
+      × Error: test.redacted · Sensitive source
+      content was excluded.
 
       ↑↓ Move   →/Enter Open   q Quit   Ctrl+C
       Cancel
@@ -257,7 +397,7 @@ describe('TUI Shell view', () => {
         "noColorFailure": "MCV
       Overview
 
-      Failed: Repository unavailable.
+      × Error: Repository unavailable.
 
       ↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel
       Accelerators: c Capture   d Deploy   s Restore   r Repository   h Help",
@@ -392,7 +532,7 @@ describe('TUI Shell view', () => {
         "applying": "MCV
       Capture · Applying
 
-      Applying 2 selected changes transactionally...
+      ● Applying: 2 selected changes transactionally...
 
       Please wait; input is disabled during Apply.",
         "confirmation": "MCV
@@ -1080,4 +1220,80 @@ function repositoryFailureResultState(): ShellState {
       },
     },
   } as unknown as ShellState;
+}
+
+function overviewState(): ShellState {
+  const report: StatusReport = {
+    schemaVersion: 1,
+    operation: 'status',
+    status: 'reported',
+    ready: false,
+    repositoryPath: '/Users/张涛/Configuration Repository/超长路径',
+    repository: {
+      path: '/Users/张涛/Configuration Repository/超长路径',
+      id: 'repository-id',
+      schemaVersion: 2,
+      git: {
+        branch: 'main',
+        clean: false,
+        uncommittedChanges: 1_234,
+      },
+    },
+    changes: [],
+    pendingDeployment: {
+      add: 123_456,
+      modify: 98_765,
+      delete: 4_321,
+      total: 226_542,
+    },
+    postDeployLocalState: {
+      unchanged: 10_000,
+      drift: 9_876,
+      missing: 543,
+      total: 20_419,
+      files: [],
+    },
+    environment: {
+      missingVariables: ['OPENAI_API_KEY', 'GEMINI_API_KEY'],
+      ideSupport: [
+        {
+          id: 'codex',
+          name: 'Codex',
+          enabled: true,
+          detected: true,
+          surfaces: [],
+        },
+        {
+          id: 'claude-code',
+          name: 'Claude Code',
+          enabled: true,
+          detected: false,
+          surfaces: [],
+        },
+        {
+          id: 'gemini',
+          name: 'Gemini',
+          enabled: false,
+          detected: false,
+          surfaces: [],
+        },
+      ],
+    },
+    lastOperation: {
+      kind: 'deploy',
+      time: '2026-07-27T00:00:00.000Z',
+      success: false,
+    },
+    issues: [{
+      severity: 'error',
+      code: 'test.blocked',
+      message: 'Deployment is blocked.',
+    }],
+    nextActions: [],
+  };
+
+  return shellReducer(createInitialShellState('overview'), {
+    type: 'overview.loaded',
+    report,
+  });
 }

@@ -1,11 +1,82 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`TUI Shell view > renders responsive Overview status tones without changing stable focus 1`] = `
+{
+  "narrow": "MCV
+Overview
+
+Navigation
+  Overview
+  Capture (c)
+  Deploy (d)
+  Restore Latest Deployment (s)
+› Repository (r)
+  Help (h)
+
+Status Overview
+✓ Repository: Ready
+  Path: /Users/张涛/Configuration
+Repository/超长路径
+! Git: Changes · 1234 uncommitted changes ·
+main
+! Pending Deployment Changes: Review ·
+226542 changes (123456 add, 98765 modify,
+4321 delete)
+! Drift: Review · 9876 changed, 543 missing
+! Environment: Warning · 2 missing variables
+IDE support:
+  ✓ Codex: Ready · enabled, detected
+  ○ Claude Code: Not detected · enabled, not
+ detected
+  ○ Gemini: Disabled · disabled, not
+detected
+× Last operation: Failed · deploy
+× Error: test.blocked · Deployment is
+blocked.
+
+↑↓ Move   →/Enter Open   q Quit   Ctrl+C
+Cancel
+Accelerators: c Capture   d Deploy   s
+Restore   r Repository   h Help",
+  "veryShort": "Navigation:  Overview  Capture (c)  Deploy (d)  Restore Latest Deployment (s)  › Repository (r)  Help (h)
+Status Overview
+✓ Repository: Ready · Path: /Users/张涛/Configuration Repository/超长路径
+! Git: Changes · 1234 uncommitted changes · main
+! Pending Deployment Changes: Review · 226542 changes (123456 add, 98765 modify, 4321 delete)
+! Drift: Review · 9876 changed, 543 missing  ! Environment: Warning · 2 missing variables
+IDE:  ✓ Codex: Ready  ○ Claude Code: Not detected  ○ Gemini: Disabled
+× Last operation: Failed · deploy  × Error: test.blocked
+↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel
+Accelerators: c Capture   d Deploy   s Restore   r Repository   h Help",
+  "wide": "MCV
+Overview
+
+Navigation                      Status Overview
+  Overview                      ✓ Repository: Ready
+  Capture (c)                     Path: /Users/张涛/Configuration Repository/超长路径
+  Deploy (d)                    ! Git: Changes · 1234 uncommitted changes · main
+  Restore Latest Deployment (s) ! Pending Deployment Changes: Review · 226542 changes (123456 add,
+› Repository (r)                98765 modify, 4321 delete)
+  Help (h)                      ! Drift: Review · 9876 changed, 543 missing
+                                ! Environment: Warning · 2 missing variables
+                                IDE support:
+                                  ✓ Codex: Ready · enabled, detected
+                                  ○ Claude Code: Not detected · enabled, not detected
+                                  ○ Gemini: Disabled · disabled, not detected
+                                × Last operation: Failed · deploy
+                                × Error: test.blocked · Deployment is blocked.
+
+↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel
+Accelerators: c Capture   d Deploy   s Restore   r Repository   h Help",
+}
+`;
+
 exports[`TUI Shell view > snapshots Deploy replacement Diff, warning, applying, stale, and failure Result 1`] = `
 {
   "applying": "MCV
 Deploy · Applying
 
-Applying 2 selected changes transactionally...
+● Applying: 2 selected changes transactionally...
 
 Please wait; input is disabled during backup, Apply, and rollback.",
   "confirmation": "MCV
@@ -50,7 +121,7 @@ exports[`TUI Shell view > snapshots Restore no-backup, conflict, review, applyin
   "applying": "MCV
 Restore Latest Deployment · Applying
 
-Restoring the latest complete deployment backup transactionally...
+● Applying: Restoring the latest complete deployment backup transactionally...
 
 Please wait; input is disabled during backup, Apply, and rollback.",
   "conflict": "MCV

@@ -83,7 +83,7 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
   it('deep-links discover, handles Escape and q, and restores ConPTY', async () => {
     const outcome = await runConPty('discover', [
       { pattern: 'Gemini:', input: '\u001b' },
-      { pattern: 'Loading Overview...', input: 'q' },
+      { pattern: '● Loading: Overview...', input: 'q' },
     ]);
 
     expect(outcome.code).toBe(0);

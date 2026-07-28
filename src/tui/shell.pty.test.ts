@@ -48,13 +48,13 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'set timeout 5',
       'log_user 1',
       'spawn /bin/zsh -f -c {stty rows 30 columns 120; cd "$MCV_TEST_REPO"; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
-      'expect -exact {Primary navigation:}',
+      'expect -exact {Status Overview}',
       'expect -exact {› Overview}',
       'send "h"',
       'expect -exact {Primary navigation:}',
       'expect -exact {Direct commands open the same Shell when attached to a terminal.}',
       'send "\\033"',
-      'expect -exact {Loading Overview...}',
+      'expect -exact {Status Overview}',
       'send "q"',
       'expect -exact {EXIT_CODE:0}',
       'expect eof',
@@ -73,7 +73,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     const outcome = await runExpect([
       'set timeout 5',
       'log_user 1',
-      'spawn /bin/zsh -f -c {stty rows 30 columns 120; cd "$MCV_TEST_REPO"; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'spawn /bin/zsh -f -c {stty rows 30 columns 120; cd "$MCV_TEST_REPO"; unset NO_COLOR; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
       'expect -exact {› Overview}',
       'send "\\033\\[B"',
       'expect -exact {› Capture}',
@@ -92,7 +92,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     const enter = await runExpect([
       'set timeout 5',
       'log_user 1',
-      'spawn /bin/zsh -f -c {stty rows 30 columns 120; cd "$MCV_TEST_REPO"; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'spawn /bin/zsh -f -c {stty rows 30 columns 120; cd "$MCV_TEST_REPO"; unset NO_COLOR; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
       'expect -exact {› Overview}',
       'send "\\033\\[A"',
       'expect -exact {› Help}',
@@ -111,6 +111,62 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     expect(enter.output).toContain('\u001b[36m');
     expectRestoredTerminal(outcome.output);
     expectRestoredTerminal(enter.output);
+  }, 15_000);
+
+  it('renders packaged Overview focus and status tones while preserving NO_COLOR meaning', async () => {
+    const repositoryPath = createStatusToneRepository();
+    writeBinding(repositoryPath, 'tui-status-tone-test');
+    const colored = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {stty rows 30 columns 120; cd "$MCV_TEST_REPO"; unset NO_COLOR; TERM=xterm-256color FORCE_COLOR=1 "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Status Overview}',
+      'expect -exact {✓ Repository: Ready}',
+      'expect -exact {! Pending Deployment Changes: Review}',
+      'expect -exact {○ Last operation: None}',
+      'expect -exact {↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: repositoryPath });
+    const noColor = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {stty rows 14 columns 120; cd "$MCV_TEST_REPO"; TERM=xterm-256color NO_COLOR=1 "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Navigation}',
+      'expect -exact {› Overview}',
+      'expect -exact {Status Overview}',
+      'expect -exact {✓ Repository: Ready}',
+      'expect -exact {! Pending Deployment Changes: Review}',
+      'expect -exact {○ Last operation: None}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: repositoryPath });
+
+    expect(colored.code).toBe(0);
+    expect(colored.output).toContain('\u001b[36m');
+    expect(colored.output).toContain('\u001b[32m');
+    expect(colored.output).toContain('\u001b[33m');
+    expect(noColor.code).toBe(0);
+    expect(noColor.output).not.toMatch(/\u001b\[(?:3[1-7]|9[1-7])m/);
+    const compactFrame = renderFrames(noColor.output).find(
+      (frame) => frame.includes('Navigation:')
+        && frame.includes('Status Overview'),
+    );
+    expect(compactFrame).toContain('› Overview');
+    expect(compactFrame).toContain('✓ Repository: Ready');
+    expect(compactFrame).toContain('! Pending Deployment Changes: Review');
+    expect(compactFrame).toContain('○ Last operation: None');
+    expect(compactFrame).toContain(
+      '↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel',
+    );
+    expectRestoredTerminal(colored.output);
+    expectRestoredTerminal(noColor.output);
   }, 15_000);
 
   it('deep-links every Repository business command into the persistent Shell', async () => {
@@ -151,7 +207,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'spawn /bin/zsh -f -c {"$MCV_TEST_NODE" "$MCV_TEST_CLI" bind "$MCV_TEST_REPO"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
       'expect -exact {Repository · Bind Plan}',
       'send "\\r"',
-      'expect -exact {Loading Overview...}',
+      'expect -exact {● Loading: Overview...}',
       'expect -exact {Overview}',
       'send "r"',
       'expect -exact {Unbind this device}',
@@ -228,7 +284,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'send "\\r"',
       'expect -exact {Repository · Bind Plan}',
       'send "\\r"',
-      'expect -exact {Loading Overview...}',
+      'expect -exact {● Loading: Overview...}',
       'expect -exact {Overview}',
       'send "c"',
       'expect -exact {Capture · Select Changes}',
@@ -248,7 +304,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'send "\\r"',
       'expect -exact {Capture · Result}',
       'send "\\r"',
-      'expect -exact {Loading Overview...}',
+      'expect -exact {● Loading: Overview...}',
       'expect -exact {Repository:}',
       'send "q"',
       'expect -exact {Captured 0 selected item(s)}',
@@ -281,7 +337,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'send "\\r"',
       'expect -exact {Capture · Select Changes}',
       'send "\\033"',
-      'expect -exact {Loading Overview...}',
+      'expect -exact {● Loading: Overview...}',
       'expect -exact {Overview}',
       'send "q"',
       'expect -exact {EXIT_CODE:0}',
@@ -402,7 +458,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'send "\\r"',
       'expect -exact {Deploy · Result}',
       'send "\\r"',
-      'expect -exact {Loading Overview...}',
+      'expect -exact {● Loading: Overview...}',
       'expect -exact {Repository:}',
       'send "q"',
       'expect -exact {Deployed 0 selected item(s)}',
@@ -508,7 +564,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'expect -exact {Restore Latest Deployment · Result}',
       'expect -exact {Restore succeeded.}',
       'send "\\r"',
-      'expect -exact {Loading Overview...}',
+      'expect -exact {● Loading: Overview...}',
       'expect -exact {Repository:}',
       'send "q"',
       'expect -exact {Restored 1 path(s) and deleted 0 path(s).}',
@@ -673,7 +729,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'set timeout 5',
       'log_user 1',
       'spawn /bin/zsh -f -c {"$MCV_TEST_NODE" "$MCV_TEST_SCRIPT"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
-      'expect -exact {Failed: simulated Overview failure}',
+      'expect -exact {× Error: simulated Overview failure}',
       'send "q"',
       'expect -exact {OUTCOME:simulated Overview failure}',
       'expect -exact {EXIT_CODE:0}',
@@ -827,6 +883,29 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'variables: {}',
       '',
     ].join('\n'));
+    return repositoryPath;
+  }
+
+  function createStatusToneRepository(): string {
+    const repositoryPath = path.join(testRoot, 'status-tone-repository');
+    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 2',
+      'repositoryId: tui-status-tone-test',
+      'initializedAt: 2026-07-27T00:00:00.000Z',
+      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets:',
+      '  codex:',
+      '    enabled: true',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(
+      path.join(repositoryPath, 'common', 'AGENTS.md'),
+      '# Shared Rules\n',
+    );
     return repositoryPath;
   }
 
@@ -1211,6 +1290,13 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
 
 function digest(value: string): string {
   return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function renderFrames(output: string): string[] {
+  return output
+    .split('\u001b[?2026h')
+    .slice(1)
+    .map((frame) => frame.split('\u001b[?2026l')[0] ?? '');
 }
 
 function expectRestoredTerminal(output: string): void {
