@@ -2,6 +2,7 @@ import { Fragment as _Fragment, jsx as _jsx, jsxs as _jsxs } from "react/jsx-run
 import { Box, Text, useWindowSize } from 'ink';
 import { buildDeploySelectionTree, flattenDeploySelectionTree, } from './deploy-selection-tree.js';
 import { captureDecisionGroups, captureWarnings, deployWarnings, } from './shell-state.js';
+import { PRIMARY_DESTINATIONS, } from './overview-navigation.js';
 export function ShellView({ state, terminalRows }) {
     const windowSize = useWindowSize();
     const rows = terminalRows ?? windowSize.rows;
@@ -223,20 +224,12 @@ function repositoryChangeLabel(change) {
     }
     return String(change.id ?? 'Repository change');
 }
-const PRIMARY_DESTINATIONS = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'capture', label: 'Capture', accelerator: 'c' },
-    { id: 'deploy', label: 'Deploy', accelerator: 'd' },
-    { id: 'restore', label: 'Restore Latest Deployment', accelerator: 's' },
-    { id: 'repository', label: 'Repository', accelerator: 'r' },
-    { id: 'help', label: 'Help', accelerator: 'h' },
-];
 function Overview({ report, focusId, }) {
     const pending = report.pendingDeployment;
     const local = report.postDeployLocalState;
     return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "Primary navigation:" }), PRIMARY_DESTINATIONS.map((destination) => {
                 const focused = destination.id === focusId;
-                return (_jsxs(Text, { color: focused ? 'cyan' : undefined, children: [focused ? '›' : ' ', ' ', destination.label, destination.accelerator
+                return (_jsxs(Text, { color: focused ? 'cyan' : undefined, children: [focused ? '›' : ' ', ' ', destination.label, 'accelerator' in destination
                             ? ` (${destination.accelerator})`
                             : ''] }, destination.id));
             }), _jsx(Text, { children: " " }), _jsxs(Text, { children: ["Repository: ", report.repository.path] }), report.repository.git && (_jsxs(Text, { children: ["Git: ", report.repository.git.clean

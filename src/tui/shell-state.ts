@@ -29,6 +29,10 @@ import type {
   RestorePlan,
   RestoreResult,
 } from '../operations/restore.js';
+import {
+  PRIMARY_DESTINATION_IDS,
+  type PrimaryDestinationId,
+} from './overview-navigation.js';
 
 export type ShellRoute =
   | 'repository'
@@ -38,17 +42,6 @@ export type ShellRoute =
   | 'capture'
   | 'deploy'
   | 'restore';
-
-export const PRIMARY_DESTINATION_IDS = [
-  'overview',
-  'capture',
-  'deploy',
-  'restore',
-  'repository',
-  'help',
-] as const;
-
-export type PrimaryDestinationId = typeof PRIMARY_DESTINATION_IDS[number];
 
 export type RepositoryMenuAction =
   | 'continue'

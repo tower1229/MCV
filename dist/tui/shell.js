@@ -11,6 +11,7 @@ import { readState, recordCaptureSuccess } from '../utils/state.js';
 import { createInitialShellState, shellReducer, } from './shell-state.js';
 import { ShellView } from './shell-view.js';
 import { normalizeShellInteraction } from './interaction-intent.js';
+import { primaryDestinationIdForAccelerator } from './overview-navigation.js';
 import { preserveTerminalInputMode } from './terminal-input-mode.js';
 export async function runTuiShell(context, initialRoute, dependencies = {}, runtime = {}) {
     let instance;
@@ -406,7 +407,7 @@ function Shell({ context, initialRoute, dependencies }) {
                 return;
             }
             if (intent.type === 'text') {
-                const route = overviewAcceleratorRoute(intent.value);
+                const route = primaryDestinationIdForAccelerator(intent.value);
                 if (route)
                     dispatch({ type: 'navigate', route });
             }
@@ -562,16 +563,6 @@ function Shell({ context, initialRoute, dependencies }) {
         exit(createOutcome(state, initialRoute));
     }, [exit, initialRoute, state]);
     return _jsx(ShellView, { state: state, terminalRows: windowSize.rows });
-}
-function overviewAcceleratorRoute(input) {
-    switch (input) {
-        case 'c': return 'capture';
-        case 'd': return 'deploy';
-        case 's': return 'restore';
-        case 'r': return 'repository';
-        case 'h': return 'help';
-        default: return undefined;
-    }
 }
 function createRepositoryEntryAction(context, entry, dependencies) {
     switch (entry.operation) {

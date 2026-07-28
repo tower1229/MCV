@@ -63,6 +63,7 @@ import {
 } from './shell-state.js';
 import { ShellView } from './shell-view.js';
 import { normalizeShellInteraction } from './interaction-intent.js';
+import { primaryDestinationIdForAccelerator } from './overview-navigation.js';
 import { preserveTerminalInputMode } from './terminal-input-mode.js';
 
 export interface ShellDependencies {
@@ -607,7 +608,7 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
         return;
       }
       if (intent.type === 'text') {
-        const route = overviewAcceleratorRoute(intent.value);
+        const route = primaryDestinationIdForAccelerator(intent.value);
         if (route) dispatch({ type: 'navigate', route });
       }
       return;
@@ -745,17 +746,6 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
   }, [exit, initialRoute, state]);
 
   return <ShellView state={state} terminalRows={windowSize.rows} />;
-}
-
-function overviewAcceleratorRoute(input: string): ShellRoute | undefined {
-  switch (input) {
-    case 'c': return 'capture';
-    case 'd': return 'deploy';
-    case 's': return 'restore';
-    case 'r': return 'repository';
-    case 'h': return 'help';
-    default: return undefined;
-  }
 }
 
 function createRepositoryEntryAction(

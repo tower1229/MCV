@@ -1,12 +1,5 @@
 import { buildDeploySelectionTree, flattenDeploySelectionTree, } from './deploy-selection-tree.js';
-export const PRIMARY_DESTINATION_IDS = [
-    'overview',
-    'capture',
-    'deploy',
-    'restore',
-    'repository',
-    'help',
-];
+import { PRIMARY_DESTINATION_IDS, } from './overview-navigation.js';
 export function createInitialShellState(route) {
     return {
         page: route === 'help'

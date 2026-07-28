@@ -27,7 +27,6 @@ import {
   deployWarnings,
   type CaptureWorkflowState,
   type DeployWorkflowState,
-  type PrimaryDestinationId,
   type RepositoryMenuAction,
   type RepositoryOperation,
   type RepositoryPlan,
@@ -35,6 +34,10 @@ import {
   type RestoreWorkflowState,
   type ShellState,
 } from './shell-state.js';
+import {
+  PRIMARY_DESTINATIONS,
+  type PrimaryDestinationId,
+} from './overview-navigation.js';
 
 export interface ShellViewProps {
   state: ShellState;
@@ -410,19 +413,6 @@ function repositoryChangeLabel(
   return String(change.id ?? 'Repository change');
 }
 
-const PRIMARY_DESTINATIONS: {
-  id: PrimaryDestinationId;
-  label: string;
-  accelerator?: string;
-}[] = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'capture', label: 'Capture', accelerator: 'c' },
-  { id: 'deploy', label: 'Deploy', accelerator: 'd' },
-  { id: 'restore', label: 'Restore Latest Deployment', accelerator: 's' },
-  { id: 'repository', label: 'Repository', accelerator: 'r' },
-  { id: 'help', label: 'Help', accelerator: 'h' },
-];
-
 function Overview({
   report,
   focusId,
@@ -442,7 +432,7 @@ function Overview({
           <Text key={destination.id} color={focused ? 'cyan' : undefined}>
             {focused ? '›' : ' '}{' '}
             {destination.label}
-            {destination.accelerator
+            {'accelerator' in destination
               ? ` (${destination.accelerator})`
               : ''}
           </Text>
