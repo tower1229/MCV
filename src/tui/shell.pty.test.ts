@@ -12,7 +12,9 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
   let testRoot: string;
 
   beforeEach(() => {
-    testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-tui-pty-'));
+    testRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-tui-pty-')),
+    );
   });
 
   afterEach(() => {
@@ -45,8 +47,9 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     const outcome = await runExpect([
       'set timeout 5',
       'log_user 1',
-      'spawn /bin/zsh -f -c {stty rows 30 columns 120; cd "$MCV_TEST_REPO"; "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
-      'expect -exact {Overview   Capture   Deploy   Restore Latest Deployment   Repository   Help}',
+      'spawn /bin/zsh -f -c {stty rows 30 columns 120; cd "$MCV_TEST_REPO"; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Primary navigation:}',
+      'expect -exact {› Overview}',
       'send "h"',
       'expect -exact {Primary navigation:}',
       'expect -exact {Direct commands open the same Shell when attached to a terminal.}',
@@ -63,6 +66,52 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     expect(outcome.output).not.toContain('Environment Details   r Repository');
     expectRestoredTerminal(outcome.output);
   }, 10_000);
+
+  it('moves visible Overview focus with arrows and opens it with Right or Enter', async () => {
+    const repositoryPath = createCaptureRepository();
+    writeBinding(repositoryPath, 'tui-capture-test');
+    const outcome = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {stty rows 30 columns 120; cd "$MCV_TEST_REPO"; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {› Overview}',
+      'send "\\033\\[B"',
+      'expect -exact {› Capture}',
+      'send "\\033\\[B"',
+      'expect -exact {› Deploy}',
+      'send "\\033\\[A"',
+      'expect -exact {› Capture}',
+      'send "\\033\\[C"',
+      'expect -exact {Capture · Select Changes}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: repositoryPath });
+    const enter = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {stty rows 30 columns 120; cd "$MCV_TEST_REPO"; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {› Overview}',
+      'send "\\033\\[A"',
+      'expect -exact {› Help}',
+      'send "\\r"',
+      'expect -exact {Primary navigation:}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: repositoryPath });
+
+    expect(outcome.code).toBe(0);
+    expect(enter.code).toBe(0);
+    expect(outcome.output).toContain('\u001b[36m');
+    expect(enter.output).toContain('\u001b[36m');
+    expectRestoredTerminal(outcome.output);
+    expectRestoredTerminal(enter.output);
+  }, 15_000);
 
   it('deep-links every Repository business command into the persistent Shell', async () => {
     const emptyPath = path.join(testRoot, 'empty');

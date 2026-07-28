@@ -276,6 +276,71 @@ describe('TUI Shell reducer', () => {
     });
   });
 
+  it('moves Overview focus through stable destination IDs in fixed order', () => {
+    const ready = shellReducer(createInitialShellState('overview'), {
+      type: 'overview.loaded',
+      report: statusReport(),
+    });
+
+    expect(ready.overviewFocusId).toBe('overview');
+
+    const capture = shellReducer(ready, {
+      type: 'overview.move',
+      delta: 1,
+    });
+    const deploy = shellReducer(capture, {
+      type: 'overview.move',
+      delta: 1,
+    });
+    const overview = shellReducer(ready, {
+      type: 'overview.move',
+      delta: -1,
+    });
+
+    expect(capture.overviewFocusId).toBe('capture');
+    expect(deploy.overviewFocusId).toBe('deploy');
+    expect(overview.overviewFocusId).toBe('help');
+  });
+
+  it('keeps Overview focus stable when refreshed status data arrives', () => {
+    const ready = shellReducer(createInitialShellState('overview'), {
+      type: 'overview.loaded',
+      report: statusReport(),
+    });
+    const focused = shellReducer(ready, {
+      type: 'overview.move',
+      delta: 3,
+    });
+    const refreshed = shellReducer(focused, {
+      type: 'overview.loaded',
+      report: {
+        ...statusReport(),
+        nextActions: ['Review the refreshed state.'],
+      },
+    });
+
+    expect(focused.overviewFocusId).toBe('restore');
+    expect(refreshed.overviewFocusId).toBe('restore');
+  });
+
+  it('opens the focused Overview destination through the reducer', () => {
+    const ready = shellReducer(createInitialShellState('overview'), {
+      type: 'overview.loaded',
+      report: statusReport(),
+    });
+    const focused = shellReducer(ready, {
+      type: 'overview.move',
+      delta: 4,
+    });
+    const opened = shellReducer(focused, { type: 'overview.open' });
+
+    expect(focused.overviewFocusId).toBe('repository');
+    expect(opened.page).toEqual({
+      route: 'repository',
+      status: 'loading',
+    });
+  });
+
   it('keeps the current route when a stale Report arrives after navigation', () => {
     const environmentLoading = shellReducer(
       createInitialShellState('overview'),

@@ -39,6 +39,17 @@ export type ShellRoute =
   | 'deploy'
   | 'restore';
 
+export const PRIMARY_DESTINATION_IDS = [
+  'overview',
+  'capture',
+  'deploy',
+  'restore',
+  'repository',
+  'help',
+] as const;
+
+export type PrimaryDestinationId = typeof PRIMARY_DESTINATION_IDS[number];
+
 export type RepositoryMenuAction =
   | 'continue'
   | 'bind-current'
@@ -281,6 +292,7 @@ export interface ShellState {
   repositoryResult?: RepositoryResultStep;
   postInitOnboarding: boolean;
   repositoryResumeRoute: Exclude<ShellRoute, 'repository'>;
+  overviewFocusId: PrimaryDestinationId;
   exitReason: 'completed' | 'interrupted' | null;
 }
 
@@ -300,6 +312,8 @@ export type ShellAction =
   | { type: 'repository.back' }
   | { type: 'onboarding.continue' }
   | { type: 'overview.loaded'; report: StatusReport }
+  | { type: 'overview.move'; delta: number }
+  | { type: 'overview.open' }
   | { type: 'environment.loaded'; report: EnvironmentReport }
   | { type: 'capture.loaded'; plan: CapturePlan }
   | { type: 'capture.move'; delta: number }
@@ -346,6 +360,7 @@ export function createInitialShellState(route: ShellRoute): ShellState {
     reports: {},
     postInitOnboarding: false,
     repositoryResumeRoute: route === 'repository' ? 'overview' : route,
+    overviewFocusId: 'overview',
     exitReason: null,
   };
 }
@@ -490,6 +505,26 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
           status: 'ready',
           report: action.report,
         },
+      };
+    case 'overview.move':
+      if (state.page.route !== 'overview') return state;
+      return {
+        ...state,
+        overviewFocusId: PRIMARY_DESTINATION_IDS[wrapIndex(
+          PRIMARY_DESTINATION_IDS.indexOf(state.overviewFocusId) + action.delta,
+          PRIMARY_DESTINATION_IDS.length,
+        )] ?? 'overview',
+      };
+    case 'overview.open':
+      if (state.page.route !== 'overview') return state;
+      return {
+        ...state,
+        ...(state.overviewFocusId === 'repository'
+          ? { repositoryResumeRoute: 'overview' as const }
+          : {}),
+        page: state.overviewFocusId === 'help'
+          ? { route: 'help', status: 'ready' }
+          : { route: state.overviewFocusId, status: 'loading' },
       };
     case 'environment.loaded':
       if (state.page.route !== 'environment') return state;

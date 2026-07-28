@@ -20,9 +20,8 @@ describe('TUI Shell view', () => {
 
       Loading Overview...
 
-      Overview   Capture   Deploy   Restore Latest Deployment   Repository   Help
-      c Capture   d Deploy   s Restore   r Repository   h Help   q Quit   Ctrl+C
-      Cancel"
+      ↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel
+      Accelerators: c Capture   d Deploy   s Restore   r Repository   h Help"
     `);
   });
 
@@ -205,6 +204,14 @@ describe('TUI Shell view', () => {
         "macos100": "MCV
       Overview
 
+      Primary navigation:
+      › Overview
+        Capture (c)
+        Deploy (d)
+        Restore Latest Deployment (s)
+        Repository (r)
+        Help (h)
+
       Repository: /Users/张涛/Configuration Repository/long-path
       Git: 1234 uncommitted changes
       Pending deployment: 226542 changes (123456 add, 98765 modify, 4321 delete)
@@ -216,10 +223,18 @@ describe('TUI Shell view', () => {
         Gemini: disabled, not detected
       Last operation: deploy · failure
 
-      Overview   Capture   Deploy   Restore Latest Deployment   Repository   Help
-      c Capture   d Deploy   s Restore   r Repository   h Help   q Quit   Ctrl+C Cancel",
+      ↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel
+      Accelerators: c Capture   d Deploy   s Restore   r Repository   h Help",
         "narrow44": "MCV
       Overview
+
+      Primary navigation:
+      › Overview
+        Capture (c)
+        Deploy (d)
+        Restore Latest Deployment (s)
+        Repository (r)
+        Help (h)
 
       Repository: /Users/张涛/Configuration
       Repository/long-path
@@ -235,18 +250,17 @@ describe('TUI Shell view', () => {
         Gemini: disabled, not detected
       Last operation: deploy · failure
 
-      Overview   Capture   Deploy   Restore Latest
-       Deployment   Repository   Help
-      c Capture   d Deploy   s Restore   r
-      Repository   h Help   q Quit   Ctrl+C Cancel",
+      ↑↓ Move   →/Enter Open   q Quit   Ctrl+C
+      Cancel
+      Accelerators: c Capture   d Deploy   s
+      Restore   r Repository   h Help",
         "noColorFailure": "MCV
       Overview
 
       Failed: Repository unavailable.
 
-      Overview   Capture   Deploy   Restore Latest Deployment   Repository   Help
-      c Capture   d Deploy   s Restore   r Repository   h Help   q Quit   Ctrl+C
-      Cancel",
+      ↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel
+      Accelerators: c Capture   d Deploy   s Restore   r Repository   h Help",
         "windows120": "MCV
       Environment Details
 

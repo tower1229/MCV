@@ -1,4 +1,12 @@
 import { buildDeploySelectionTree, flattenDeploySelectionTree, } from './deploy-selection-tree.js';
+export const PRIMARY_DESTINATION_IDS = [
+    'overview',
+    'capture',
+    'deploy',
+    'restore',
+    'repository',
+    'help',
+];
 export function createInitialShellState(route) {
     return {
         page: route === 'help'
@@ -7,6 +15,7 @@ export function createInitialShellState(route) {
         reports: {},
         postInitOnboarding: false,
         repositoryResumeRoute: route === 'repository' ? 'overview' : route,
+        overviewFocusId: 'overview',
         exitReason: null,
     };
 }
@@ -137,6 +146,25 @@ export function shellReducer(state, action) {
                     status: 'ready',
                     report: action.report,
                 },
+            };
+        case 'overview.move':
+            if (state.page.route !== 'overview')
+                return state;
+            return {
+                ...state,
+                overviewFocusId: PRIMARY_DESTINATION_IDS[wrapIndex(PRIMARY_DESTINATION_IDS.indexOf(state.overviewFocusId) + action.delta, PRIMARY_DESTINATION_IDS.length)] ?? 'overview',
+            };
+        case 'overview.open':
+            if (state.page.route !== 'overview')
+                return state;
+            return {
+                ...state,
+                ...(state.overviewFocusId === 'repository'
+                    ? { repositoryResumeRoute: 'overview' }
+                    : {}),
+                page: state.overviewFocusId === 'help'
+                    ? { route: 'help', status: 'ready' }
+                    : { route: state.overviewFocusId, status: 'loading' },
             };
         case 'environment.loaded':
             if (state.page.route !== 'environment')

@@ -10,6 +10,7 @@ import { applyBindPlan, applyInitPlan, applyMigrationPlan, applyUnbindPlan, crea
 import { readState, recordCaptureSuccess } from '../utils/state.js';
 import { createInitialShellState, shellReducer, } from './shell-state.js';
 import { ShellView } from './shell-view.js';
+import { normalizeShellInteraction } from './interaction-intent.js';
 import { preserveTerminalInputMode } from './terminal-input-mode.js';
 export async function runTuiShell(context, initialRoute, dependencies = {}, runtime = {}) {
     let instance;
@@ -302,6 +303,7 @@ function Shell({ context, initialRoute, dependencies }) {
         };
     }, [context, dependencies, state.page]);
     useInput((input, key) => {
+        const intent = normalizeShellInteraction(input, key);
         const captureWorkflow = state.page.route === 'capture'
             && state.page.status === 'ready'
             ? state.page.workflow
@@ -323,223 +325,234 @@ function Shell({ context, initialRoute, dependencies }) {
             || restoreWorkflow?.status === 'applying'
             || repositoryWorkflow?.status === 'applying')
             return;
-        if (key.ctrl && input === 'c') {
+        if (intent.type === 'interrupt') {
             dispatch({ type: 'cancel' });
             return;
         }
         if (repositoryWorkflow) {
             if (repositoryWorkflow.status === 'path') {
-                if (key.escape) {
+                if (intent.type === 'cancel') {
                     dispatch({ type: 'repository.back' });
                 }
-                else if (key.return) {
+                else if (intent.type === 'confirm') {
                     const plan = (dependencies.createBindPlan ?? createBindPlan)(context, repositoryWorkflow.value);
                     dispatch({ type: 'repository.plan', operation: 'bind', plan });
                 }
-                else if (key.backspace || key.delete) {
+                else if (intent.type === 'delete.backward') {
                     dispatch({
                         type: 'repository.path',
                         value: repositoryWorkflow.value.slice(0, -1),
                     });
                 }
-                else if (input && !key.ctrl && !key.meta) {
+                else if (intent.type === 'text') {
                     dispatch({
                         type: 'repository.path',
-                        value: `${repositoryWorkflow.value}${input}`,
+                        value: `${repositoryWorkflow.value}${intent.value}`,
+                    });
+                }
+                else if (intent.type === 'quit' || intent.type === 'toggle') {
+                    dispatch({
+                        type: 'repository.path',
+                        value: `${repositoryWorkflow.value}${intent.type === 'quit' ? 'q' : ' '}`,
                     });
                 }
                 return;
             }
-            if (input === 'q') {
+            if (intent.type === 'quit') {
                 dispatch({ type: 'exit' });
                 return;
             }
             if (repositoryWorkflow.status === 'menu') {
-                if (key.upArrow) {
+                if (intent.type === 'focus.previous') {
                     dispatch({ type: 'repository.move', delta: -1 });
                 }
-                else if (key.downArrow) {
+                else if (intent.type === 'focus.next') {
                     dispatch({ type: 'repository.move', delta: 1 });
                 }
-                else if (key.return) {
+                else if (intent.type === 'confirm') {
                     chooseRepositoryAction(context, repositoryWorkflow, dependencies, dispatch);
                 }
                 return;
             }
             if (repositoryWorkflow.status === 'plan') {
-                if (key.escape)
+                if (intent.type === 'cancel')
                     dispatch({ type: 'repository.back' });
-                else if (key.return
+                else if (intent.type === 'confirm'
                     && repositoryWorkflow.step.plan.status === 'planned') {
                     dispatch({ type: 'repository.apply' });
                 }
                 return;
             }
-            if (repositoryWorkflow.status === 'result' && key.return) {
+            if (repositoryWorkflow.status === 'result' && intent.type === 'confirm') {
                 dispatch({ type: 'navigate', route: 'overview' });
             }
             return;
         }
-        if (input === 'q') {
+        if (intent.type === 'quit') {
             dispatch({ type: 'exit' });
             return;
         }
-        if (state.page.route === 'overview' && input === 'r') {
-            dispatch({ type: 'navigate', route: 'repository' });
+        if (state.page.route === 'overview') {
+            if (intent.type === 'focus.previous') {
+                dispatch({ type: 'overview.move', delta: -1 });
+                return;
+            }
+            if (intent.type === 'focus.next') {
+                dispatch({ type: 'overview.move', delta: 1 });
+                return;
+            }
+            if (intent.type === 'open' || intent.type === 'confirm') {
+                dispatch({ type: 'overview.open' });
+                return;
+            }
+            if (intent.type === 'text') {
+                const route = overviewAcceleratorRoute(intent.value);
+                if (route)
+                    dispatch({ type: 'navigate', route });
+            }
             return;
         }
-        if (state.page.route === 'overview' && input === 'h') {
-            dispatch({ type: 'navigate', route: 'help' });
-            return;
-        }
-        if (state.page.route === 'overview' && input === 'd') {
-            dispatch({ type: 'navigate', route: 'deploy' });
-            return;
-        }
-        if (state.page.route === 'overview' && input === 's') {
-            dispatch({ type: 'navigate', route: 'restore' });
-            return;
-        }
-        if (state.page.route === 'overview'
-            && (input === 'c' || key.return)) {
-            dispatch({ type: 'navigate', route: 'capture' });
-            return;
-        }
-        if (state.page.route === 'environment' && key.escape) {
+        if (state.page.route === 'environment' && intent.type === 'cancel') {
             dispatch({ type: 'navigate', route: 'overview' });
             return;
         }
-        if (state.page.route === 'help' && key.escape) {
+        if (state.page.route === 'help' && intent.type === 'cancel') {
             dispatch({ type: 'navigate', route: 'overview' });
             return;
         }
         if (state.page.route === 'environment'
             && state.page.status === 'ready'
             && state.postInitOnboarding
-            && key.return) {
+            && intent.type === 'confirm') {
             dispatch({ type: 'onboarding.continue' });
             return;
         }
         if (state.page.route === 'deploy' && state.page.status === 'ready') {
-            if (deployWorkflow?.status === 'result' && key.return) {
+            if (deployWorkflow?.status === 'result' && intent.type === 'confirm') {
                 dispatch({ type: 'navigate', route: 'overview' });
                 return;
             }
-            if (key.upArrow) {
+            if (intent.type === 'focus.previous') {
                 dispatch({ type: 'deploy.move', delta: -1 });
                 return;
             }
-            if (key.downArrow) {
+            if (intent.type === 'focus.next') {
                 dispatch({ type: 'deploy.move', delta: 1 });
                 return;
             }
             if (deployWorkflow?.status === 'selection') {
-                if (key.rightArrow)
+                if (intent.type === 'open')
                     dispatch({ type: 'deploy.expand' });
-                else if (key.leftArrow)
+                else if (intent.type === 'back')
                     dispatch({ type: 'deploy.collapse' });
-                else if (key.pageUp) {
+                else if (intent.type === 'page.previous') {
                     dispatch({
                         type: 'deploy.move',
                         delta: -Math.max(1, windowSize.rows - 12),
                     });
                 }
-                else if (key.pageDown) {
+                else if (intent.type === 'page.next') {
                     dispatch({
                         type: 'deploy.move',
                         delta: Math.max(1, windowSize.rows - 12),
                     });
                 }
-                else if (key.home) {
+                else if (intent.type === 'focus.first') {
                     dispatch({ type: 'deploy.focus', position: 'first' });
                 }
-                else if (key.end) {
+                else if (intent.type === 'focus.last') {
                     dispatch({ type: 'deploy.focus', position: 'last' });
                 }
-                else if (input === ' ') {
+                else if (intent.type === 'toggle') {
                     dispatch({ type: 'deploy.toggleSelection' });
                 }
-                else if (input === 'a')
+                else if (intent.type === 'text' && intent.value === 'a') {
                     dispatch({ type: 'deploy.toggleAdvanced' });
-                else if (input === 'd')
+                }
+                else if (intent.type === 'text' && intent.value === 'd') {
                     dispatch({ type: 'deploy.openDiff' });
-                else if (key.return)
+                }
+                else if (intent.type === 'confirm')
                     dispatch({ type: 'deploy.continue' });
-                else if (key.escape)
+                else if (intent.type === 'cancel') {
                     dispatch({ type: 'navigate', route: 'overview' });
+                }
                 return;
             }
-            if (deployWorkflow?.status === 'diff' && key.escape) {
+            if (deployWorkflow?.status === 'diff' && intent.type === 'cancel') {
                 dispatch({ type: 'deploy.closeDiff' });
                 return;
             }
             if (deployWorkflow?.status === 'confirmation') {
-                if (input === ' ')
+                if (intent.type === 'toggle')
                     dispatch({ type: 'deploy.toggleWarning' });
-                else if (key.return)
+                else if (intent.type === 'confirm')
                     dispatch({ type: 'deploy.apply' });
-                else if (key.escape)
+                else if (intent.type === 'cancel')
                     dispatch({ type: 'deploy.back' });
             }
             return;
         }
         if (state.page.route === 'restore' && state.page.status === 'ready') {
-            if (restoreWorkflow?.status === 'result' && key.return) {
+            if (restoreWorkflow?.status === 'result' && intent.type === 'confirm') {
                 dispatch({ type: 'navigate', route: 'overview' });
                 return;
             }
             if (restoreWorkflow?.status === 'review') {
-                if (key.return)
+                if (intent.type === 'confirm')
                     dispatch({ type: 'restore.apply' });
-                else if (key.escape)
+                else if (intent.type === 'cancel') {
                     dispatch({ type: 'navigate', route: 'overview' });
+                }
             }
             return;
         }
         if (state.page.route !== 'capture' || state.page.status !== 'ready')
             return;
-        if (captureWorkflow?.status === 'result' && key.return) {
+        if (captureWorkflow?.status === 'result' && intent.type === 'confirm') {
             dispatch({ type: 'navigate', route: 'overview' });
             return;
         }
-        if (key.upArrow) {
+        if (intent.type === 'focus.previous') {
             dispatch({ type: 'capture.move', delta: -1 });
             return;
         }
-        if (key.downArrow) {
+        if (intent.type === 'focus.next') {
             dispatch({ type: 'capture.move', delta: 1 });
             return;
         }
         if (captureWorkflow?.status === 'selection') {
-            if (input === ' ')
+            if (intent.type === 'toggle')
                 dispatch({ type: 'capture.toggleSelection' });
-            else if (input === 'd')
+            else if (intent.type === 'text' && intent.value === 'd') {
                 dispatch({ type: 'capture.openDiff' });
-            else if (key.return)
+            }
+            else if (intent.type === 'confirm')
                 dispatch({ type: 'capture.continue' });
-            else if (key.escape)
+            else if (intent.type === 'cancel') {
                 dispatch({ type: 'navigate', route: 'overview' });
+            }
             return;
         }
-        if (captureWorkflow?.status === 'diff' && key.escape) {
+        if (captureWorkflow?.status === 'diff' && intent.type === 'cancel') {
             dispatch({ type: 'capture.closeDiff' });
             return;
         }
         if (captureWorkflow?.status === 'decision') {
-            if (input === ' ')
+            if (intent.type === 'toggle')
                 dispatch({ type: 'capture.chooseDecision' });
-            else if (key.return)
+            else if (intent.type === 'confirm')
                 dispatch({ type: 'capture.continue' });
-            else if (key.escape)
+            else if (intent.type === 'cancel')
                 dispatch({ type: 'capture.back' });
             return;
         }
         if (captureWorkflow?.status === 'confirmation') {
-            if (input === ' ')
+            if (intent.type === 'toggle')
                 dispatch({ type: 'capture.toggleWarning' });
-            else if (key.return)
+            else if (intent.type === 'confirm')
                 dispatch({ type: 'capture.apply' });
-            else if (key.escape)
+            else if (intent.type === 'cancel')
                 dispatch({ type: 'capture.back' });
         }
     });
@@ -549,6 +562,16 @@ function Shell({ context, initialRoute, dependencies }) {
         exit(createOutcome(state, initialRoute));
     }, [exit, initialRoute, state]);
     return _jsx(ShellView, { state: state, terminalRows: windowSize.rows });
+}
+function overviewAcceleratorRoute(input) {
+    switch (input) {
+        case 'c': return 'capture';
+        case 'd': return 'deploy';
+        case 's': return 'restore';
+        case 'r': return 'repository';
+        case 'h': return 'help';
+        default: return undefined;
+    }
 }
 function createRepositoryEntryAction(context, entry, dependencies) {
     switch (entry.operation) {

@@ -27,6 +27,7 @@ import {
   deployWarnings,
   type CaptureWorkflowState,
   type DeployWorkflowState,
+  type PrimaryDestinationId,
   type RepositoryMenuAction,
   type RepositoryOperation,
   type RepositoryPlan,
@@ -55,7 +56,10 @@ export function ShellView({ state, terminalRows }: ShellViewProps): ReactNode {
       {page.status === 'loading' && <Text>Loading {title}...</Text>}
       {page.status === 'failure' && <Text color="red">Failed: {page.message}</Text>}
       {page.status === 'ready' && page.route === 'overview' && (
-        <Overview report={page.report} />
+        <Overview
+          report={page.report}
+          focusId={state.overviewFocusId}
+        />
       )}
       {page.status === 'ready' && page.route === 'repository' && (
         <RepositoryWorkflow workflow={page.workflow} />
@@ -221,8 +225,8 @@ function pageControls(
 
 function primaryNavigationControls(): string {
   return [
-    'Overview   Capture   Deploy   Restore Latest Deployment   Repository   Help',
-    'c Capture   d Deploy   s Restore   r Repository   h Help   q Quit   Ctrl+C Cancel',
+    '↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel',
+    'Accelerators: c Capture   d Deploy   s Restore   r Repository   h Help',
   ].join('\n');
 }
 
@@ -406,12 +410,45 @@ function repositoryChangeLabel(
   return String(change.id ?? 'Repository change');
 }
 
-function Overview({ report }: { report: StatusReport }): ReactNode {
+const PRIMARY_DESTINATIONS: {
+  id: PrimaryDestinationId;
+  label: string;
+  accelerator?: string;
+}[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'capture', label: 'Capture', accelerator: 'c' },
+  { id: 'deploy', label: 'Deploy', accelerator: 'd' },
+  { id: 'restore', label: 'Restore Latest Deployment', accelerator: 's' },
+  { id: 'repository', label: 'Repository', accelerator: 'r' },
+  { id: 'help', label: 'Help', accelerator: 'h' },
+];
+
+function Overview({
+  report,
+  focusId,
+}: {
+  report: StatusReport;
+  focusId: PrimaryDestinationId;
+}): ReactNode {
   const pending = report.pendingDeployment;
   const local = report.postDeployLocalState;
 
   return (
     <Box flexDirection="column">
+      <Text>Primary navigation:</Text>
+      {PRIMARY_DESTINATIONS.map((destination) => {
+        const focused = destination.id === focusId;
+        return (
+          <Text key={destination.id} color={focused ? 'cyan' : undefined}>
+            {focused ? '›' : ' '}{' '}
+            {destination.label}
+            {destination.accelerator
+              ? ` (${destination.accelerator})`
+              : ''}
+          </Text>
+        );
+      })}
+      <Text> </Text>
       <Text>Repository: {report.repository.path}</Text>
       {report.repository.git && (
         <Text>

@@ -8,7 +8,7 @@ export function ShellView({ state, terminalRows }) {
     const { page } = state;
     const title = pageTitle(state);
     const controls = pageControls(state, rows);
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { bold: true, children: "MCV" }), _jsx(Text, { children: title }), _jsx(Text, { children: " " }), page.status === 'loading' && _jsxs(Text, { children: ["Loading ", title, "..."] }), page.status === 'failure' && _jsxs(Text, { color: "red", children: ["Failed: ", page.message] }), page.status === 'ready' && page.route === 'overview' && (_jsx(Overview, { report: page.report })), page.status === 'ready' && page.route === 'repository' && (_jsx(RepositoryWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'environment' && (_jsx(EnvironmentDetails, { report: page.report })), page.status === 'ready' && page.route === 'help' && _jsx(Help, {}), page.status === 'ready' && page.route === 'capture' && (_jsx(CaptureWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'deploy' && (_jsx(DeployWorkflow, { workflow: page.workflow, terminalRows: rows })), page.status === 'ready' && page.route === 'restore' && (_jsx(RestoreWorkflow, { workflow: page.workflow })), controls && (_jsxs(_Fragment, { children: [_jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: controls })] }))] }));
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { bold: true, children: "MCV" }), _jsx(Text, { children: title }), _jsx(Text, { children: " " }), page.status === 'loading' && _jsxs(Text, { children: ["Loading ", title, "..."] }), page.status === 'failure' && _jsxs(Text, { color: "red", children: ["Failed: ", page.message] }), page.status === 'ready' && page.route === 'overview' && (_jsx(Overview, { report: page.report, focusId: state.overviewFocusId })), page.status === 'ready' && page.route === 'repository' && (_jsx(RepositoryWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'environment' && (_jsx(EnvironmentDetails, { report: page.report })), page.status === 'ready' && page.route === 'help' && _jsx(Help, {}), page.status === 'ready' && page.route === 'capture' && (_jsx(CaptureWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'deploy' && (_jsx(DeployWorkflow, { workflow: page.workflow, terminalRows: rows })), page.status === 'ready' && page.route === 'restore' && (_jsx(RestoreWorkflow, { workflow: page.workflow })), controls && (_jsxs(_Fragment, { children: [_jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: controls })] }))] }));
 }
 function pageTitle(state) {
     const { page } = state;
@@ -151,8 +151,8 @@ function pageControls(state, terminalRows) {
 }
 function primaryNavigationControls() {
     return [
-        'Overview   Capture   Deploy   Restore Latest Deployment   Repository   Help',
-        'c Capture   d Deploy   s Restore   r Repository   h Help   q Quit   Ctrl+C Cancel',
+        '↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel',
+        'Accelerators: c Capture   d Deploy   s Restore   r Repository   h Help',
     ].join('\n');
 }
 function Help() {
@@ -223,10 +223,23 @@ function repositoryChangeLabel(change) {
     }
     return String(change.id ?? 'Repository change');
 }
-function Overview({ report }) {
+const PRIMARY_DESTINATIONS = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'capture', label: 'Capture', accelerator: 'c' },
+    { id: 'deploy', label: 'Deploy', accelerator: 'd' },
+    { id: 'restore', label: 'Restore Latest Deployment', accelerator: 's' },
+    { id: 'repository', label: 'Repository', accelerator: 'r' },
+    { id: 'help', label: 'Help', accelerator: 'h' },
+];
+function Overview({ report, focusId, }) {
     const pending = report.pendingDeployment;
     const local = report.postDeployLocalState;
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: ["Repository: ", report.repository.path] }), report.repository.git && (_jsxs(Text, { children: ["Git: ", report.repository.git.clean
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "Primary navigation:" }), PRIMARY_DESTINATIONS.map((destination) => {
+                const focused = destination.id === focusId;
+                return (_jsxs(Text, { color: focused ? 'cyan' : undefined, children: [focused ? '›' : ' ', ' ', destination.label, destination.accelerator
+                            ? ` (${destination.accelerator})`
+                            : ''] }, destination.id));
+            }), _jsx(Text, { children: " " }), _jsxs(Text, { children: ["Repository: ", report.repository.path] }), report.repository.git && (_jsxs(Text, { children: ["Git: ", report.repository.git.clean
                         ? 'clean'
                         : `${report.repository.git.uncommittedChanges} uncommitted changes`] })), _jsxs(Text, { children: ["Pending deployment: ", pending.total, " changes (", pending.add, " add,", ' ', pending.modify, " modify, ", pending.delete, " delete)"] }), _jsxs(Text, { children: ["Local managed state: ", local.drift, " changed, ", local.missing, " missing"] }), _jsxs(Text, { children: ["Environment: ", report.environment.missingVariables.length, " missing variables"] }), _jsx(Text, { children: "IDE support:" }), report.environment.ideSupport.map((ide) => (_jsxs(Text, { children: ['  ', ide.name, ": ", ide.enabled ? 'enabled' : 'disabled', ",", ' ', ide.detected ? 'detected' : 'not detected'] }, ide.id))), _jsxs(Text, { children: ["Last operation: ", report.lastOperation
                         ? `${report.lastOperation.kind} · ${report.lastOperation.success ? 'success' : 'failure'}`
