@@ -1,3 +1,5 @@
+**实现状态（2026-07-29）：已实现。** Operation Modules、稳定的一次性 text/JSON 协议、NodeNext/ESM、默认 Ink Shell、方向键优先导航、事务期间输入锁定、响应式与 `NO_COLOR` 语义、macOS PTY / Windows ConPTY 发布门均已落地。本文以下内容保留为已交付功能规格，不增加后续范围。
+
 ## Problem Statement
 
 MCV 已经具备 Capture、Deploy、Status、Restore、Repository Binding 和 schema Migration 的基本安全闭环，但当前交互仍是数字菜单和逐行询问。计划生成、终端输出、用户选择和文件副作用混在命令函数中，导致 TUI、文本 CLI、JSON 协议和自动测试无法共用一套可靠的核心流程。

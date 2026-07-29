@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -105,6 +106,41 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
     expect(outcome.output).not.toContain('INPUT_MODE:changed');
   }, 45_000);
 
+  it('opens every primary destination with arrows while NO_COLOR preserves meaning', async () => {
+    createDeployTreeRepository(testRoot);
+    const before = snapshotTree(testRoot);
+    const outcome = await runConPty('status', [
+      { pattern: '› Overview', input: '\u001b[B' },
+      { pattern: '› Capture', input: '\u001b[C' },
+      { pattern: 'Capture · Select Changes', input: '\u001b[D' },
+      { pattern: 'Status Overview', input: '\u001b[B' },
+      { pattern: '› Deploy', input: '\u001b[C' },
+      { pattern: 'Deploy · Select Changes', input: '\u001b[D' },
+      { pattern: '› Deploy', input: '\u001b[B' },
+      { pattern: '› Restore Latest Deployment', input: '\u001b[C' },
+      { pattern: 'Restore Latest Deployment · Review', input: '\u001b[D' },
+      { pattern: '› Restore Latest Deployment', input: '\u001b[B' },
+      { pattern: '› Repository', input: '\u001b[C' },
+      { pattern: 'Repository ID: deploy-tree-conpty', input: '\u001b[D' },
+      { pattern: '› Repository', input: '\u001b[B' },
+      { pattern: '› Help', input: '\r' },
+      { pattern: 'Primary navigation:', input: '\u001b[D' },
+      { pattern: '› Help', input: 'q' },
+    ], {
+      environment: { NO_COLOR: '1' },
+    });
+
+    expect(outcome.code).toBe(0);
+    expect(outcome.output).toContain('✓ Repository: Ready');
+    expect(outcome.output).toContain('! Pending Deployment Changes: Review');
+    expect(outcome.output).toContain('[x]');
+    expectColorlessOutput(outcome.output);
+    expect(snapshotTree(testRoot)).toEqual(before);
+    expectRestoredTerminal(outcome.output);
+    expect(outcome.output).toContain('INPUT_MODE:restored');
+    expect(outcome.output).not.toContain('INPUT_MODE:changed');
+  }, 60_000);
+
   it('pages through the packaged Deploy tree inside a bounded viewport', async () => {
     createDeployTreeRepository(testRoot);
     const outcome = await runConPty('deploy', [
@@ -124,14 +160,36 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
     expect(outcome.output).toContain('INPUT_MODE:restored');
   }, 45_000);
 
+  it('completes Restore Apply and Result while transaction input stays disabled', async () => {
+    const fixture = createRestoreRepository(testRoot);
+    const outcome = await runConPty('restore', [
+      { pattern: 'Restore Latest Deployment · Review', input: '\r' },
+      { pattern: 'Restore Latest Deployment · Applying', input: 'q\u0003' },
+      { pattern: 'Restore Latest Deployment · Result', input: 'q' },
+    ]);
+
+    expect(outcome.code).toBe(0);
+    expect(outcome.output).toContain('Restore succeeded.');
+    expect(outcome.output).toContain(
+      'Restored 1 path(s) and deleted 0 path(s).',
+    );
+    expect(fs.readFileSync(fixture.targetPath, 'utf8')).toBe('before deploy\n');
+    expectRestoredTerminal(outcome.output);
+    expect(outcome.output).toContain('INPUT_MODE:restored');
+    expect(outcome.output).not.toContain('INPUT_MODE:changed');
+  }, 45_000);
+
   function runConPty(
-    route: 'discover' | 'status' | 'deploy',
+    route: 'discover' | 'status' | 'deploy' | 'restore',
     steps: Array<{
       pattern: string;
       input?: string;
       delay?: number;
       resize?: { cols: number; rows: number };
     }>,
+    options: {
+      environment?: NodeJS.ProcessEnv;
+    } = {},
   ): Promise<{ code: number; output: string }> {
     return new Promise((resolve, reject) => {
       const arguments_ = [
@@ -159,10 +217,12 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
           HOME: testRoot,
           USERPROFILE: testRoot,
           APPDATA: testRoot,
+          ...options.environment,
         },
       });
       let output = '';
       let nextStep = 0;
+      let searchStart = 0;
       const timeout = setTimeout(() => {
         terminal.kill();
         reject(new Error(`Timed out waiting for Windows TUI. Output: ${output}`));
@@ -171,8 +231,9 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
       terminal.onData((data) => {
         output += data;
         const step = steps[nextStep];
-        if (!step || !output.includes(step.pattern)) return;
+        if (!step || !output.slice(searchStart).includes(step.pattern)) return;
         nextStep += 1;
+        searchStart = output.length;
         setTimeout(() => {
           if (step.resize) {
             terminal.resize(step.resize.cols, step.resize.rows);
@@ -182,6 +243,13 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
       });
       terminal.onExit(({ exitCode }) => {
         clearTimeout(timeout);
+        if (nextStep !== steps.length) {
+          reject(new Error(
+            `Windows TUI exited before step ${nextStep + 1}/${steps.length}.`
+            + ` Output: ${output}`,
+          ));
+          return;
+        }
         resolve({ code: exitCode, output });
       });
     });
@@ -228,6 +296,92 @@ function createDeployTreeRepository(testRoot: string): void {
     defaultRepositoryId: 'deploy-tree-conpty',
     repositoryPath,
   }, null, 2)}\n`);
+}
+
+function createRestoreRepository(
+  testRoot: string,
+): { targetPath: string } {
+  const repositoryPath = path.join(testRoot, 'restore-repository');
+  const targetPath = path.join(testRoot, 'target', 'settings.json');
+  const backupDirectory = path.join(testRoot, 'mcv', 'backups', 'complete');
+  const originalContent = 'before deploy\n';
+  const deployedContent = 'after deploy\n';
+  const digest = (content: string): string =>
+    crypto.createHash('sha256').update(content).digest('hex');
+
+  fs.mkdirSync(repositoryPath);
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.mkdirSync(path.join(backupDirectory, 'files'), { recursive: true });
+  fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+    'schemaVersion: 2',
+    'repositoryId: restore-conpty',
+    'initializedAt: 2026-07-29T00:00:00.000Z',
+    'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+    'capture: { preserveUnknownNativeFields: true }',
+    'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+    'targets: {}',
+    'variables: {}',
+    '',
+  ].join('\n'));
+  fs.writeFileSync(
+    path.join(testRoot, 'mcv', 'config.json'),
+    `${JSON.stringify({
+      schemaVersion: 2,
+      defaultRepositoryId: 'restore-conpty',
+      repositoryPath,
+    }, null, 2)}\n`,
+  );
+  fs.writeFileSync(targetPath, deployedContent);
+  fs.writeFileSync(
+    path.join(backupDirectory, 'files', 'settings.json'),
+    originalContent,
+  );
+  fs.writeFileSync(
+    path.join(backupDirectory, 'manifest.json'),
+    JSON.stringify({
+      createdAt: '2026-07-29T08:30:00.000Z',
+      status: 'complete',
+      files: [{
+        action: 'modify',
+        originalPath: targetPath,
+        backupPath: 'files/settings.json',
+        beforeHash: digest(originalContent),
+        afterHash: digest(deployedContent),
+      }],
+    }),
+  );
+  return { targetPath };
+}
+
+function snapshotTree(root: string): Record<string, string> {
+  const snapshot: Record<string, string> = {};
+  const visit = (directory: string): void => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const absolutePath = path.join(directory, entry.name);
+      const relativePath = path.relative(root, absolutePath);
+      if (entry.isDirectory()) {
+        snapshot[`${relativePath}/`] = 'directory';
+        visit(absolutePath);
+      } else {
+        snapshot[relativePath] = crypto
+          .createHash('sha256')
+          .update(fs.readFileSync(absolutePath))
+          .digest('hex');
+      }
+    }
+  };
+  visit(root);
+  return snapshot;
+}
+
+function expectColorlessOutput(output: string): void {
+  const colorParameters = [...output.matchAll(/\u001b\[([0-9;:]*)m/g)]
+    .flatMap((match) => match[1]?.split(/[;:]/) ?? [])
+    .map((value) => Number.parseInt(value, 10))
+    .filter((value) =>
+      (value >= 30 && value <= 49)
+      || (value >= 90 && value <= 107));
+  expect(colorParameters).toEqual([]);
 }
 
 function expectRestoredTerminal(output: string): void {

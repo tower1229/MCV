@@ -42,7 +42,7 @@ MCV 仓库中的配置分为：
 
 ## 快速开始
 
-在完整 TTY 中直接运行 `mcv` 会进入统一的 Ink Shell，并异步打开只读 Overview。一级导航固定为 Overview、Capture、Deploy、Restore Latest Deployment、Repository 和 Help；Overview 中按 `↑` / `↓` 移动焦点，按 `→` 或 `Enter` 打开焦点目标。`c`、`d`、`s`、`r`、`h` 继续分别作为 Capture、Deploy、Restore Latest Deployment、Repository、Help 的快捷键。所有业务子命令都 deep-link 到同一个持久 Shell：`status` 打开 Overview，`discover` 打开 Environment Details，Capture/Deploy/Restore 打开各自 workflow，Repository 生命周期命令直接打开对应 Repository 页面或 Plan。Help、Environment Details 和 Result 页按 `↑` / `↓` 滚动；Help 与 Environment Details 按 `←` 或 `Escape` 返回 Overview，Result 页按 `←` 或 `Enter` 返回刷新后的 Overview。除 Repository 路径输入页需要保留完整文本输入外，任一非 Apply 页面按 `q` 正常退出，按 `Ctrl+C` 以 130 退出。direct subcommand 正常关闭后会在主屏留下对应摘要和 next action。Shell 使用 alternate screen，退出、失败、中断和异常后都会恢复主屏、光标和输入模式。
+在完整 TTY 中直接运行 `mcv` 会进入统一的 Ink Shell，并异步打开只读 Overview。一级导航固定为 Overview、Capture、Deploy、Restore Latest Deployment、Repository 和 Help；Overview 中按 `↑` / `↓` 移动焦点，按 `→` 或 `Enter` 打开焦点目标。`c`、`d`、`s`、`r`、`h` 继续分别作为 Capture、Deploy、Restore Latest Deployment、Repository、Help 的可选加速键。所有业务子命令都 deep-link 到同一个持久 Shell：`status` 打开 Overview，`discover` 打开 Environment Details，Capture/Deploy/Restore 打开各自 workflow，Repository 生命周期命令直接打开对应 Repository 页面或 Plan。Help、Environment Details 和 Result 页按 `↑` / `↓` 滚动；Help 与 Environment Details 按 `←` 或 `Escape` 返回 Overview，Result 页按 `←` 或 `Enter` 返回刷新后的 Overview。除 Repository 路径输入页需要保留完整文本输入外，任一非 Apply 页面按 `q` 正常退出，按 `Ctrl+C` 以 130 退出。direct subcommand 正常关闭后会在主屏留下对应摘要和 next action。Shell 使用 alternate screen，退出、失败、中断和异常后都会恢复主屏、光标和输入模式。
 
 非 TTY 的无参数调用仍立即输出 help。显式使用 `--plain`、`--dry-run`、`--yes` 或 `--json` 的命令始终执行一次性协议，不进入 alternate screen。
 
