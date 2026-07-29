@@ -40,7 +40,8 @@ function renderLinkOutcome(outcome) {
     const files = `${outcome.affectedFileCount} affected ${outcome.affectedFileCount === 1 ? 'file' : 'files'}`;
     return [
         `${state} · ${outcome.ownership} · ${displayIde(outcome.ide)} · ${packages} · ${files}`,
-        `  ${outcome.linkPath}${outcome.resolvedPath ? ` -> ${outcome.resolvedPath}` : ''}`,
+        ...outcome.linkPaths.map((linkPath) => `  Link: ${linkPath}`),
+        ...(outcome.resolvedPaths?.map((resolvedPath) => `  Resolved target: ${resolvedPath}`) ?? []),
     ];
 }
 function linkedOutcomeReason(reason) {

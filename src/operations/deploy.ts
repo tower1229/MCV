@@ -69,7 +69,9 @@ export interface DeployLinkOutcome {
   scope: 'skill-package' | 'shared-link-root';
   ide: DeployChange['ide'];
   linkPath: string;
+  linkPaths: string[];
   resolvedPath?: string;
+  resolvedPaths?: string[];
   packageNames: string[];
   affectedFileCount: number;
   reason?: 'divergent' | 'dangling' | 'cycle' | 'physical-target-conflict' | 'unclassified';
@@ -360,75 +362,102 @@ function classifyLinkedSkillPackages(
   outcomes: DeployLinkOutcome[],
   issues: Issue[],
 ): void {
-  const linkedGroups = new Map<string, {
+  interface LinkedSkillFile {
+    file: SourcedDeployFile;
     linkPath: string;
-    files: SourcedDeployFile[];
+  }
+  const linkedGroups = new Map<string, {
+    scope: DeployLinkOutcome['scope'];
+    files: LinkedSkillFile[];
   }>();
   for (const file of desired) {
     if (file.capability !== 'skills') continue;
     const linkPath = findSymbolicLinkAncestor(file.targetPath);
     if (!linkPath) continue;
-    const key = `${file.ide}\0${path.resolve(linkPath)}`;
-    const group = linkedGroups.get(key) ?? { linkPath, files: [] };
-    group.files.push(file);
+    const skillRoot = skillRootPath(file.targetPath);
+    const withinSkillRoot = skillRoot !== undefined
+      && isPathWithin(skillRoot, linkPath);
+    const sharedRoot = withinSkillRoot
+      && path.resolve(linkPath) === path.resolve(skillRoot);
+    const groupingPath = sharedRoot
+      ? linkPath
+      : withinSkillRoot
+        ? skillPackageRoot(file.targetPath)
+        : linkPath;
+    const scope = sharedRoot ? 'shared-link-root' as const : 'skill-package' as const;
+    const key = `${file.ide}\0${path.resolve(groupingPath)}`;
+    const group = linkedGroups.get(key) ?? { scope, files: [] };
+    group.files.push({ file, linkPath });
     linkedGroups.set(key, group);
   }
 
-  for (const { linkPath, files } of linkedGroups.values()) {
-    const first = files[0];
-    const packageNames = [...new Set(files.map((file) => skillPackageName(file.targetPath)))]
+  const desiredByPath = new Map(desired
+    .filter((file) => !findSymbolicLinkAncestor(file.targetPath))
+    .map((file) => [path.resolve(file.targetPath), toBuffer(file.content)]));
+
+  for (const { scope, files } of linkedGroups.values()) {
+    const first = files[0].file;
+    const linkPaths = [...new Set(files.map((entry) => entry.linkPath))].sort();
+    const packageNames = [...new Set(files.map(({ file }) => skillPackageName(file.targetPath)))]
       .sort();
     const baseOutcome = {
       ownership: 'external' as const,
-      scope: path.basename(linkPath) === 'skills'
-        ? 'shared-link-root' as const
-        : 'skill-package' as const,
+      scope,
       ide: first.ide,
-      linkPath,
+      linkPath: linkPaths[0],
+      linkPaths,
       packageNames,
       affectedFileCount: files.length,
     };
-    if (files.some((file) => !isLinkWithinSkillRoot(file.targetPath, linkPath))) {
+    if (files.some(({ file, linkPath }) => !isLinkWithinSkillRoot(file.targetPath, linkPath))) {
       outcomes.push({ ...baseOutcome, status: 'blocked', reason: 'unclassified' });
       issues.push(linkedSkillIssue(baseOutcome, 'unclassified'));
       continue;
     }
-    let resolvedPath: string;
+    const resolvedByLink = new Map<string, string>();
+    let resolutionFailure: NonNullable<DeployLinkOutcome['reason']> | undefined;
     try {
-      resolvedPath = fs.realpathSync(linkPath);
+      for (const linkPath of linkPaths) {
+        resolvedByLink.set(linkPath, fs.realpathSync(linkPath));
+      }
     } catch (error) {
-      const reason = symbolicLinkFailureReason(error);
-      outcomes.push({ ...baseOutcome, status: 'blocked', reason });
-      issues.push(linkedSkillIssue(baseOutcome, reason));
+      resolutionFailure = symbolicLinkFailureReason(error);
+    }
+    if (resolutionFailure) {
+      outcomes.push({ ...baseOutcome, status: 'blocked', reason: resolutionFailure });
+      issues.push(linkedSkillIssue(baseOutcome, resolutionFailure));
       continue;
     }
+    const resolvedPaths = [...new Set(resolvedByLink.values())].sort();
+    const resolution = {
+      ...(resolvedPaths.length === 1 ? { resolvedPath: resolvedPaths[0] } : {}),
+      resolvedPaths,
+    };
 
     let matches = true;
     try {
-      matches = files.every((file) =>
+      matches = files.every(({ file }) =>
         fs.readFileSync(file.targetPath).equals(toBuffer(file.content)));
     } catch {
       matches = false;
     }
     const physicalTargetConflict = hasPhysicalTargetConflict(
       files,
-      linkPath,
-      resolvedPath,
-      desired,
+      resolvedByLink,
+      desiredByPath,
     );
     const followsEquivalentPhysicalTarget = linkedFilesMatchPhysicalDesired(
       files,
-      linkPath,
-      resolvedPath,
-      desired,
+      resolvedByLink,
+      desiredByPath,
     );
     if (!physicalTargetConflict && (matches || followsEquivalentPhysicalTarget)) {
-      outcomes.push({ ...baseOutcome, status: 'satisfied-via-link', resolvedPath });
+      outcomes.push({ ...baseOutcome, ...resolution, status: 'satisfied-via-link' });
       issues.push({
         severity: 'notice',
         code: `deploy.skillsLinked.satisfied.${first.ide}`,
         message: `Satisfied via link: ${packageSummary(packageNames)} (${files.length} affected file(s)).`,
-        details: `External link ${linkPath} resolves to ${resolvedPath}; MCV will not take ownership or write through it.`,
+        details: `${linkPaths.length} external link(s) resolve to ${resolvedPaths.join(', ')}; MCV will not take ownership or write through them.`,
       });
       continue;
     }
@@ -436,22 +465,38 @@ function classifyLinkedSkillPackages(
     const reason = physicalTargetConflict
       ? 'physical-target-conflict' as const
       : 'divergent' as const;
-    outcomes.push({ ...baseOutcome, status: 'blocked', resolvedPath, reason });
-    issues.push(linkedSkillIssue(baseOutcome, reason, resolvedPath));
+    outcomes.push({ ...baseOutcome, ...resolution, status: 'blocked', reason });
+    issues.push(linkedSkillIssue({ ...baseOutcome, ...resolution }, reason));
   }
 }
 
 function isLinkWithinSkillRoot(targetPath: string, linkPath: string): boolean {
+  const skillRoot = skillRootPath(targetPath);
+  return skillRoot !== undefined && isPathWithin(skillRoot, linkPath);
+}
+
+function isPathWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === ''
+    || (relative !== '..'
+      && !relative.startsWith(`..${path.sep}`)
+      && !path.isAbsolute(relative));
+}
+
+function skillRootPath(targetPath: string): string | undefined {
   const resolvedTarget = path.resolve(targetPath);
   const marker = `${path.sep}skills${path.sep}`;
   const markerIndex = resolvedTarget.lastIndexOf(marker);
-  if (markerIndex < 0) return false;
-  const skillRoot = resolvedTarget.slice(0, markerIndex + marker.length - 1);
-  const relativeLink = path.relative(skillRoot, path.resolve(linkPath));
-  return relativeLink === ''
-    || (relativeLink !== '..'
-      && !relativeLink.startsWith(`..${path.sep}`)
-      && !path.isAbsolute(relativeLink));
+  return markerIndex < 0
+    ? undefined
+    : resolvedTarget.slice(0, markerIndex + marker.length - 1);
+}
+
+function skillPackageRoot(targetPath: string): string {
+  const skillRoot = skillRootPath(targetPath);
+  return skillRoot
+    ? path.join(skillRoot, skillPackageName(targetPath))
+    : path.dirname(targetPath);
 }
 
 function skillPackageName(targetPath: string): string {
@@ -471,23 +516,24 @@ function symbolicLinkFailureReason(
 }
 
 function hasPhysicalTargetConflict(
-  linkedFiles: SourcedDeployFile[],
-  linkPath: string,
-  resolvedPath: string,
-  desired: SourcedDeployFile[],
+  linkedFiles: Array<{ file: SourcedDeployFile; linkPath: string }>,
+  resolvedByLink: Map<string, string>,
+  desiredByPath: Map<string, Buffer>,
 ): boolean {
-  try {
-    if (!fs.statSync(resolvedPath).isDirectory()
-      && linkedFiles.some((file) => path.relative(linkPath, file.targetPath) !== '')) {
+  for (const [linkPath, resolvedPath] of resolvedByLink) {
+    try {
+      if (!fs.statSync(resolvedPath).isDirectory()
+        && linkedFiles.some(({ file, linkPath: fileLinkPath }) =>
+          fileLinkPath === linkPath && path.relative(linkPath, file.targetPath) !== '')) {
+        return true;
+      }
+    } catch {
       return true;
     }
-  } catch {
-    return true;
   }
-  const desiredByPath = new Map(desired
-    .filter((file) => !findSymbolicLinkAncestor(file.targetPath))
-    .map((file) => [path.resolve(file.targetPath), toBuffer(file.content)]));
-  return linkedFiles.some((file) => {
+  return linkedFiles.some(({ file, linkPath }) => {
+    const resolvedPath = resolvedByLink.get(linkPath);
+    if (!resolvedPath) return true;
     const physicalPath = path.resolve(resolvedPath, path.relative(linkPath, file.targetPath));
     const directDesired = desiredByPath.get(physicalPath);
     return directDesired !== undefined && !directDesired.equals(toBuffer(file.content));
@@ -495,24 +541,21 @@ function hasPhysicalTargetConflict(
 }
 
 function linkedFilesMatchPhysicalDesired(
-  linkedFiles: SourcedDeployFile[],
-  linkPath: string,
-  resolvedPath: string,
-  desired: SourcedDeployFile[],
+  linkedFiles: Array<{ file: SourcedDeployFile; linkPath: string }>,
+  resolvedByLink: Map<string, string>,
+  desiredByPath: Map<string, Buffer>,
 ): boolean {
-  const desiredByPath = new Map(desired
-    .filter((file) => !findSymbolicLinkAncestor(file.targetPath))
-    .map((file) => [path.resolve(file.targetPath), toBuffer(file.content)]));
-  return linkedFiles.every((file) => {
+  return linkedFiles.every(({ file, linkPath }) => {
+    const resolvedPath = resolvedByLink.get(linkPath);
+    if (!resolvedPath) return false;
     const physicalPath = path.resolve(resolvedPath, path.relative(linkPath, file.targetPath));
     return desiredByPath.get(physicalPath)?.equals(toBuffer(file.content)) === true;
   });
 }
 
 function linkedSkillIssue(
-  outcome: Omit<DeployLinkOutcome, 'status' | 'resolvedPath' | 'reason'>,
+  outcome: Omit<DeployLinkOutcome, 'status' | 'reason'>,
   reason: NonNullable<DeployLinkOutcome['reason']>,
-  resolvedPath?: string,
 ): Issue {
   return {
     severity: 'error',
@@ -520,8 +563,10 @@ function linkedSkillIssue(
     message: `Linked external Skills are blocked: ${linkedSkillReason(reason)} (${outcome.affectedFileCount} affected file(s)).`,
     details: [
       `Packages: ${packageSummary(outcome.packageNames)}.`,
-      `Link: ${outcome.linkPath}.`,
-      ...(resolvedPath ? [`Resolved target: ${resolvedPath}.`] : []),
+      `Links: ${outcome.linkPaths.join(', ')}.`,
+      ...(outcome.resolvedPaths
+        ? [`Resolved targets: ${outcome.resolvedPaths.join(', ')}.`]
+        : []),
       'MCV will not write through, replace, or manage cleanup beneath this link.',
     ].join(' '),
   };
@@ -1050,6 +1095,8 @@ function freezeDeployPlan(plan: DeployPlan): DeployPlan {
   Object.freeze(plan.changes);
   for (const outcome of plan.linkOutcomes) {
     Object.freeze(outcome.packageNames);
+    Object.freeze(outcome.linkPaths);
+    if (outcome.resolvedPaths) Object.freeze(outcome.resolvedPaths);
     Object.freeze(outcome);
   }
   Object.freeze(plan.linkOutcomes);

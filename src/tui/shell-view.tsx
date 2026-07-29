@@ -10,6 +10,7 @@ import type {
 import type { StatusReport } from '../operations/status.js';
 import type { RepositoryReport } from '../operations/repository.js';
 import type {
+  DeployLinkOutcome,
   DeployPreview,
   DeployResult,
 } from '../operations/deploy.js';
@@ -1098,12 +1099,14 @@ function createOverviewStatusViewModel(
       state: pending.total > 0 ? 'Review' : 'None',
       details: `${pending.total} changes (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete)`,
     },
-    linkedSkills: report.linkOutcomes.map((outcome) => ({
-      key: `linked-skills:${outcome.ide}:${outcome.linkPath}`,
-      tone: outcome.status === 'satisfied-via-link' ? 'info' : 'error',
+    linkedSkills: summarizeLinkOutcomes(report.linkOutcomes).map((summary) => ({
+      key: `linked-skills:${summary.key}`,
+      tone: summary.status === 'satisfied-via-link' ? 'info' : 'error',
       label: 'Linked Skills',
-      state: outcome.status === 'satisfied-via-link' ? 'Satisfied via link' : 'Blocked',
-      details: `External · ${outcome.packageNames.length} ${outcome.packageNames.length === 1 ? 'package' : 'packages'} · ${outcome.affectedFileCount} affected ${outcome.affectedFileCount === 1 ? 'file' : 'files'}`,
+      state: summary.outcomeCount === 1
+        ? summary.state
+        : `${summary.outcomeCount} ${summary.state.toLowerCase()} outcomes`,
+      details: `External · ${summary.packageCount} ${summary.packageCount === 1 ? 'package' : 'packages'} · ${summary.affectedFileCount} affected ${summary.affectedFileCount === 1 ? 'file' : 'files'}`,
     })),
     drift: {
       key: 'drift',
@@ -1160,6 +1163,38 @@ function createOverviewStatusViewModel(
       details: issue.message,
       })),
   };
+}
+
+interface LinkOutcomeSummary {
+  key: string;
+  status: DeployLinkOutcome['status'];
+  state: 'Satisfied via link' | 'Blocked';
+  outcomeCount: number;
+  packageCount: number;
+  affectedFileCount: number;
+}
+
+function summarizeLinkOutcomes(
+  outcomes: DeployLinkOutcome[],
+): LinkOutcomeSummary[] {
+  return (['satisfied-via-link', 'blocked'] as const).flatMap((status) => {
+    const matching = outcomes.filter((outcome) => outcome.status === status);
+    if (matching.length === 0) return [];
+    return [{
+      key: status,
+      status,
+      state: status === 'satisfied-via-link' ? 'Satisfied via link' : 'Blocked',
+      outcomeCount: matching.length,
+      packageCount: matching.reduce(
+        (total, outcome) => total + outcome.packageNames.length,
+        0,
+      ),
+      affectedFileCount: matching.reduce(
+        (total, outcome) => total + outcome.affectedFileCount,
+        0,
+      ),
+    }];
+  });
 }
 
 function statusItemText(
@@ -1574,10 +1609,14 @@ function DeploySelection({
   const advanced = workflow.plan.changes.filter(
     (change) => change.group === 'advanced',
   );
+  const linkOutcomeSummaries = summarizeLinkOutcomes(workflow.plan.linkOutcomes);
+  const linkOutcomeRows = workflow.plan.linkOutcomes.length === 1
+    ? 2
+    : linkOutcomeSummaries.length;
   const viewport = listViewport(
     visible,
     workflow.cursor,
-    Math.max(1, terminalRows - (terminalRows <= 12 ? 9 : 10)),
+    Math.max(1, terminalRows - (terminalRows <= 12 ? 9 : 10) - linkOutcomeRows),
   );
 
   return (
@@ -1588,7 +1627,7 @@ function DeploySelection({
       <Text>
         {workflow.plan.changes.length} changes · {workflow.selectedIds.length} selected
       </Text>
-      {workflow.plan.linkOutcomes.map((outcome) => (
+      {workflow.plan.linkOutcomes.length === 1 && workflow.plan.linkOutcomes.map((outcome) => (
         <Box key={`${outcome.ide}:${outcome.linkPath}`} flexDirection="column">
           <Text wrap="truncate-middle">
             {outcome.status === 'satisfied-via-link'
@@ -1597,13 +1636,22 @@ function DeploySelection({
             {' '}· External · {outcome.packageNames.length} Skill{' '}
             {outcome.packageNames.length === 1 ? 'package' : 'packages'} ·{' '}
             {outcome.affectedFileCount} affected{' '}
-            {outcome.affectedFileCount === 1 ? 'file' : 'files'}
+            {outcome.affectedFileCount === 1 ? 'file' : 'files'} ·{' '}
+            {outcome.linkPaths.length} {outcome.linkPaths.length === 1 ? 'link' : 'links'}
           </Text>
           <Text wrap="truncate-middle">
             {'  '}{outcome.linkPath}
             {outcome.resolvedPath ? ` → ${outcome.resolvedPath}` : ''}
           </Text>
         </Box>
+      ))}
+      {workflow.plan.linkOutcomes.length > 1 && linkOutcomeSummaries.map((summary) => (
+        <Text key={summary.key} wrap="truncate-middle">
+          {summary.outcomeCount} external {summary.state.toLowerCase()} outcomes ·{' '}
+          {summary.packageCount} Skill {summary.packageCount === 1 ? 'package' : 'packages'} ·{' '}
+          {summary.affectedFileCount} affected{' '}
+          {summary.affectedFileCount === 1 ? 'file' : 'files'}
+        </Text>
       ))}
       <Text> </Text>
       {!viewport.combinedIndicator && viewport.hiddenBefore > 0 && (

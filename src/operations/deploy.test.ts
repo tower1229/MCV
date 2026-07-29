@@ -441,7 +441,9 @@ describe('Deploy operations', () => {
       scope: 'shared-link-root',
       ide: 'claude-code',
       linkPath: skillsRoot,
+      linkPaths: [skillsRoot],
       resolvedPath: externalRoot,
+      resolvedPaths: [externalRoot],
       packageNames: ['review'],
       affectedFileCount: 1,
     }]);
@@ -466,6 +468,52 @@ describe('Deploy operations', () => {
     expect(result.status).toBe('succeeded');
     expect(fs.readFileSync(externalSkill, 'utf8')).toBe('# Review\n');
     expect(readState(context).managedInventory).not.toHaveProperty(externalSkill);
+  });
+
+  it('aggregates multiple nested links inside one Skill package into one outcome', async () => {
+    const sourceReference = path.join(
+      repositoryPath,
+      'common',
+      'skills',
+      'review',
+      'references',
+      'guide.md',
+    );
+    const packageRoot = path.join(homeDir, '.claude', 'skills', 'review');
+    const skillLink = path.join(packageRoot, 'SKILL.md');
+    const referencesLink = path.join(packageRoot, 'references');
+    const externalSkill = path.join(testRoot, 'external-review.md');
+    const externalReferences = path.join(testRoot, 'external-references');
+    fs.rmSync(path.join(homeDir, '.claude', 'skills'), { recursive: true });
+    fs.mkdirSync(path.dirname(sourceReference), { recursive: true });
+    fs.mkdirSync(packageRoot, { recursive: true });
+    fs.mkdirSync(externalReferences, { recursive: true });
+    fs.writeFileSync(sourceReference, '# Guide\n');
+    fs.writeFileSync(externalSkill, '# Review\n');
+    fs.writeFileSync(path.join(externalReferences, 'guide.md'), '# Guide\n');
+    fs.symlinkSync(externalSkill, skillLink);
+    fs.symlinkSync(
+      externalReferences,
+      referencesLink,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.linkOutcomes).toEqual([expect.objectContaining({
+      status: 'satisfied-via-link',
+      ownership: 'external',
+      scope: 'skill-package',
+      linkPath: [referencesLink, skillLink].sort()[0],
+      linkPaths: [referencesLink, skillLink].sort(),
+      resolvedPaths: [externalReferences, externalSkill].sort(),
+      packageNames: ['review'],
+      affectedFileCount: 2,
+    })]);
+    expect(plan.issues.filter((issue) =>
+      issue.code.startsWith('deploy.skillsLinked.satisfied.'))).toHaveLength(1);
+    expect(plan.changes.some((change) =>
+      change.capability === 'skills' && change.targetPath.startsWith(packageRoot))).toBe(false);
   });
 
   it('blocks a divergent external Skill link once at package-root granularity', async () => {

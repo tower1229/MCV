@@ -552,12 +552,14 @@ function createOverviewStatusViewModel(report) {
             state: pending.total > 0 ? 'Review' : 'None',
             details: `${pending.total} changes (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete)`,
         },
-        linkedSkills: report.linkOutcomes.map((outcome) => ({
-            key: `linked-skills:${outcome.ide}:${outcome.linkPath}`,
-            tone: outcome.status === 'satisfied-via-link' ? 'info' : 'error',
+        linkedSkills: summarizeLinkOutcomes(report.linkOutcomes).map((summary) => ({
+            key: `linked-skills:${summary.key}`,
+            tone: summary.status === 'satisfied-via-link' ? 'info' : 'error',
             label: 'Linked Skills',
-            state: outcome.status === 'satisfied-via-link' ? 'Satisfied via link' : 'Blocked',
-            details: `External · ${outcome.packageNames.length} ${outcome.packageNames.length === 1 ? 'package' : 'packages'} · ${outcome.affectedFileCount} affected ${outcome.affectedFileCount === 1 ? 'file' : 'files'}`,
+            state: summary.outcomeCount === 1
+                ? summary.state
+                : `${summary.outcomeCount} ${summary.state.toLowerCase()} outcomes`,
+            details: `External · ${summary.packageCount} ${summary.packageCount === 1 ? 'package' : 'packages'} · ${summary.affectedFileCount} affected ${summary.affectedFileCount === 1 ? 'file' : 'files'}`,
         })),
         drift: {
             key: 'drift',
@@ -614,6 +616,21 @@ function createOverviewStatusViewModel(report) {
             details: issue.message,
         })),
     };
+}
+function summarizeLinkOutcomes(outcomes) {
+    return ['satisfied-via-link', 'blocked'].flatMap((status) => {
+        const matching = outcomes.filter((outcome) => outcome.status === status);
+        if (matching.length === 0)
+            return [];
+        return [{
+                key: status,
+                status,
+                state: status === 'satisfied-via-link' ? 'Satisfied via link' : 'Blocked',
+                outcomeCount: matching.length,
+                packageCount: matching.reduce((total, outcome) => total + outcome.packageNames.length, 0),
+                affectedFileCount: matching.reduce((total, outcome) => total + outcome.affectedFileCount, 0),
+            }];
+    });
 }
 function statusItemText(item, includeDetails = true) {
     return includeDetails && item.details
@@ -733,10 +750,14 @@ function DeploySelection({ workflow, terminalRows, }) {
     const tree = buildDeploySelectionTree(workflow.plan);
     const visible = flattenDeploySelectionTree(tree, workflow.expandedNodeIds);
     const advanced = workflow.plan.changes.filter((change) => change.group === 'advanced');
-    const viewport = listViewport(visible, workflow.cursor, Math.max(1, terminalRows - (terminalRows <= 12 ? 9 : 10)));
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: ["Repository: ", workflow.plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: [workflow.plan.changes.length, " changes \u00B7 ", workflow.selectedIds.length, " selected"] }), workflow.plan.linkOutcomes.map((outcome) => (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: [outcome.status === 'satisfied-via-link'
+    const linkOutcomeSummaries = summarizeLinkOutcomes(workflow.plan.linkOutcomes);
+    const linkOutcomeRows = workflow.plan.linkOutcomes.length === 1
+        ? 2
+        : linkOutcomeSummaries.length;
+    const viewport = listViewport(visible, workflow.cursor, Math.max(1, terminalRows - (terminalRows <= 12 ? 9 : 10) - linkOutcomeRows));
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: ["Repository: ", workflow.plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: [workflow.plan.changes.length, " changes \u00B7 ", workflow.selectedIds.length, " selected"] }), workflow.plan.linkOutcomes.length === 1 && workflow.plan.linkOutcomes.map((outcome) => (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: [outcome.status === 'satisfied-via-link'
                                 ? 'Satisfied via link'
-                                : `Blocked · ${outcome.reason?.replaceAll('-', ' ') ?? 'unclassified'}`, ' ', "\u00B7 External \u00B7 ", outcome.packageNames.length, " Skill", ' ', outcome.packageNames.length === 1 ? 'package' : 'packages', " \u00B7", ' ', outcome.affectedFileCount, " affected", ' ', outcome.affectedFileCount === 1 ? 'file' : 'files'] }), _jsxs(Text, { wrap: "truncate-middle", children: ['  ', outcome.linkPath, outcome.resolvedPath ? ` → ${outcome.resolvedPath}` : ''] })] }, `${outcome.ide}:${outcome.linkPath}`))), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: { node, depth } }, index) => {
+                                : `Blocked · ${outcome.reason?.replaceAll('-', ' ') ?? 'unclassified'}`, ' ', "\u00B7 External \u00B7 ", outcome.packageNames.length, " Skill", ' ', outcome.packageNames.length === 1 ? 'package' : 'packages', " \u00B7", ' ', outcome.affectedFileCount, " affected", ' ', outcome.affectedFileCount === 1 ? 'file' : 'files', " \u00B7", ' ', outcome.linkPaths.length, " ", outcome.linkPaths.length === 1 ? 'link' : 'links'] }), _jsxs(Text, { wrap: "truncate-middle", children: ['  ', outcome.linkPath, outcome.resolvedPath ? ` → ${outcome.resolvedPath}` : ''] })] }, `${outcome.ide}:${outcome.linkPath}`))), workflow.plan.linkOutcomes.length > 1 && linkOutcomeSummaries.map((summary) => (_jsxs(Text, { wrap: "truncate-middle", children: [summary.outcomeCount, " external ", summary.state.toLowerCase(), " outcomes \u00B7", ' ', summary.packageCount, " Skill ", summary.packageCount === 1 ? 'package' : 'packages', " \u00B7", ' ', summary.affectedFileCount, " affected", ' ', summary.affectedFileCount === 1 ? 'file' : 'files'] }, summary.key))), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: { node, depth } }, index) => {
                 const visibleIndex = viewport.start + index;
                 const expanded = workflow.expandedNodeIds.includes(node.id);
                 const disclosure = node.children.length === 0

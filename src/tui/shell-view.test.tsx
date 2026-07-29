@@ -475,7 +475,9 @@ describe('TUI Shell view', () => {
       scope: 'shared-link-root',
       ide: 'claude-code',
       linkPath: '/Users/张涛/.claude/skills',
+      linkPaths: ['/Users/张涛/.claude/skills'],
       resolvedPath: '/Users/张涛/.agents/skills',
+      resolvedPaths: ['/Users/张涛/.agents/skills'],
       packageNames: ['review'],
       affectedFileCount: 42,
     }]);
@@ -838,7 +840,9 @@ describe('TUI Shell view', () => {
       scope: 'shared-link-root',
       ide: 'codex',
       linkPath: '/Users/张涛/.claude/skills',
+      linkPaths: ['/Users/张涛/.claude/skills'],
       resolvedPath: '/Users/张涛/.agents/skills',
+      resolvedPaths: ['/Users/张涛/.agents/skills'],
       packageNames: ['hatch-pet', 'review'],
       affectedFileCount: 18,
     }];
@@ -853,6 +857,44 @@ describe('TUI Shell view', () => {
       'Satisfied via link · External · 2 Skill packages · 18 affected files',
     );
     expect(rendered).toContain('/Users/张涛/.claude/skills → /Users/张涛/.agents/skills');
+  });
+
+  it('bounds many linked-Skill outcomes in Deploy and Overview viewports', () => {
+    const outcomes = Array.from({ length: 20 }, (_, index): DeployPlan['linkOutcomes'][number] => ({
+      status: index < 18 ? 'satisfied-via-link' : 'blocked',
+      ownership: 'external',
+      scope: 'skill-package',
+      ide: 'claude-code',
+      linkPath: `/Users/张涛/.claude/skills/skill-${index}`,
+      linkPaths: [`/Users/张涛/.claude/skills/skill-${index}`],
+      resolvedPath: `/Volumes/config/skills/skill-${index}`,
+      resolvedPaths: [`/Volumes/config/skills/skill-${index}`],
+      packageNames: [`skill-${index}`],
+      affectedFileCount: 10,
+      ...(index < 18 ? {} : { reason: 'divergent' as const }),
+    }));
+    const plan = largeDeployPlan();
+    plan.linkOutcomes = outcomes;
+    const deploy = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan,
+    });
+    const overview = overviewState(outcomes);
+
+    const deployRendered = renderToString(
+      <ShellView state={deploy} terminalRows={24} />,
+      { columns: 80 },
+    );
+    const overviewRendered = renderToString(
+      <ShellView state={overview} terminalColumns={72} terminalRows={16} />,
+      { columns: 72 },
+    );
+    const normalized = `${deployRendered}\n${overviewRendered}`.replace(/\s+/g, ' ');
+
+    expect(deployRendered.split('\n').length).toBeLessThanOrEqual(24);
+    expect(normalized).toContain('18 external satisfied via link outcomes');
+    expect(normalized).toContain('2 external blocked outcomes');
+    expect(normalized).not.toContain('/Volumes/config/skills/skill-19');
   });
 
   it('summarizes a large Deploy Plan by capability within a 24-row terminal', () => {
