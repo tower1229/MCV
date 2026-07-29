@@ -500,7 +500,9 @@ function pageControls(
       case 'diff':
         return '←/Escape Close Diff   q Quit   Ctrl+C Cancel';
       case 'confirmation':
-        return '↑↓/Pg Move   Home/End   Space Confirm Warning   Enter Apply   ←/Escape Back   q Quit   Ctrl+C Cancel';
+        return terminalRows <= 12
+          ? '↑↓/Pg Move   Home/End   Space Confirm   Enter Apply   ← Back   q Quit'
+          : '↑↓/Pg Move   Home/End   Space Confirm Warning   Enter Apply   ←/Escape Back   q Quit   Ctrl+C Cancel';
       case 'applying':
       case 'regenerating':
         return undefined;
@@ -1292,7 +1294,12 @@ function DeployWorkflow({
     case 'diff':
       return <DeployDiff workflow={workflow} />;
     case 'confirmation':
-      return <DeployConfirmation workflow={workflow} />;
+      return (
+        <DeployConfirmation
+          workflow={workflow}
+          terminalRows={terminalRows}
+        />
+      );
     case 'applying':
       return (
         <Box flexDirection="column">
@@ -1510,27 +1517,42 @@ function DeployPreviewView({
 
 function DeployConfirmation({
   workflow,
+  terminalRows,
 }: {
   workflow: Extract<DeployWorkflowState, { status: 'confirmation' }>;
+  terminalRows: number;
 }): ReactNode {
   const warnings = deployWarnings(workflow.plan);
   const allConfirmed = warnings.every((warning) =>
     workflow.confirmedIssueCodes.includes(warning.code));
+  const viewport = listViewport(
+    warnings,
+    workflow.warningCursor,
+    Math.max(1, terminalRows - (terminalRows <= 12 ? 8 : 10)),
+  );
   return (
     <Box flexDirection="column">
       <Text>{workflow.selectedIds.length} selected changes</Text>
       {warnings.length > 0 && <Text>Warnings require explicit confirmation:</Text>}
-      {warnings.map((warning, index) => (
+      {!viewport.combinedIndicator && viewport.hiddenBefore > 0 && (
+        <Text dimColor>  … {viewport.hiddenBefore} earlier</Text>
+      )}
+      {viewport.items.map(({ item: warning }, index) => (
         <Text key={warning.code}>
-          {index === workflow.warningCursor ? '>' : ' '}{' '}
+          {viewport.start + index === workflow.warningCursor ? '>' : ' '}{' '}
           [{workflow.confirmedIssueCodes.includes(warning.code) ? 'x' : ' '}] {warning.message}
         </Text>
       ))}
+      {!viewport.combinedIndicator && viewport.hiddenAfter > 0 && (
+        <Text dimColor>  … {viewport.hiddenAfter} more</Text>
+      )}
+      {viewport.combinedIndicator && (
+        <Text dimColor>
+          {'  '}… {viewport.hiddenBefore} earlier · {viewport.hiddenAfter} more
+        </Text>
+      )}
       {!allConfirmed && (
-        <>
-          <Text> </Text>
-          <Text color="yellow">Apply disabled: confirm every warning.</Text>
-        </>
+        <Text color="yellow">Apply disabled: confirm every warning.</Text>
       )}
     </Box>
   );

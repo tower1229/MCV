@@ -589,6 +589,13 @@ describe('TUI Shell reducer', () => {
     expect(state.page).toMatchObject({
       workflow: { cursor: 0, expandedNodeIds: [] },
     });
+    state = shellReducer(state, { type: 'deploy.back' });
+    expect(state.page).toEqual({
+      route: 'overview',
+      status: 'loading',
+    });
+    state = shellReducer(state, { type: 'navigate', route: 'deploy' });
+    state = shellReducer(state, { type: 'deploy.loaded', plan: deployPlan() });
     state = shellReducer(state, {
       type: 'deploy.focus',
       position: 'last',
@@ -603,11 +610,11 @@ describe('TUI Shell reducer', () => {
 
   it('moves, pages, and backs out of Deploy warning confirmation', () => {
     const plan = deployPlan();
-    plan.issues.push({
-      severity: 'warning',
-      code: 'deploy.warning.second',
-      message: 'Review the second warning.',
-    });
+    plan.issues.push(...Array.from({ length: 14 }, (_, index) => ({
+      severity: 'warning' as const,
+      code: `deploy.warning.${index + 2}`,
+      message: `Review warning ${index + 2}.`,
+    })));
     let state = shellReducer(createInitialShellState('deploy'), {
       type: 'deploy.loaded',
       plan,
@@ -615,9 +622,13 @@ describe('TUI Shell reducer', () => {
     state = shellReducer(state, { type: 'deploy.move', delta: 1 });
     state = shellReducer(state, { type: 'deploy.continue' });
 
-    state = shellReducer(state, { type: 'deploy.move', delta: 1 });
+    state = shellReducer(state, { type: 'deploy.move', delta: 10 });
     expect(state.page).toMatchObject({
-      workflow: { status: 'confirmation', warningCursor: 1 },
+      workflow: { status: 'confirmation', warningCursor: 10 },
+    });
+    state = shellReducer(state, { type: 'deploy.move', delta: 100 });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'confirmation', warningCursor: 14 },
     });
     state = shellReducer(state, {
       type: 'deploy.focus',
@@ -631,7 +642,7 @@ describe('TUI Shell reducer', () => {
       position: 'last',
     });
     expect(state.page).toMatchObject({
-      workflow: { status: 'confirmation', warningCursor: 1 },
+      workflow: { status: 'confirmation', warningCursor: 14 },
     });
     state = shellReducer(state, { type: 'deploy.back' });
     expect(state.page).toMatchObject({

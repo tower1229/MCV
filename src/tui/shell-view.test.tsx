@@ -674,6 +674,31 @@ describe('TUI Shell view', () => {
     expect(noColor).toContain('[ ]   × Destructive · [delete]');
   });
 
+  it('keeps a focused Deploy warning visible in a short terminal viewport', () => {
+    const plan = deployPlan();
+    plan.issues.push(...Array.from({ length: 14 }, (_, index) => ({
+      severity: 'warning' as const,
+      code: `deploy.warning.${index + 2}`,
+      message: `Review warning ${index + 2}.`,
+    })));
+    let state = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan,
+    });
+    state = shellReducer(state, { type: 'deploy.continue' });
+    state = shellReducer(state, { type: 'deploy.focus', position: 'last' });
+
+    const rendered = renderToString(
+      <ShellView state={state} terminalRows={10} />,
+      { columns: 80 },
+    );
+
+    expect(rendered.split('\n').length).toBeLessThanOrEqual(10);
+    expect(rendered).toContain('> [ ] Review warning 15.');
+    expect(rendered).toContain('earlier');
+    expect(rendered).not.toContain('A target needs explicit review.');
+  });
+
   it('expands a Skill capability into one package summary', () => {
     const loaded = shellReducer(createInitialShellState('deploy'), {
       type: 'deploy.loaded',

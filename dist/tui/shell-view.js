@@ -328,7 +328,9 @@ function pageControls(state, terminalRows) {
             case 'diff':
                 return '←/Escape Close Diff   q Quit   Ctrl+C Cancel';
             case 'confirmation':
-                return '↑↓/Pg Move   Home/End   Space Confirm Warning   Enter Apply   ←/Escape Back   q Quit   Ctrl+C Cancel';
+                return terminalRows <= 12
+                    ? '↑↓/Pg Move   Home/End   Space Confirm   Enter Apply   ← Back   q Quit'
+                    : '↑↓/Pg Move   Home/End   Space Confirm Warning   Enter Apply   ←/Escape Back   q Quit   Ctrl+C Cancel';
             case 'applying':
             case 'regenerating':
                 return undefined;
@@ -653,7 +655,7 @@ function DeployWorkflow({ workflow, terminalRows, }) {
         case 'diff':
             return _jsx(DeployDiff, { workflow: workflow });
         case 'confirmation':
-            return _jsx(DeployConfirmation, { workflow: workflow });
+            return (_jsx(DeployConfirmation, { workflow: workflow, terminalRows: terminalRows }));
         case 'applying':
             return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(StatusLine, { tone: "info", label: "Applying", children: [workflow.selectedIds.length, " selected changes transactionally..."] }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait; input is disabled during backup, Apply, and rollback." })] }));
         case 'regenerating':
@@ -730,10 +732,11 @@ function DeployPreviewView({ preview, }) {
     }
     return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: preview.targetPath }), preview.diff.split('\n').map((line, index) => (_jsxs(Text, { children: ['  ', line] }, `${preview.targetPath}:${index}`)))] }));
 }
-function DeployConfirmation({ workflow, }) {
+function DeployConfirmation({ workflow, terminalRows, }) {
     const warnings = deployWarnings(workflow.plan);
     const allConfirmed = warnings.every((warning) => workflow.confirmedIssueCodes.includes(warning.code));
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: [workflow.selectedIds.length, " selected changes"] }), warnings.length > 0 && _jsx(Text, { children: "Warnings require explicit confirmation:" }), warnings.map((warning, index) => (_jsxs(Text, { children: [index === workflow.warningCursor ? '>' : ' ', ' ', "[", workflow.confirmedIssueCodes.includes(warning.code) ? 'x' : ' ', "] ", warning.message] }, warning.code))), !allConfirmed && (_jsxs(_Fragment, { children: [_jsx(Text, { children: " " }), _jsx(Text, { color: "yellow", children: "Apply disabled: confirm every warning." })] }))] }));
+    const viewport = listViewport(warnings, workflow.warningCursor, Math.max(1, terminalRows - (terminalRows <= 12 ? 8 : 10)));
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: [workflow.selectedIds.length, " selected changes"] }), warnings.length > 0 && _jsx(Text, { children: "Warnings require explicit confirmation:" }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: warning }, index) => (_jsxs(Text, { children: [viewport.start + index === workflow.warningCursor ? '>' : ' ', ' ', "[", workflow.confirmedIssueCodes.includes(warning.code) ? 'x' : ' ', "] ", warning.message] }, warning.code))), !viewport.combinedIndicator && viewport.hiddenAfter > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenAfter, " more"] })), viewport.combinedIndicator && (_jsxs(Text, { dimColor: true, children: ['  ', "\u2026 ", viewport.hiddenBefore, " earlier \u00B7 ", viewport.hiddenAfter, " more"] })), !allConfirmed && (_jsx(Text, { color: "yellow", children: "Apply disabled: confirm every warning." }))] }));
 }
 function RestoreWorkflow({ workflow, terminalRows, }) {
     switch (workflow.status) {

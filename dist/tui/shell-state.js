@@ -301,8 +301,21 @@ export function shellReducer(state, action) {
             return updateDeployWorkflow(state, toggleDeployWarning);
         case 'deploy.continue':
             return updateDeployWorkflow(state, continueDeployWorkflow);
-        case 'deploy.back':
+        case 'deploy.back': {
+            if (state.page.route === 'deploy'
+                && state.page.status === 'ready'
+                && state.page.workflow.status === 'selection') {
+                const workflow = backDeployWorkflow(state.page.workflow);
+                if (workflow === state.page.workflow) {
+                    return {
+                        ...state,
+                        scrollOffset: 0,
+                        page: { route: 'overview', status: 'loading' },
+                    };
+                }
+            }
             return updateDeployWorkflow(state, backDeployWorkflow);
+        }
         case 'deploy.apply':
             return updateDeployWorkflow(state, beginDeployApply);
         case 'deploy.applied':
@@ -759,7 +772,7 @@ function moveDeployCursor(workflow, delta) {
     if (workflow.status === 'confirmation') {
         return {
             ...workflow,
-            warningCursor: wrapIndex(workflow.warningCursor + delta, deployWarnings(workflow.plan).length),
+            warningCursor: clampIndex(workflow.warningCursor + delta, deployWarnings(workflow.plan).length),
         };
     }
     return workflow;
