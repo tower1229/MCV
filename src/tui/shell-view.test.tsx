@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { CapturePlan, CaptureResult } from '../operations/capture.js';
 import type { DeployPlan, DeployResult } from '../operations/deploy.js';
 import type { RestorePlan, RestoreResult } from '../operations/restore.js';
+import type { RepositoryReport } from '../operations/repository.js';
 import type { StatusReport } from '../operations/status.js';
 import {
   maximumPageScrollOffset,
@@ -199,10 +200,30 @@ describe('TUI Shell view', () => {
 
   it('sends Repository write Results back to Overview', () => {
     const state = repositoryFailureResultState();
+    const rendered = renderToString(<ShellView state={state} />);
 
-    expect(renderToString(<ShellView state={state} />)).toContain(
-      'Enter/← Refresh Overview   q Quit',
+    expect(rendered).toContain(
+      'Enter/←/Escape Refresh Overview   q Quit',
     );
+    expect(rendered).toContain(
+      '× Failed: Bind: The selected directory is not a valid Repository.',
+    );
+  });
+
+  it('renders Repository menu focus, health, and path mode with shared status tones', () => {
+    const menu = repositoryRecoveryMenuState();
+    const path = shellReducer(menu, { type: 'repository.move', delta: 1 });
+    const pathEntry = shellReducer(path, { type: 'repository.enterPath' });
+    const renderedMenu = renderToString(<ShellView state={menu} />);
+    const renderedPath = renderToString(<ShellView state={pathEntry} />);
+
+    expect(renderedMenu).toContain('× Blocked: Repository is not ready.');
+    expect(renderedMenu).toContain('› Review Migration Plan');
+    expect(renderedMenu).toContain('→/Enter Open');
+    expect(renderedPath).toContain(
+      '● Input: Enter the path to an existing MCV Repository:',
+    );
+    expect(renderedPath).toContain('←/Escape Back');
   });
 
   it('renders an actionable failure state', () => {
@@ -1461,6 +1482,32 @@ function repositoryFailureResultState(): ShellState {
       },
     },
   } as unknown as ShellState;
+}
+
+function repositoryRecoveryMenuState(): ShellState {
+  const report: RepositoryReport = {
+    schemaVersion: 1,
+    operation: 'repository',
+    status: 'reported',
+    ready: false,
+    repositoryPath: '/tmp/repository',
+    repositoryId: 'repository-id',
+    repositorySchemaVersion: 1,
+    valid: false,
+    changes: [],
+    issues: [{
+      severity: 'error',
+      code: 'repository.migrationRequired',
+      message: 'Repository schema migration is required.',
+    }],
+    nextActions: ['Review the Migration Plan.'],
+  };
+  return shellReducer(createInitialShellState('capture'), {
+    type: 'repository.loaded',
+    report,
+    currentDirectory: report,
+    resumeRoute: 'capture',
+  });
 }
 
 function overviewState(): ShellState {

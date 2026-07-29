@@ -18,7 +18,7 @@ export function ShellView({ state, terminalColumns, terminalRows, }) {
     const contentRows = pageContentRows(state, rows, columns);
     return (_jsxs(Box, { flexDirection: "column", children: [!compactOverview && (_jsxs(_Fragment, { children: [_jsx(Text, { bold: true, children: "MCV" }), _jsx(Text, { children: title }), _jsx(Text, { children: " " })] })), _jsx(Box, { flexDirection: "column", maxHeight: scrollable ? contentRows : undefined, overflowY: scrollable ? 'hidden' : undefined, children: _jsxs(Box, { flexDirection: "column", marginTop: scrollable ? -state.scrollOffset : undefined, children: [page.status === 'loading' && (_jsxs(StatusLine, { tone: "info", label: "Loading", children: [title, "..."] })), page.status === 'failure' && (_jsx(StatusLine, { tone: "error", label: "Error", children: page.message })), page.status === 'ready' && page.route === 'overview' && (_jsx(Overview, { report: page.report, focusId: state.overviewFocusId, terminalColumns: columns, terminalRows: rows })), page.status === 'ready' && page.route === 'repository' && (page.workflow.status === 'result'
                             ? _jsx(ScrollablePageContent, { state: state })
-                            : _jsx(RepositoryWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'environment' && (_jsx(ScrollablePageContent, { state: state })), page.status === 'ready' && page.route === 'help' && (_jsx(ScrollablePageContent, { state: state })), page.status === 'ready' && page.route === 'capture' && (page.workflow.status === 'result'
+                            : (_jsx(RepositoryWorkflow, { workflow: page.workflow, latestResult: state.repositoryResult }))), page.status === 'ready' && page.route === 'environment' && (_jsx(ScrollablePageContent, { state: state })), page.status === 'ready' && page.route === 'help' && (_jsx(ScrollablePageContent, { state: state })), page.status === 'ready' && page.route === 'capture' && (page.workflow.status === 'result'
                             ? _jsx(ScrollablePageContent, { state: state })
                             : (_jsx(CaptureWorkflow, { workflow: page.workflow, terminalRows: rows }))), page.status === 'ready' && page.route === 'deploy' && (page.workflow.status === 'result'
                             ? _jsx(ScrollablePageContent, { state: state })
@@ -137,15 +137,21 @@ function scrollablePageLines(state) {
             return [];
         const { operation, result } = page.workflow.step;
         if (result.status === 'succeeded') {
-            return pageLines('repository-success', [`${operationLabel(operation)} succeeded.`], () => 'green');
+            return statusPageLines('repository-success', 'success', [
+                `Succeeded: ${operationLabel(operation)} completed.`,
+            ]);
         }
         const message = result.status === 'failed'
             ? result.error.message
             : result.issues[0]?.message ?? 'The operation was blocked.';
-        return pageLines('repository-failure', [
-            `${operationLabel(operation)} failed: ${message}`,
+        return statusPageLines(result.status === 'blocked'
+            ? 'repository-blocked'
+            : 'repository-failure', 'error', [
+            result.status === 'blocked'
+                ? `Blocked: ${operationLabel(operation)} did not change Repository state: ${message}`
+                : `Failed: ${operationLabel(operation)}: ${message}`,
             ...result.nextActions.map((action) => `Next: ${action}`),
-        ], (index) => index === 0 ? 'red' : undefined);
+        ]);
     }
     if (page.workflow.status !== 'result')
         return [];
@@ -292,17 +298,17 @@ function pageControls(state, terminalRows) {
             return 'q Quit   Ctrl+C Cancel';
         switch (page.workflow.status) {
             case 'menu':
-                return '↑↓ Move   Enter Select   q Quit   Ctrl+C Cancel';
+                return '↑↓ Move   →/Enter Open   ←/Escape Overview   q Quit   Ctrl+C Cancel';
             case 'path':
-                return 'Type path   Enter Review Bind   Escape Back   Ctrl+C Cancel';
+                return 'Type path   Enter Review Bind   ←/Escape Back   Ctrl+C Cancel';
             case 'plan':
                 return page.workflow.step.plan.status === 'planned'
-                    ? 'Enter Apply   Escape Back   Ctrl+C Cancel'
-                    : 'Escape Back   Ctrl+C Cancel';
+                    ? 'Enter Apply   ←/Escape Back   Ctrl+C Cancel'
+                    : '←/Escape Back   Ctrl+C Cancel';
             case 'applying':
                 return undefined;
             case 'result':
-                return '↑↓ Scroll   Enter/← Refresh Overview   q Quit';
+                return '↑↓ Scroll   Enter/←/Escape Refresh Overview   q Quit';
         }
     }
     if (page.status !== 'ready') {
@@ -391,15 +397,19 @@ function primaryNavigationControls() {
         'Accelerators: c Capture   d Deploy   s Restore   r Repository   h Help',
     ].join('\n');
 }
-function RepositoryWorkflow({ workflow, }) {
+function RepositoryWorkflow({ workflow, latestResult, }) {
     if (workflow.status === 'menu') {
         const report = workflow.report.repositoryPath
             ? workflow.report
             : workflow.currentDirectory;
-        return (_jsxs(Box, { flexDirection: "column", children: [_jsx(RepositoryIdentity, { report: report }), workflow.report.repositoryPath && !workflow.report.valid && (_jsx(Text, { color: "red", children: "Repository writes are blocked until the binding is recovered." })), _jsx(Text, { children: " " }), workflow.actions.map((action, index) => (_jsxs(Text, { children: [index === workflow.cursor ? '>' : ' ', ' ', repositoryActionLabel(action, workflow.resumeRoute)] }, action)))] }));
+        const focusStyle = statusToneStyle('info');
+        return (_jsxs(Box, { flexDirection: "column", children: [_jsx(RepositoryIdentity, { report: report }), latestResult?.result.status === 'succeeded' && (_jsxs(StatusLine, { tone: "success", label: "Succeeded", children: [operationLabel(latestResult.operation), " completed."] })), workflow.report.repositoryPath && !workflow.report.valid && (_jsx(StatusLine, { tone: "error", label: "Blocked", children: "Repository writes are blocked until the binding is recovered." })), _jsx(Text, { children: " " }), workflow.actions.map((action, index) => {
+                    const focused = index === workflow.cursor;
+                    return (_jsxs(Text, { color: focused ? focusStyle.color : undefined, children: [focused ? '›' : ' ', ' ', repositoryActionLabel(action, workflow.resumeRoute)] }, action));
+                })] }));
     }
     if (workflow.status === 'path') {
-        return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "Enter the path to an existing MCV Repository:" }), _jsxs(Text, { children: ['> ', workflow.value] })] }));
+        return (_jsxs(Box, { flexDirection: "column", children: [_jsx(StatusLine, { tone: "info", label: "Input", children: "Enter the path to an existing MCV Repository:" }), _jsxs(Text, { children: ['> ', workflow.value] })] }));
     }
     if (workflow.status === 'applying') {
         return (_jsxs(StatusLine, { tone: "info", label: "Applying", children: ["Reviewed ", operationLabel(workflow.step.operation), " Plan..."] }));
@@ -415,10 +425,30 @@ function RepositoryWorkflow({ workflow, }) {
         return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { color: "red", children: [operationLabel(operation), " failed: ", message] }), result.nextActions.map((action) => (_jsxs(Text, { children: ["Next: ", action] }, action)))] }));
     }
     const { operation, plan } = workflow.step;
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: ["Repository: ", plan.repositoryPath ?? 'not bound'] }), operation === 'unbind' && (_jsx(Text, { children: "This removes only the local binding. Repository files will not be changed." })), plan.changes.map((change) => (_jsxs(Text, { children: ["[", change.kind, "] ", repositoryChangeLabel(change)] }, change.id))), plan.issues.map((issue) => (_jsx(Text, { color: issue.severity === 'error' ? 'red' : 'yellow', children: issue.message }, issue.code))), plan.status === 'failed' && (_jsx(Text, { color: "red", children: "Apply disabled until the Repository selection is fixed." }))] }));
+    const hasError = plan.status === 'failed'
+        || plan.issues.some((issue) => issue.severity === 'error'
+            || issue.severity === 'decisionRequired');
+    const hasWarning = plan.issues.some((issue) => issue.severity === 'warning');
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(StatusLine, { tone: hasError ? 'error' : hasWarning ? 'warning' : 'info', label: hasError ? 'Blocked' : hasWarning ? 'Warning' : 'Ready', children: [operationLabel(operation), " Plan ", hasError
+                        ? 'cannot be applied.'
+                        : hasWarning
+                            ? 'requires review.'
+                            : 'reviewed.'] }), _jsxs(Text, { children: ["Repository: ", plan.repositoryPath ?? 'not bound'] }), operation === 'unbind' && (_jsxs(_Fragment, { children: [_jsx(StatusLine, { tone: "error", label: "Destructive", children: "Local binding removal." }), _jsx(Text, { children: "This removes only the local binding. Repository files will not be changed." })] })), plan.changes.map((change) => (_jsxs(Text, { children: ["[", change.kind, "] ", repositoryChangeLabel(change)] }, change.id))), plan.issues.map((issue) => (_jsx(StatusLine, { tone: repositoryIssueTone(issue.severity), label: repositoryIssueLabel(issue.severity), children: issue.message }, issue.code))), plan.status === 'failed' && (_jsx(Text, { color: "red", children: "Apply disabled until the Repository selection is fixed." }))] }));
 }
 function RepositoryIdentity({ report, }) {
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: ["Path: ", report.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: ["Repository ID: ", report.repositoryId ?? 'unknown'] }), _jsxs(Text, { children: ["Schema: ", report.repositorySchemaVersion ?? 'unknown'] }), report.git && (_jsxs(Text, { children: ["Git: ", report.git.clean ? 'clean' : `${report.git.uncommittedChanges} uncommitted changes`, report.git.branch ? ` (${report.git.branch})` : ''] })), report.issues.map((issue) => (_jsx(Text, { color: issue.severity === 'error' ? 'red' : 'yellow', children: issue.message }, issue.code)))] }));
+    const hasError = report.issues.some((issue) => issue.severity === 'error');
+    const hasWarning = report.issues.some((issue) => issue.severity === 'warning');
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(StatusLine, { tone: report.valid ? 'success' : hasError ? 'error' : hasWarning ? 'warning' : 'muted', label: report.valid ? 'Valid' : hasError ? 'Blocked' : hasWarning ? 'Warning' : 'Unavailable', children: ["Repository ", report.valid ? 'is ready.' : 'is not ready.'] }), _jsxs(Text, { children: ["Path: ", report.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: ["Repository ID: ", report.repositoryId ?? 'unknown'] }), _jsxs(Text, { children: ["Schema: ", report.repositorySchemaVersion ?? 'unknown'] }), report.git && (_jsxs(Text, { children: ["Git: ", report.git.clean ? 'clean' : `${report.git.uncommittedChanges} uncommitted changes`, report.git.branch ? ` (${report.git.branch})` : ''] })), report.issues.map((issue) => (_jsx(StatusLine, { tone: repositoryIssueTone(issue.severity), label: repositoryIssueLabel(issue.severity), children: issue.message }, issue.code)))] }));
+}
+function repositoryIssueTone(severity) {
+    if (severity === 'notice')
+        return 'info';
+    return severity === 'warning' ? 'warning' : 'error';
+}
+function repositoryIssueLabel(severity) {
+    if (severity === 'notice')
+        return 'Notice';
+    return severity === 'warning' ? 'Warning' : 'Blocked';
 }
 function repositoryActionLabel(action, resumeRoute) {
     switch (action) {

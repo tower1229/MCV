@@ -104,7 +104,12 @@ export function ShellView({
           {page.status === 'ready' && page.route === 'repository' && (
             page.workflow.status === 'result'
               ? <ScrollablePageContent state={state} />
-              : <RepositoryWorkflow workflow={page.workflow} />
+              : (
+                <RepositoryWorkflow
+                  workflow={page.workflow}
+                  latestResult={state.repositoryResult}
+                />
+              )
           )}
           {page.status === 'ready' && page.route === 'environment' && (
             <ScrollablePageContent state={state} />
@@ -295,19 +300,25 @@ function scrollablePageLines(state: ShellState): ScrollablePageLine[] {
     if (page.workflow.status !== 'result') return [];
     const { operation, result } = page.workflow.step;
     if (result.status === 'succeeded') {
-      return pageLines(
-        'repository-success',
-        [`${operationLabel(operation)} succeeded.`],
-        () => 'green',
-      );
+      return statusPageLines('repository-success', 'success', [
+        `Succeeded: ${operationLabel(operation)} completed.`,
+      ]);
     }
     const message = result.status === 'failed'
       ? result.error.message
       : result.issues[0]?.message ?? 'The operation was blocked.';
-    return pageLines('repository-failure', [
-      `${operationLabel(operation)} failed: ${message}`,
+    return statusPageLines(
+      result.status === 'blocked'
+        ? 'repository-blocked'
+        : 'repository-failure',
+      'error',
+      [
+      result.status === 'blocked'
+        ? `Blocked: ${operationLabel(operation)} did not change Repository state: ${message}`
+        : `Failed: ${operationLabel(operation)}: ${message}`,
       ...result.nextActions.map((action) => `Next: ${action}`),
-    ], (index) => index === 0 ? 'red' : undefined);
+      ],
+    );
   }
   if (page.workflow.status !== 'result') return [];
   if (page.route === 'capture') {
@@ -487,17 +498,17 @@ function pageControls(
     if (page.status !== 'ready') return 'q Quit   Ctrl+C Cancel';
     switch (page.workflow.status) {
       case 'menu':
-        return '↑↓ Move   Enter Select   q Quit   Ctrl+C Cancel';
+        return '↑↓ Move   →/Enter Open   ←/Escape Overview   q Quit   Ctrl+C Cancel';
       case 'path':
-        return 'Type path   Enter Review Bind   Escape Back   Ctrl+C Cancel';
+        return 'Type path   Enter Review Bind   ←/Escape Back   Ctrl+C Cancel';
       case 'plan':
         return page.workflow.step.plan.status === 'planned'
-          ? 'Enter Apply   Escape Back   Ctrl+C Cancel'
-          : 'Escape Back   Ctrl+C Cancel';
+          ? 'Enter Apply   ←/Escape Back   Ctrl+C Cancel'
+          : '←/Escape Back   Ctrl+C Cancel';
       case 'applying':
         return undefined;
       case 'result':
-        return '↑↓ Scroll   Enter/← Refresh Overview   q Quit';
+        return '↑↓ Scroll   Enter/←/Escape Refresh Overview   q Quit';
     }
   }
   if (page.status !== 'ready') {
@@ -590,35 +601,51 @@ function primaryNavigationControls(): string {
 
 function RepositoryWorkflow({
   workflow,
+  latestResult,
 }: {
   workflow: RepositoryWorkflowState;
+  latestResult?: ShellState['repositoryResult'];
 }): ReactNode {
   if (workflow.status === 'menu') {
     const report = workflow.report.repositoryPath
       ? workflow.report
       : workflow.currentDirectory;
+    const focusStyle = statusToneStyle('info');
     return (
       <Box flexDirection="column">
         <RepositoryIdentity report={report} />
+        {latestResult?.result.status === 'succeeded' && (
+          <StatusLine tone="success" label="Succeeded">
+            {operationLabel(latestResult.operation)} completed.
+          </StatusLine>
+        )}
         {workflow.report.repositoryPath && !workflow.report.valid && (
-          <Text color="red">
+          <StatusLine tone="error" label="Blocked">
             Repository writes are blocked until the binding is recovered.
-          </Text>
+          </StatusLine>
         )}
         <Text> </Text>
-        {workflow.actions.map((action, index) => (
-          <Text key={action}>
-            {index === workflow.cursor ? '>' : ' '}{' '}
-            {repositoryActionLabel(action, workflow.resumeRoute)}
-          </Text>
-        ))}
+        {workflow.actions.map((action, index) => {
+          const focused = index === workflow.cursor;
+          return (
+            <Text
+              key={action}
+              color={focused ? focusStyle.color : undefined}
+            >
+              {focused ? '›' : ' '}{' '}
+              {repositoryActionLabel(action, workflow.resumeRoute)}
+            </Text>
+          );
+        })}
       </Box>
     );
   }
   if (workflow.status === 'path') {
     return (
       <Box flexDirection="column">
-        <Text>Enter the path to an existing MCV Repository:</Text>
+        <StatusLine tone="info" label="Input">
+          Enter the path to an existing MCV Repository:
+        </StatusLine>
         <Text>{'> '}{workflow.value}</Text>
       </Box>
     );
@@ -651,24 +678,45 @@ function RepositoryWorkflow({
   }
 
   const { operation, plan } = workflow.step;
+  const hasError = plan.status === 'failed'
+    || plan.issues.some((issue) =>
+      issue.severity === 'error'
+      || issue.severity === 'decisionRequired');
+  const hasWarning = plan.issues.some((issue) => issue.severity === 'warning');
   return (
     <Box flexDirection="column">
+      <StatusLine
+        tone={hasError ? 'error' : hasWarning ? 'warning' : 'info'}
+        label={hasError ? 'Blocked' : hasWarning ? 'Warning' : 'Ready'}
+      >
+        {operationLabel(operation)} Plan {hasError
+          ? 'cannot be applied.'
+          : hasWarning
+            ? 'requires review.'
+            : 'reviewed.'}
+      </StatusLine>
       <Text>Repository: {plan.repositoryPath ?? 'not bound'}</Text>
       {operation === 'unbind' && (
-        <Text>
-          This removes only the local binding. Repository files will not be changed.
-        </Text>
+        <>
+          <StatusLine tone="error" label="Destructive">
+            Local binding removal.
+          </StatusLine>
+          <Text>
+            This removes only the local binding. Repository files will not be changed.
+          </Text>
+        </>
       )}
       {plan.changes.map((change) => (
         <Text key={change.id}>[{change.kind}] {repositoryChangeLabel(change)}</Text>
       ))}
       {plan.issues.map((issue) => (
-        <Text
+        <StatusLine
           key={issue.code}
-          color={issue.severity === 'error' ? 'red' : 'yellow'}
+          tone={repositoryIssueTone(issue.severity)}
+          label={repositoryIssueLabel(issue.severity)}
         >
           {issue.message}
-        </Text>
+        </StatusLine>
       ))}
       {plan.status === 'failed' && (
         <Text color="red">Apply disabled until the Repository selection is fixed.</Text>
@@ -682,8 +730,16 @@ function RepositoryIdentity({
 }: {
   report: RepositoryReport;
 }): ReactNode {
+  const hasError = report.issues.some((issue) => issue.severity === 'error');
+  const hasWarning = report.issues.some((issue) => issue.severity === 'warning');
   return (
     <Box flexDirection="column">
+      <StatusLine
+        tone={report.valid ? 'success' : hasError ? 'error' : hasWarning ? 'warning' : 'muted'}
+        label={report.valid ? 'Valid' : hasError ? 'Blocked' : hasWarning ? 'Warning' : 'Unavailable'}
+      >
+        Repository {report.valid ? 'is ready.' : 'is not ready.'}
+      </StatusLine>
       <Text>Path: {report.repositoryPath ?? 'not bound'}</Text>
       <Text>Repository ID: {report.repositoryId ?? 'unknown'}</Text>
       <Text>Schema: {report.repositorySchemaVersion ?? 'unknown'}</Text>
@@ -694,12 +750,30 @@ function RepositoryIdentity({
         </Text>
       )}
       {report.issues.map((issue) => (
-        <Text key={issue.code} color={issue.severity === 'error' ? 'red' : 'yellow'}>
+        <StatusLine
+          key={issue.code}
+          tone={repositoryIssueTone(issue.severity)}
+          label={repositoryIssueLabel(issue.severity)}
+        >
           {issue.message}
-        </Text>
+        </StatusLine>
       ))}
     </Box>
   );
+}
+
+function repositoryIssueTone(
+  severity: RepositoryReport['issues'][number]['severity'],
+): StatusTone {
+  if (severity === 'notice') return 'info';
+  return severity === 'warning' ? 'warning' : 'error';
+}
+
+function repositoryIssueLabel(
+  severity: RepositoryReport['issues'][number]['severity'],
+): string {
+  if (severity === 'notice') return 'Notice';
+  return severity === 'warning' ? 'Warning' : 'Blocked';
 }
 
 function repositoryActionLabel(

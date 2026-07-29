@@ -69,6 +69,12 @@ type RepositoryWorkflowContext = {
   currentDirectory: RepositoryReport;
   resumeRoute: Exclude<ShellRoute, 'repository'>;
 };
+type RepositoryPlanPreviousSurface =
+  | { status: 'menu'; cursor: number }
+  | { status: 'path'; value: string; menuCursor: number };
+type RepositoryPlanContext = RepositoryWorkflowContext & {
+  previousSurface: RepositoryPlanPreviousSurface;
+};
 
 export type RepositoryWorkflowState =
   | {
@@ -84,16 +90,17 @@ export type RepositoryWorkflowState =
     report: RepositoryReport;
     currentDirectory: RepositoryReport;
     value: string;
+    menuCursor: number;
     resumeRoute: Exclude<ShellRoute, 'repository'>;
   }
   | ({
     status: 'plan';
     step: RepositoryPlanStep;
-  } & RepositoryWorkflowContext)
+  } & RepositoryPlanContext)
   | ({
     status: 'applying';
     step: RepositoryPlanStep;
-  } & RepositoryWorkflowContext)
+  } & RepositoryPlanContext)
   | ({
     status: 'result';
     step: RepositoryResultStep;
@@ -422,17 +429,33 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
             report: workflow.report,
             currentDirectory: workflow.currentDirectory,
             value: '',
+            menuCursor: workflow.cursor,
             resumeRoute: workflow.resumeRoute,
           }
           : workflow);
     case 'repository.plan':
-      return updateRepositoryWorkflow(state, (workflow) => ({
-        status: 'plan',
-        step: action,
-        report: workflow.report,
-        currentDirectory: workflow.currentDirectory,
-        resumeRoute: workflow.resumeRoute,
-      }));
+      return updateRepositoryWorkflow(state, (workflow) => {
+        const previousSurface: RepositoryPlanPreviousSurface =
+          workflow.status === 'path'
+            ? {
+              status: 'path',
+              value: workflow.value,
+              menuCursor: workflow.menuCursor,
+            }
+            : workflow.status === 'menu'
+              ? { status: 'menu', cursor: workflow.cursor }
+              : workflow.status === 'plan' || workflow.status === 'applying'
+                ? workflow.previousSurface
+                : { status: 'menu', cursor: 0 };
+        return {
+          status: 'plan',
+          step: action,
+          report: workflow.report,
+          currentDirectory: workflow.currentDirectory,
+          resumeRoute: workflow.resumeRoute,
+          previousSurface,
+        };
+      });
     case 'repository.apply':
       return updateRepositoryWorkflow(state, (workflow) =>
         workflow.status === 'plan' && workflow.step.plan.status === 'planned'
@@ -481,17 +504,49 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       }));
     }
     case 'repository.back':
-      return updateRepositoryWorkflow(state, (workflow) => ({
-        status: 'menu',
-        report: workflow.report,
-        currentDirectory: workflow.currentDirectory,
-        cursor: 0,
-        actions: repositoryMenuActions(
-          workflow.report,
-          workflow.currentDirectory,
-        ),
-        resumeRoute: workflow.resumeRoute,
-      }));
+      if (
+        state.page.route === 'repository'
+        && state.page.status === 'ready'
+        && (
+          state.page.workflow.status === 'menu'
+          || state.page.workflow.status === 'result'
+        )
+      ) {
+        return {
+          ...state,
+          scrollOffset: 0,
+          page: { route: 'overview', status: 'loading' },
+        };
+      }
+      return updateRepositoryWorkflow(state, (workflow) => {
+        if (workflow.status === 'menu' || workflow.status === 'result') {
+          return workflow;
+        }
+        const previousSurface = workflow.status === 'path'
+          ? { status: 'menu' as const, cursor: workflow.menuCursor }
+          : workflow.previousSurface;
+        if (previousSurface.status === 'path') {
+          return {
+            status: 'path',
+            report: workflow.report,
+            currentDirectory: workflow.currentDirectory,
+            value: previousSurface.value,
+            menuCursor: previousSurface.menuCursor,
+            resumeRoute: workflow.resumeRoute,
+          };
+        }
+        return {
+          status: 'menu',
+          report: workflow.report,
+          currentDirectory: workflow.currentDirectory,
+          cursor: previousSurface.cursor,
+          actions: repositoryMenuActions(
+            workflow.report,
+            workflow.currentDirectory,
+          ),
+          resumeRoute: workflow.resumeRoute,
+        };
+      });
     case 'onboarding.continue':
       if (
         !state.postInitOnboarding
@@ -875,7 +930,10 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
         ...state,
         scrollOffset: 0,
         ...(action.route === 'repository' && state.page.route !== 'repository'
-          ? { repositoryResumeRoute: state.page.route }
+          ? {
+            repositoryResumeRoute: state.page.route,
+            repositoryResult: undefined,
+          }
           : {}),
         page: action.route === 'help'
           ? { route: 'help', status: 'ready' }
@@ -922,11 +980,13 @@ function updateRepositoryWorkflow(
   if (state.page.route !== 'repository' || state.page.status !== 'ready') {
     return state;
   }
+  const workflow = update(state.page.workflow);
+  if (workflow === state.page.workflow) return state;
   return {
     ...state,
     page: {
       ...state.page,
-      workflow: update(state.page.workflow),
+      workflow,
     },
   };
 }

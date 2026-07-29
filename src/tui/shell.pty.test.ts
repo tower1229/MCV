@@ -171,6 +171,105 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     expectRestoredTerminal(noColor.output);
   }, 15_000);
 
+  it('drives Repository onboarding and recovery with arrows without directional writes', async () => {
+    const newRepository = path.join(testRoot, 'arrow-onboarding');
+    fs.mkdirSync(newRepository);
+    const onboarding = await runExpect([
+      'set timeout 7',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {cd "$MCV_TEST_REPO"; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {× Blocked: Repository is not ready.}',
+      'expect -exact {› Initialize here}',
+      'send "\\033\\[C"',
+      'expect -exact {Repository · Init Plan}',
+      'expect -exact {● Ready: Init Plan reviewed.}',
+      'send "\\033\\[C"',
+      'after 150',
+      'send "\\033\\[D"',
+      'expect -exact {› Initialize here}',
+      'send "\\033\\[C"',
+      'expect -exact {Repository · Init Plan}',
+      'send "\\r"',
+      'expect -exact {Environment Details}',
+      'send "\\r"',
+      'expect -exact {Capture · Select Changes}',
+      'send "\\033"',
+      'expect -exact {Overview}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: newRepository });
+
+    expect(onboarding.code).toBe(0);
+    expect(fs.existsSync(path.join(newRepository, 'mcv.yaml'))).toBe(true);
+    expectRestoredTerminal(onboarding.output);
+
+    const menuBack = await runExpect([
+      'set timeout 5',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {cd "$MCV_TEST_REPO"; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {Status Overview}',
+      'send "r"',
+      'expect -exact {✓ Valid: Repository is ready.}',
+      'send "\\033"',
+      'expect -exact {Status Overview}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: newRepository });
+    expect(menuBack.code).toBe(0);
+    expectRestoredTerminal(menuBack.output);
+
+    const movedRepository = createCaptureRepository();
+    const missingPath = path.join(testRoot, 'missing-old-location');
+    writeBinding(missingPath, 'tui-capture-test');
+    const recovery = await runExpect([
+      'set timeout 7',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI" capture; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'expect -exact {› Rebind moved Repository}',
+      'send "\\033\\[C"',
+      'expect -exact {● Input: Enter the path to an existing MCV Repository:}',
+      'send -- $env(MCV_TEST_REPO)',
+      'after 200',
+      'send "x"',
+      'after 100',
+      'send "\\177"',
+      'after 100',
+      'send "\\r"',
+      'expect -exact {Repository · Bind Plan}',
+      'send "\\033\\[D"',
+      'expect -exact {Repository · Enter Existing Path}',
+      'send "\\r"',
+      'expect -exact {Repository · Bind Plan}',
+      'send "\\033\\[C"',
+      'after 150',
+      'send "\\033\\[D"',
+      'expect -exact {Repository · Enter Existing Path}',
+      'send "\\r"',
+      'expect -exact {Repository · Bind Plan}',
+      'send "\\r"',
+      'expect -exact {Capture · Select Changes}',
+      'send "\\033"',
+      'expect -exact {Overview}',
+      'send "q"',
+      'expect -exact {EXIT_CODE:0}',
+      'expect eof',
+      'set result [wait]',
+      'exit [lindex $result 3]',
+    ], { MCV_TEST_REPO: movedRepository });
+
+    expect(recovery.code).toBe(0);
+    expect(readBinding()).toMatchObject({
+      repositoryPath: movedRepository,
+    });
+    expectRestoredTerminal(recovery.output);
+  }, 20_000);
+
   it('deep-links every Repository business command into the persistent Shell', async () => {
     const emptyPath = path.join(testRoot, 'empty');
     fs.mkdirSync(emptyPath);

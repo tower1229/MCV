@@ -200,6 +200,91 @@ describe('TUI Shell reducer', () => {
     expect(resumed.page).toEqual({ route: 'capture', status: 'loading' });
   });
 
+  it('keeps Repository menu, path entry, and Plan review backward transitions pure', () => {
+    let state = repositoryManagementState('capture');
+    state = shellReducer(state, { type: 'repository.move', delta: 1 });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'menu', cursor: 1, actions: ['migrate', 'rebind', 'unbind'] },
+    });
+
+    state = shellReducer(state, { type: 'repository.enterPath' });
+    state = shellReducer(state, {
+      type: 'repository.path',
+      value: '/tmp/moved-repository',
+    });
+    const path = state;
+    state = shellReducer(state, {
+      type: 'repository.plan',
+      operation: 'bind',
+      plan: bindPlan(),
+    });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'plan', step: { operation: 'bind' } },
+    });
+
+    state = shellReducer(state, { type: 'repository.back' });
+    expect(state.page).toMatchObject({
+      workflow: {
+        status: 'path',
+        value: '/tmp/moved-repository',
+        menuCursor: 1,
+      },
+    });
+    expect(shellReducer(path, { type: 'repository.back' }).page).toMatchObject({
+      workflow: { status: 'menu', cursor: 1 },
+    });
+  });
+
+  it('requires Repository Apply to be explicit and rejects every action while applying', () => {
+    const repository = repositoryManagementState('capture');
+    const planned = shellReducer(repository, {
+      type: 'repository.plan',
+      operation: 'migrate',
+      plan: migrationPlan(),
+    });
+
+    expect(shellReducer(planned, { type: 'repository.move', delta: 1 })).toBe(
+      planned,
+    );
+    const applying = shellReducer(planned, { type: 'repository.apply' });
+    expect(applying.page).toMatchObject({
+      workflow: { status: 'applying' },
+    });
+
+    for (const action of [
+      { type: 'repository.move', delta: 1 },
+      { type: 'repository.back' },
+      { type: 'repository.enterPath' },
+      { type: 'exit' },
+      { type: 'cancel' },
+    ] as const) {
+      expect(shellReducer(applying, action)).toBe(applying);
+    }
+  });
+
+  it('returns Repository menus and Results to Overview without applying', () => {
+    const repository = repositoryManagementState('capture');
+    expect(shellReducer(repository, { type: 'repository.back' })).toMatchObject({
+      page: { route: 'overview', status: 'loading' },
+      repositoryResumeRoute: 'capture',
+    });
+
+    const planned = shellReducer(repository, {
+      type: 'repository.plan',
+      operation: 'bind',
+      plan: bindPlan(),
+    });
+    const applying = shellReducer(planned, { type: 'repository.apply' });
+    const result = shellReducer(applying, {
+      type: 'repository.applied',
+      operation: 'bind',
+      result: failedBindResult(),
+    });
+    expect(shellReducer(result, { type: 'repository.back' })).toMatchObject({
+      page: { route: 'overview', status: 'loading' },
+    });
+  });
+
   it.each([
     {
       operation: 'migrate' as const,
@@ -253,6 +338,16 @@ describe('TUI Shell reducer', () => {
     expect(reloaded.page).toMatchObject({
       workflow: { resumeRoute: 'deploy' },
     });
+
+    const overview = shellReducer(reloaded, {
+      type: 'navigate',
+      route: 'overview',
+    });
+    const reopened = shellReducer(overview, {
+      type: 'navigate',
+      route: 'repository',
+    });
+    expect(reopened.repositoryResult).toBeUndefined();
   });
 
   it('moves Overview from loading to ready when its Report arrives', () => {
@@ -1577,6 +1672,23 @@ function bindResult(): BindResult {
       repositoryId: 'repository-id',
       repositorySchemaVersion: 2,
       previousRepositoryPath: '/tmp/old-repository',
+    },
+  };
+}
+
+function failedBindResult(): BindResult {
+  return {
+    schemaVersion: 1,
+    operation: 'bind',
+    status: 'failed',
+    repositoryPath: '/tmp/moved-repository',
+    changes: [],
+    issues: [],
+    nextActions: ['Choose a valid Repository.'],
+    error: {
+      code: 'repository.invalidManifest',
+      message: 'The selected directory is not a valid Repository.',
+      nextActions: ['Choose a valid Repository.'],
     },
   };
 }

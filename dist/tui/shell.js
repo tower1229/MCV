@@ -350,7 +350,7 @@ function Shell({ context, initialRoute, dependencies }) {
         }
         if (repositoryWorkflow) {
             if (repositoryWorkflow.status === 'path') {
-                if (intent.type === 'cancel') {
+                if (intent.type === 'cancel' || intent.type === 'back') {
                     dispatch({ type: 'repository.back' });
                 }
                 else if (intent.type === 'confirm') {
@@ -388,14 +388,18 @@ function Shell({ context, initialRoute, dependencies }) {
                 else if (intent.type === 'focus.next') {
                     dispatch({ type: 'repository.move', delta: 1 });
                 }
-                else if (intent.type === 'confirm') {
+                else if (intent.type === 'back' || intent.type === 'cancel') {
+                    dispatch({ type: 'repository.back' });
+                }
+                else if (intent.type === 'confirm' || intent.type === 'open') {
                     chooseRepositoryAction(context, repositoryWorkflow, dependencies, dispatch);
                 }
                 return;
             }
             if (repositoryWorkflow.status === 'plan') {
-                if (intent.type === 'cancel')
+                if (intent.type === 'cancel' || intent.type === 'back') {
                     dispatch({ type: 'repository.back' });
+                }
                 else if (intent.type === 'confirm'
                     && repositoryWorkflow.step.plan.status === 'planned') {
                     dispatch({ type: 'repository.apply' });
@@ -403,7 +407,12 @@ function Shell({ context, initialRoute, dependencies }) {
                 return;
             }
             if (repositoryWorkflow.status === 'result') {
-                handleResultInteraction();
+                if (intent.type === 'cancel') {
+                    dispatch({ type: 'repository.back' });
+                }
+                else {
+                    handleResultInteraction();
+                }
             }
             return;
         }
