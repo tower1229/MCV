@@ -95,6 +95,7 @@ function skillPlan(): DeployPlan {
         'modify',
       ),
     ],
+    linkOutcomes: [],
     issues: [],
     nextActions: [],
   };

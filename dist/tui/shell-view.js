@@ -504,7 +504,7 @@ function PrimaryNavigation({ focusId, }) {
 }
 function OverviewStatus({ report }) {
     const status = createOverviewStatusViewModel(report);
-    return (_jsxs(_Fragment, { children: [_jsx(StatusLine, { tone: status.repository.tone, label: status.repository.label, children: statusItemText(status.repository) }), _jsxs(Text, { wrap: "wrap", children: ['  ', "Path: ", report.repository.path] }), status.git && (_jsx(StatusLine, { tone: status.git.tone, label: status.git.label, children: statusItemText(status.git) })), _jsx(StatusLine, { tone: status.pending.tone, label: status.pending.label, children: statusItemText(status.pending) }), _jsx(StatusLine, { tone: status.drift.tone, label: status.drift.label, children: statusItemText(status.drift) }), _jsx(StatusLine, { tone: status.environment.tone, label: status.environment.label, children: statusItemText(status.environment) }), _jsx(Text, { children: "IDE support:" }), status.ideSupport.map((ide) => (_jsx(StatusLine, { tone: ide.tone, label: ide.label, indent: 2, children: statusItemText(ide) }, ide.key))), _jsx(StatusLine, { tone: status.lastOperation.tone, label: status.lastOperation.label, children: statusItemText(status.lastOperation) }), status.issues.map((issue) => (_jsx(StatusLine, { tone: issue.tone, label: issue.label, children: statusItemText(issue) }, issue.key)))] }));
+    return (_jsxs(_Fragment, { children: [_jsx(StatusLine, { tone: status.repository.tone, label: status.repository.label, children: statusItemText(status.repository) }), _jsxs(Text, { wrap: "wrap", children: ['  ', "Path: ", report.repository.path] }), status.git && (_jsx(StatusLine, { tone: status.git.tone, label: status.git.label, children: statusItemText(status.git) })), _jsx(StatusLine, { tone: status.pending.tone, label: status.pending.label, children: statusItemText(status.pending) }), status.linkedSkills.map((item) => (_jsx(StatusLine, { tone: item.tone, label: item.label, children: statusItemText(item) }, item.key))), _jsx(StatusLine, { tone: status.drift.tone, label: status.drift.label, children: statusItemText(status.drift) }), _jsx(StatusLine, { tone: status.environment.tone, label: status.environment.label, children: statusItemText(status.environment) }), _jsx(Text, { children: "IDE support:" }), status.ideSupport.map((ide) => (_jsx(StatusLine, { tone: ide.tone, label: ide.label, indent: 2, children: statusItemText(ide) }, ide.key))), _jsx(StatusLine, { tone: status.lastOperation.tone, label: status.lastOperation.label, children: statusItemText(status.lastOperation) }), status.issues.map((issue) => (_jsx(StatusLine, { tone: issue.tone, label: issue.label, children: statusItemText(issue) }, issue.key)))] }));
 }
 function CompactOverview({ report, focusId, terminalColumns, }) {
     const status = createOverviewStatusViewModel(report);
@@ -515,7 +515,7 @@ function CompactOverview({ report, focusId, terminalColumns, }) {
                         return (_jsxs(Text, { color: focused ? style.color : undefined, children: ['  ', focused ? '› ' : '', destination.label, 'accelerator' in destination
                                     ? ` (${destination.accelerator})`
                                     : ''] }, destination.id));
-                    })] }), _jsx(Text, { children: "Status Overview" }), _jsxs(StatusLine, { tone: status.repository.tone, label: status.repository.label, children: [statusItemText(status.repository), " \u00B7 Path: ", truncateLeading(report.repository.path, pathLength)] }), status.git && (_jsx(StatusLine, { tone: status.git.tone, label: status.git.label, children: statusItemText(status.git) })), _jsx(StatusLine, { tone: status.pending.tone, label: status.pending.label, children: statusItemText(status.pending) }), _jsxs(Text, { wrap: "wrap", children: [_jsxs(StatusFragment, { tone: status.drift.tone, children: [status.drift.label, ": ", statusItemText(status.drift)] }), '  ', _jsxs(StatusFragment, { tone: status.environment.tone, children: [status.environment.label, ": ", statusItemText(status.environment)] })] }), _jsxs(Text, { wrap: "wrap", children: ["IDE:", status.ideSupport.map((ide) => (_jsxs(StatusFragment, { tone: ide.tone, prefix: "  ", children: [ide.label, ": ", statusItemText(ide, false)] }, ide.key)))] }), _jsxs(Text, { wrap: "wrap", children: [_jsxs(StatusFragment, { tone: status.lastOperation.tone, children: [status.lastOperation.label, ": ", statusItemText(status.lastOperation)] }), status.issues.map((issue) => (_jsxs(StatusFragment, { tone: issue.tone, prefix: "  ", children: [issue.label, ": ", statusItemText(issue, false)] }, issue.key)))] })] }));
+                    })] }), _jsx(Text, { children: "Status Overview" }), _jsxs(StatusLine, { tone: status.repository.tone, label: status.repository.label, children: [statusItemText(status.repository), " \u00B7 Path: ", truncateLeading(report.repository.path, pathLength)] }), status.git && (_jsx(StatusLine, { tone: status.git.tone, label: status.git.label, children: statusItemText(status.git) })), _jsx(StatusLine, { tone: status.pending.tone, label: status.pending.label, children: statusItemText(status.pending) }), status.linkedSkills.length > 0 && (_jsx(Text, { wrap: "wrap", children: status.linkedSkills.map((item) => (_jsxs(StatusFragment, { tone: item.tone, prefix: "  ", children: [item.label, ": ", statusItemText(item)] }, item.key))) })), _jsxs(Text, { wrap: "wrap", children: [_jsxs(StatusFragment, { tone: status.drift.tone, children: [status.drift.label, ": ", statusItemText(status.drift)] }), '  ', _jsxs(StatusFragment, { tone: status.environment.tone, children: [status.environment.label, ": ", statusItemText(status.environment)] })] }), _jsxs(Text, { wrap: "wrap", children: ["IDE:", status.ideSupport.map((ide) => (_jsxs(StatusFragment, { tone: ide.tone, prefix: "  ", children: [ide.label, ": ", statusItemText(ide, false)] }, ide.key)))] }), _jsxs(Text, { wrap: "wrap", children: [_jsxs(StatusFragment, { tone: status.lastOperation.tone, children: [status.lastOperation.label, ": ", statusItemText(status.lastOperation)] }), status.issues.map((issue) => (_jsxs(StatusFragment, { tone: issue.tone, prefix: "  ", children: [issue.label, ": ", statusItemText(issue, false)] }, issue.key)))] })] }));
 }
 function createOverviewStatusViewModel(report) {
     const pending = report.pendingDeployment;
@@ -552,6 +552,13 @@ function createOverviewStatusViewModel(report) {
             state: pending.total > 0 ? 'Review' : 'None',
             details: `${pending.total} changes (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete)`,
         },
+        linkedSkills: report.linkOutcomes.map((outcome) => ({
+            key: `linked-skills:${outcome.ide}:${outcome.linkPath}`,
+            tone: outcome.status === 'satisfied-via-link' ? 'info' : 'error',
+            label: 'Linked Skills',
+            state: outcome.status === 'satisfied-via-link' ? 'Satisfied via link' : 'Blocked',
+            details: `External · ${outcome.packageNames.length} ${outcome.packageNames.length === 1 ? 'package' : 'packages'} · ${outcome.affectedFileCount} affected ${outcome.affectedFileCount === 1 ? 'file' : 'files'}`,
+        })),
         drift: {
             key: 'drift',
             tone: local.drift > 0 || local.missing > 0 ? 'warning' : 'success',
@@ -589,7 +596,9 @@ function createOverviewStatusViewModel(report) {
                 label: 'Last operation',
                 state: 'None',
             },
-        issues: report.issues.map((issue) => ({
+        issues: report.issues
+            .filter((issue) => !issue.code.startsWith('deploy.skillsLinked.'))
+            .map((issue) => ({
             key: issue.code,
             tone: issue.severity === 'error'
                 ? 'error'
@@ -725,7 +734,9 @@ function DeploySelection({ workflow, terminalRows, }) {
     const visible = flattenDeploySelectionTree(tree, workflow.expandedNodeIds);
     const advanced = workflow.plan.changes.filter((change) => change.group === 'advanced');
     const viewport = listViewport(visible, workflow.cursor, Math.max(1, terminalRows - (terminalRows <= 12 ? 9 : 10)));
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: ["Repository: ", workflow.plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: [workflow.plan.changes.length, " changes \u00B7 ", workflow.selectedIds.length, " selected"] }), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: { node, depth } }, index) => {
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: ["Repository: ", workflow.plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: [workflow.plan.changes.length, " changes \u00B7 ", workflow.selectedIds.length, " selected"] }), workflow.plan.linkOutcomes.map((outcome) => (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: [outcome.status === 'satisfied-via-link'
+                                ? 'Satisfied via link'
+                                : `Blocked · ${outcome.reason?.replaceAll('-', ' ') ?? 'unclassified'}`, ' ', "\u00B7 External \u00B7 ", outcome.packageNames.length, " Skill", ' ', outcome.packageNames.length === 1 ? 'package' : 'packages', " \u00B7", ' ', outcome.affectedFileCount, " affected", ' ', outcome.affectedFileCount === 1 ? 'file' : 'files'] }), _jsxs(Text, { wrap: "truncate-middle", children: ['  ', outcome.linkPath, outcome.resolvedPath ? ` → ${outcome.resolvedPath}` : ''] })] }, `${outcome.ide}:${outcome.linkPath}`))), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: { node, depth } }, index) => {
                 const visibleIndex = viewport.start + index;
                 const expanded = workflow.expandedNodeIds.includes(node.id);
                 const disclosure = node.children.length === 0

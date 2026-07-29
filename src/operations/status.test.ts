@@ -106,6 +106,7 @@ describe('inspectStatus', () => {
         time: '2026-07-21T01:02:03.000Z',
         success: false,
       },
+      linkOutcomes: [],
       issues: [],
       nextActions: [],
     });
@@ -133,6 +134,42 @@ describe('inspectStatus', () => {
     fs.writeFileSync(path.join(testRoot, 'untracked.txt'), 'dirty');
     const dirty = await inspectStatus(context);
     expect(dirty.repository.git).toMatchObject({ clean: false, uncommittedChanges: 1 });
+  });
+
+  it('keeps satisfied linked Skill packages out of Pending Deployment Changes', async () => {
+    createRepository(repositoryPath);
+    const sourceSkill = path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md');
+    const linkedRoot = path.join(homeDir, '.agents', 'skills');
+    const externalRoot = path.join(testRoot, 'external-skills');
+    const externalSkill = path.join(externalRoot, 'review', 'SKILL.md');
+    fs.mkdirSync(path.dirname(sourceSkill), { recursive: true });
+    fs.mkdirSync(path.dirname(externalSkill), { recursive: true });
+    fs.mkdirSync(path.dirname(linkedRoot), { recursive: true });
+    fs.writeFileSync(sourceSkill, '# Review\n');
+    fs.writeFileSync(externalSkill, '# Review\n');
+    fs.symlinkSync(externalRoot, linkedRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'repository-id',
+      repositoryPath,
+    });
+
+    const report = await inspectStatus(context);
+
+    expect(report.linkOutcomes).toEqual([expect.objectContaining({
+      status: 'satisfied-via-link',
+      ownership: 'external',
+      linkPath: linkedRoot,
+      resolvedPath: externalRoot,
+      packageNames: ['review'],
+      affectedFileCount: 1,
+    })]);
+    expect(report.changes.some((change) => change.capability === 'skills')).toBe(false);
+    expect(report.pendingDeployment.total).toBe(report.changes.length);
+    expect(report.issues).toContainEqual(expect.objectContaining({
+      severity: 'notice',
+      message: expect.stringContaining('Satisfied via link'),
+    }));
   });
 });
 

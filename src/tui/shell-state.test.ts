@@ -1540,6 +1540,7 @@ function statusReport(): StatusReport {
       missingVariables: [],
       ideSupport: [],
     },
+    linkOutcomes: [],
     lastOperation: null,
     issues: [],
     nextActions: [],

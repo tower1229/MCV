@@ -126,6 +126,42 @@ describe('mcv deploy', () => {
     expect(fs.existsSync(path.join(homeDir, '.claude', 'CLAUDE.md'))).toBe(false);
   });
 
+  it('prints the same structured satisfied external Skill link in plain text and JSON', async () => {
+    const sourceSkill = path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md');
+    const linkedRoot = path.join(homeDir, '.claude', 'skills');
+    const externalRoot = path.join(testRoot, 'external-skills');
+    const externalSkill = path.join(externalRoot, 'review', 'SKILL.md');
+    fs.mkdirSync(path.dirname(sourceSkill), { recursive: true });
+    fs.mkdirSync(path.dirname(externalSkill), { recursive: true });
+    fs.writeFileSync(sourceSkill, '# Review\n');
+    fs.writeFileSync(externalSkill, '# Review\n');
+    fs.mkdirSync(path.dirname(linkedRoot), { recursive: true });
+    fs.symlinkSync(externalRoot, linkedRoot, process.platform === 'win32' ? 'junction' : 'dir');
+
+    await createProgram(deviceContext('win32')).parseAsync(['node', 'mcv', 'deploy', '--dry-run']);
+    const plain = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
+
+    vi.mocked(console.log).mockClear();
+    await createProgram(deviceContext('win32')).parseAsync([
+      'node', 'mcv', 'deploy', '--dry-run', '--json',
+    ]);
+    const json = JSON.parse(String(vi.mocked(console.log).mock.calls[0][0]));
+    expect(json).toMatchObject({ status: 'planned' });
+    expect(plain).toContain(
+      'Satisfied via link · external · Claude Code · 1 Skill package · 1 affected file',
+    );
+    expect(json.linkOutcomes).toEqual([expect.objectContaining({
+      status: 'satisfied-via-link',
+      ownership: 'external',
+      scope: 'shared-link-root',
+      ide: 'claude-code',
+      linkPath: linkedRoot,
+      resolvedPath: externalRoot,
+      packageNames: ['review'],
+      affectedFileCount: 1,
+    })]);
+  });
+
   it('detects a symbolic-link ancestor before planning writes beneath it', () => {
     const target = path.join(testRoot, 'link-target');
     const link = path.join(testRoot, 'link');

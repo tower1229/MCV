@@ -3,6 +3,9 @@ import { renderIssuePlain } from './color.js';
 
 export function renderDeployPlanPlain(plan: DeployPlan): string[] {
   const lines = [`Deploy Plan: ${plan.repositoryPath ?? 'not bound'}`];
+  for (const outcome of plan.linkOutcomes) {
+    lines.push(...renderLinkOutcome(outcome));
+  }
   let currentGroup = '';
   for (const change of plan.changes.filter((item) => item.group === 'standard')) {
     const group = `${change.ide}/${change.capability}`;
@@ -29,6 +32,24 @@ export function renderDeployPlanPlain(plan: DeployPlan): string[] {
   }
   for (const action of plan.nextActions) lines.push(`Next: ${action}`);
   return lines;
+}
+
+function renderLinkOutcome(outcome: DeployPlan['linkOutcomes'][number]): string[] {
+  const state = outcome.status === 'satisfied-via-link'
+    ? 'Satisfied via link'
+    : `Blocked (${linkedOutcomeReason(outcome.reason)})`;
+  const packages = `${outcome.packageNames.length} Skill ${outcome.packageNames.length === 1 ? 'package' : 'packages'}`;
+  const files = `${outcome.affectedFileCount} affected ${outcome.affectedFileCount === 1 ? 'file' : 'files'}`;
+  return [
+    `${state} · ${outcome.ownership} · ${displayIde(outcome.ide)} · ${packages} · ${files}`,
+    `  ${outcome.linkPath}${outcome.resolvedPath ? ` -> ${outcome.resolvedPath}` : ''}`,
+  ];
+}
+
+function linkedOutcomeReason(
+  reason: DeployPlan['linkOutcomes'][number]['reason'],
+): string {
+  return reason?.replaceAll('-', ' ') ?? 'unclassified';
 }
 
 export function renderDeployResultPlain(result: DeployResult): string[] {

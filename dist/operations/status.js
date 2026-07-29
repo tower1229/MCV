@@ -32,6 +32,7 @@ export async function inspectStatus(context) {
             ...(repositoryReport.git ? { git: repositoryReport.git } : {}),
         },
         changes,
+        linkOutcomes: deployPlan.linkOutcomes,
         pendingDeployment: summarizePendingDeployment(changes),
         postDeployLocalState: summarizePostDeployLocalState(state.baselineSnapshot?.files ?? {}),
         environment: {

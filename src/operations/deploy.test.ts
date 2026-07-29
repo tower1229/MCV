@@ -424,6 +424,217 @@ describe('Deploy operations', () => {
     expect(fs.readFileSync(linkTarget, 'utf8')).toBe('# Linked rules\n');
   });
 
+  it('treats a matching externally linked Skill root as one satisfied package outcome', async () => {
+    const skillsRoot = path.join(homeDir, '.claude', 'skills');
+    const externalRoot = path.join(testRoot, 'external-skills');
+    const externalSkill = path.join(externalRoot, 'review', 'SKILL.md');
+    fs.rmSync(skillsRoot, { recursive: true });
+    fs.mkdirSync(path.dirname(externalSkill), { recursive: true });
+    fs.writeFileSync(externalSkill, '# Review\n');
+    fs.symlinkSync(externalRoot, skillsRoot, process.platform === 'win32' ? 'junction' : 'dir');
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.linkOutcomes).toEqual([{
+      status: 'satisfied-via-link',
+      ownership: 'external',
+      scope: 'shared-link-root',
+      ide: 'claude-code',
+      linkPath: skillsRoot,
+      resolvedPath: externalRoot,
+      packageNames: ['review'],
+      affectedFileCount: 1,
+    }]);
+    expect(plan.issues).toContainEqual(expect.objectContaining({
+      severity: 'notice',
+      code: 'deploy.skillsLinked.satisfied.claude-code',
+      message: expect.stringContaining('Satisfied via link'),
+    }));
+    expect(plan.changes.some((change) =>
+      change.capability === 'skills' && change.targetPath.startsWith(skillsRoot))).toBe(false);
+
+    const selectedIds = plan.changes
+      .filter((change) => change.defaultSelected)
+      .map((change) => change.id);
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      { changeIds: selectedIds },
+      { nonInteractive: true },
+    );
+
+    expect(result.status).toBe('succeeded');
+    expect(fs.readFileSync(externalSkill, 'utf8')).toBe('# Review\n');
+    expect(readState(context).managedInventory).not.toHaveProperty(externalSkill);
+  });
+
+  it('blocks a divergent external Skill link once at package-root granularity', async () => {
+    const skillsRoot = path.join(homeDir, '.claude', 'skills');
+    const externalRoot = path.join(testRoot, 'external-skills');
+    const externalSkill = path.join(externalRoot, 'review', 'SKILL.md');
+    const sourceReference = path.join(
+      repositoryPath,
+      'common',
+      'skills',
+      'review',
+      'references',
+      'guide.md',
+    );
+    fs.rmSync(skillsRoot, { recursive: true });
+    fs.mkdirSync(path.dirname(externalSkill), { recursive: true });
+    fs.mkdirSync(path.dirname(sourceReference), { recursive: true });
+    fs.writeFileSync(externalSkill, '# Externally changed\n');
+    fs.writeFileSync(sourceReference, '# Guide\n');
+    fs.symlinkSync(externalRoot, skillsRoot, process.platform === 'win32' ? 'junction' : 'dir');
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.readyToApply).toBe(false);
+    expect(plan.linkOutcomes).toEqual([expect.objectContaining({
+      status: 'blocked',
+      ownership: 'external',
+      scope: 'shared-link-root',
+      linkPath: skillsRoot,
+      resolvedPath: externalRoot,
+      packageNames: ['review'],
+      affectedFileCount: 2,
+      reason: 'divergent',
+    })]);
+    expect(plan.issues.filter((issue) =>
+      issue.code.startsWith('deploy.skillsLinked.blocked.'))).toEqual([
+      expect.objectContaining({
+        severity: 'error',
+        message: expect.stringContaining('2 affected file(s)'),
+      }),
+    ]);
+    expect(plan.changes.some((change) => change.targetPath.startsWith(skillsRoot))).toBe(false);
+
+    const result = await applyDeployPlan(context, plan, { changeIds: [] });
+    expect(result.status).toBe('blocked');
+    expect(fs.readFileSync(externalSkill, 'utf8')).toBe('# Externally changed\n');
+  });
+
+  it('classifies a non-directory link target as one physical-target conflict', async () => {
+    const skillsRoot = path.join(homeDir, '.claude', 'skills');
+    const externalFile = path.join(testRoot, 'external-file');
+    fs.rmSync(skillsRoot, { recursive: true });
+    fs.writeFileSync(externalFile, 'not a Skill directory\n');
+    fs.symlinkSync(externalFile, skillsRoot);
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.linkOutcomes).toEqual([expect.objectContaining({
+      status: 'blocked',
+      reason: 'physical-target-conflict',
+      linkPath: skillsRoot,
+      resolvedPath: externalFile,
+      affectedFileCount: 1,
+    })]);
+    expect(plan.issues.filter((issue) =>
+      issue.code.startsWith('deploy.skillsLinked.blocked.'))).toHaveLength(1);
+  });
+
+  it('never proposes managed cleanup beneath an unclassified external link', async () => {
+    const skillsRoot = path.join(homeDir, '.claude', 'skills');
+    const externalRoot = path.join(testRoot, 'external-skills');
+    const externalStale = path.join(externalRoot, 'stale', 'SKILL.md');
+    fs.rmSync(skillsRoot, { recursive: true });
+    fs.mkdirSync(path.dirname(externalStale), { recursive: true });
+    fs.writeFileSync(externalStale, 'externally owned\n');
+    fs.symlinkSync(externalRoot, skillsRoot, process.platform === 'win32' ? 'junction' : 'dir');
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.changes.some((change) =>
+      change.change === 'delete' && change.targetPath.startsWith(skillsRoot))).toBe(false);
+    expect(fs.readFileSync(externalStale, 'utf8')).toBe('externally owned\n');
+  });
+
+  it.each([
+    ['dangling', 'missing-skills'],
+    ['cycle', 'self'],
+  ] as const)('blocks one %s Skill-link outcome without traversing it', async (reason, target) => {
+    const skillsRoot = path.join(homeDir, '.claude', 'skills');
+    fs.rmSync(skillsRoot, { recursive: true });
+    fs.symlinkSync(
+      target === 'self' ? skillsRoot : path.join(testRoot, target),
+      skillsRoot,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.linkOutcomes).toEqual([expect.objectContaining({
+      status: 'blocked',
+      reason,
+      linkPath: skillsRoot,
+      affectedFileCount: 1,
+    })]);
+    expect(plan.issues.filter((issue) =>
+      issue.code.startsWith('deploy.skillsLinked.blocked.'))).toHaveLength(1);
+    expect(plan.changes.some((change) => change.targetPath.startsWith(skillsRoot))).toBe(false);
+  });
+
+  it('does not classify or traverse a link above the Skill root', async () => {
+    const claudeRoot = path.join(homeDir, '.claude');
+    const externalRoot = path.join(testRoot, 'external-claude');
+    const externalSkill = path.join(externalRoot, 'skills', 'review', 'SKILL.md');
+    fs.rmSync(claudeRoot, { recursive: true });
+    fs.mkdirSync(path.dirname(externalSkill), { recursive: true });
+    fs.writeFileSync(externalSkill, '# Review\n');
+    fs.symlinkSync(externalRoot, claudeRoot, process.platform === 'win32' ? 'junction' : 'dir');
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.linkOutcomes).toEqual([expect.objectContaining({
+      status: 'blocked',
+      reason: 'unclassified',
+      linkPath: claudeRoot,
+      affectedFileCount: 1,
+    })]);
+    expect(plan.changes.some((change) =>
+      change.targetPath.startsWith(`${claudeRoot}${path.sep}`))).toBe(false);
+    expect(fs.readFileSync(externalSkill, 'utf8')).toBe('# Review\n');
+  });
+
+  it('lets a shared Skill link follow an equivalent physical Deploy target', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(manifestPath, fs.readFileSync(manifestPath, 'utf8').replace(
+      'targets:\n  claudeCode:',
+      'targets:\n  codex:\n    enabled: true\n  claudeCode:',
+    ));
+    const linkedSkillsRoot = path.join(homeDir, '.claude', 'skills');
+    const physicalSkillsRoot = path.join(homeDir, '.agents', 'skills');
+    const physicalSkill = path.join(physicalSkillsRoot, 'review', 'SKILL.md');
+    fs.rmSync(linkedSkillsRoot, { recursive: true });
+    fs.mkdirSync(path.dirname(physicalSkill), { recursive: true });
+    fs.writeFileSync(physicalSkill, '# Old review\n');
+    fs.symlinkSync(
+      physicalSkillsRoot,
+      linkedSkillsRoot,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.readyToApply).toBe(true);
+    expect(plan.linkOutcomes).toEqual([expect.objectContaining({
+      status: 'satisfied-via-link',
+      ownership: 'external',
+      linkPath: linkedSkillsRoot,
+      resolvedPath: physicalSkillsRoot,
+      affectedFileCount: 1,
+    })]);
+    expect(plan.changes.filter((change) =>
+      change.capability === 'skills' && change.targetPath.endsWith('review/SKILL.md'))).toEqual([
+      expect.objectContaining({
+        ide: 'codex',
+        targetPath: physicalSkill,
+        change: 'modify',
+      }),
+    ]);
+  });
+
   it('applies only selected capabilities and updates only their device state scope', async () => {
     const targetPath = path.join(homeDir, '.claude.json');
     const plan = await createDeployPlan(context);

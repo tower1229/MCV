@@ -145,7 +145,7 @@ mcv restore    TTY 中 deep-link 到 Restore Latest Deployment；--dry-run/--yes
 
 删除默认不执行。只有 `mcv deploy --prune-managed` 经交互确认后，才会删除本机 state 中已记录为 MCV managed、但仓库已不再生成的文件，以及与本次 Canonical 部署逐文件完全一致的旧 `$CODEX_HOME/skills` Skill 副本；`--yes` 永远拒绝删除。普通 deploy 检测到后一种重复时会提示，不会自动删除；内容不同或包含链接的 legacy Skill 会保留。
 
-Deploy 不会穿过已有 symlink/junction 写文件。计划会以 `skip:symlink` 明确列出这些目录；若多个 IDE 通过链接复用 `~/.agents/skills`，MCV 只写官方事实路径，避免重复写入和破坏链接。
+Deploy 不会穿过已有 symlink/junction 写文件。对于已有的 Canonical Skill package 链接，Plan 会按 Skill package 或共享 link root 识别其有效内容：与期望内容一致时显示一个 `Satisfied via link` 外部所有权 outcome，不产生该链接路径的写入候选，也不进入 Pending Deployment Change 或 managed cleanup；若同一物理事实路径本轮有等价的正常 Deploy 候选，只写该事实路径。内容 divergent、dangling、cycle、物理目标冲突等情况会合并为一个带 affected-file count 的 blocking outcome。其他未分类链接仍不会被遍历、替换、写入或删除，包括 copy layout 和 Advanced Cleanup。
 
 命令不支持按参数临时选择 IDE。需要启用或禁用目标时，编辑 `mcv.yaml`：
 

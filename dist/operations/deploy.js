@@ -25,7 +25,7 @@ export async function createDeployPlan(context) {
         registerDeployPlan(plan, mutations);
         return plan;
     }
-    catch {
+    catch (error) {
         return freezeDeployPlan({
             schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'deploy',
@@ -35,6 +35,7 @@ export async function createDeployPlan(context) {
             preconditions: {},
             repositoryPath,
             changes: [],
+            linkOutcomes: [],
             issues: [{
                     severity: 'error',
                     code: 'deploy.planFailed',
@@ -44,6 +45,7 @@ export async function createDeployPlan(context) {
             error: {
                 code: 'deploy.planFailed',
                 message: 'The Deploy Plan could not be generated safely.',
+                technicalDetails: errorMessage(error),
                 nextActions: ['Fix the Repository or IDE configuration problem, then regenerate the Deploy Plan.'],
             },
         });
@@ -62,6 +64,7 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
             preconditions: {},
             repositoryPath,
             changes: [],
+            linkOutcomes: [],
             issues: [{
                     severity: 'notice',
                     code: 'deploy.noEnabledTargets',
@@ -87,10 +90,13 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
         });
     }))).flat();
     const issues = [];
+    const linkOutcomes = [];
     const safeDesired = desired.filter((file) => {
         const linkPath = findSymbolicLinkAncestor(file.targetPath);
         if (!linkPath)
             return true;
+        if (file.capability === 'skills')
+            return false;
         issues.push({
             severity: 'warning',
             code: `deploy.symbolicLinkSkipped.${issues.length + 1}`,
@@ -99,6 +105,7 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
         });
         return false;
     });
+    classifyLinkedSkillPackages(desired, linkOutcomes, issues);
     const changes = safeDesired.flatMap((file) => {
         const previous = fs.existsSync(file.targetPath) ? fs.readFileSync(file.targetPath) : undefined;
         const next = toBuffer(file.content);
@@ -152,6 +159,8 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
     for (const [targetPath, inventoryEntry] of Object.entries(managedInventory)) {
         if (desiredPaths.has(path.resolve(targetPath)) || !fs.existsSync(targetPath))
             continue;
+        if (findSymbolicLinkAncestor(targetPath))
+            continue;
         const ide = inferIde(targetPath, context);
         if (!ide)
             continue;
@@ -193,11 +202,162 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
         preconditions,
         repositoryPath,
         changes,
+        linkOutcomes,
         issues,
         nextActions: blocked
             ? ['Resolve every decisionRequired or error Issue, then regenerate the Deploy Plan.']
             : [],
     };
+}
+function classifyLinkedSkillPackages(desired, outcomes, issues) {
+    const linkedGroups = new Map();
+    for (const file of desired) {
+        if (file.capability !== 'skills')
+            continue;
+        const linkPath = findSymbolicLinkAncestor(file.targetPath);
+        if (!linkPath)
+            continue;
+        const key = `${file.ide}\0${path.resolve(linkPath)}`;
+        const group = linkedGroups.get(key) ?? { linkPath, files: [] };
+        group.files.push(file);
+        linkedGroups.set(key, group);
+    }
+    for (const { linkPath, files } of linkedGroups.values()) {
+        const first = files[0];
+        const packageNames = [...new Set(files.map((file) => skillPackageName(file.targetPath)))]
+            .sort();
+        const baseOutcome = {
+            ownership: 'external',
+            scope: path.basename(linkPath) === 'skills'
+                ? 'shared-link-root'
+                : 'skill-package',
+            ide: first.ide,
+            linkPath,
+            packageNames,
+            affectedFileCount: files.length,
+        };
+        if (files.some((file) => !isLinkWithinSkillRoot(file.targetPath, linkPath))) {
+            outcomes.push({ ...baseOutcome, status: 'blocked', reason: 'unclassified' });
+            issues.push(linkedSkillIssue(baseOutcome, 'unclassified'));
+            continue;
+        }
+        let resolvedPath;
+        try {
+            resolvedPath = fs.realpathSync(linkPath);
+        }
+        catch (error) {
+            const reason = symbolicLinkFailureReason(error);
+            outcomes.push({ ...baseOutcome, status: 'blocked', reason });
+            issues.push(linkedSkillIssue(baseOutcome, reason));
+            continue;
+        }
+        let matches = true;
+        try {
+            matches = files.every((file) => fs.readFileSync(file.targetPath).equals(toBuffer(file.content)));
+        }
+        catch {
+            matches = false;
+        }
+        const physicalTargetConflict = hasPhysicalTargetConflict(files, linkPath, resolvedPath, desired);
+        const followsEquivalentPhysicalTarget = linkedFilesMatchPhysicalDesired(files, linkPath, resolvedPath, desired);
+        if (!physicalTargetConflict && (matches || followsEquivalentPhysicalTarget)) {
+            outcomes.push({ ...baseOutcome, status: 'satisfied-via-link', resolvedPath });
+            issues.push({
+                severity: 'notice',
+                code: `deploy.skillsLinked.satisfied.${first.ide}`,
+                message: `Satisfied via link: ${packageSummary(packageNames)} (${files.length} affected file(s)).`,
+                details: `External link ${linkPath} resolves to ${resolvedPath}; MCV will not take ownership or write through it.`,
+            });
+            continue;
+        }
+        const reason = physicalTargetConflict
+            ? 'physical-target-conflict'
+            : 'divergent';
+        outcomes.push({ ...baseOutcome, status: 'blocked', resolvedPath, reason });
+        issues.push(linkedSkillIssue(baseOutcome, reason, resolvedPath));
+    }
+}
+function isLinkWithinSkillRoot(targetPath, linkPath) {
+    const resolvedTarget = path.resolve(targetPath);
+    const marker = `${path.sep}skills${path.sep}`;
+    const markerIndex = resolvedTarget.lastIndexOf(marker);
+    if (markerIndex < 0)
+        return false;
+    const skillRoot = resolvedTarget.slice(0, markerIndex + marker.length - 1);
+    const relativeLink = path.relative(skillRoot, path.resolve(linkPath));
+    return relativeLink === ''
+        || (relativeLink !== '..'
+            && !relativeLink.startsWith(`..${path.sep}`)
+            && !path.isAbsolute(relativeLink));
+}
+function skillPackageName(targetPath) {
+    const segments = path.resolve(targetPath).split(path.sep);
+    const skillsIndex = segments.lastIndexOf('skills');
+    return skillsIndex >= 0 && segments[skillsIndex + 1]
+        ? segments[skillsIndex + 1]
+        : path.basename(path.dirname(targetPath));
+}
+function symbolicLinkFailureReason(error) {
+    if (isRecord(error) && error.code === 'ELOOP')
+        return 'cycle';
+    if (isRecord(error) && error.code === 'ENOENT')
+        return 'dangling';
+    return 'unclassified';
+}
+function hasPhysicalTargetConflict(linkedFiles, linkPath, resolvedPath, desired) {
+    try {
+        if (!fs.statSync(resolvedPath).isDirectory()
+            && linkedFiles.some((file) => path.relative(linkPath, file.targetPath) !== '')) {
+            return true;
+        }
+    }
+    catch {
+        return true;
+    }
+    const desiredByPath = new Map(desired
+        .filter((file) => !findSymbolicLinkAncestor(file.targetPath))
+        .map((file) => [path.resolve(file.targetPath), toBuffer(file.content)]));
+    return linkedFiles.some((file) => {
+        const physicalPath = path.resolve(resolvedPath, path.relative(linkPath, file.targetPath));
+        const directDesired = desiredByPath.get(physicalPath);
+        return directDesired !== undefined && !directDesired.equals(toBuffer(file.content));
+    });
+}
+function linkedFilesMatchPhysicalDesired(linkedFiles, linkPath, resolvedPath, desired) {
+    const desiredByPath = new Map(desired
+        .filter((file) => !findSymbolicLinkAncestor(file.targetPath))
+        .map((file) => [path.resolve(file.targetPath), toBuffer(file.content)]));
+    return linkedFiles.every((file) => {
+        const physicalPath = path.resolve(resolvedPath, path.relative(linkPath, file.targetPath));
+        return desiredByPath.get(physicalPath)?.equals(toBuffer(file.content)) === true;
+    });
+}
+function linkedSkillIssue(outcome, reason, resolvedPath) {
+    return {
+        severity: 'error',
+        code: `deploy.skillsLinked.blocked.${outcome.ide}`,
+        message: `Linked external Skills are blocked: ${linkedSkillReason(reason)} (${outcome.affectedFileCount} affected file(s)).`,
+        details: [
+            `Packages: ${packageSummary(outcome.packageNames)}.`,
+            `Link: ${outcome.linkPath}.`,
+            ...(resolvedPath ? [`Resolved target: ${resolvedPath}.`] : []),
+            'MCV will not write through, replace, or manage cleanup beneath this link.',
+        ].join(' '),
+    };
+}
+function linkedSkillReason(reason) {
+    switch (reason) {
+        case 'divergent': return 'linked content differs from the desired Canonical packages';
+        case 'dangling': return 'the link target is missing';
+        case 'cycle': return 'the link contains a cycle';
+        case 'physical-target-conflict': return 'the link conflicts with a physical Deploy target';
+        case 'unclassified': return 'the link target could not be classified safely';
+    }
+}
+function packageSummary(packageNames) {
+    return packageNames.length === 1
+        ? `Skill package ${packageNames[0]}`
+        : `${packageNames.length} Skill packages`;
 }
 function registerDeployPlan(plan, mutations) {
     freezeDeployPlan(plan);
@@ -348,6 +508,7 @@ function sameDeploySnapshot(left, right) {
         && stableValue(left.preconditions) === stableValue(right.preconditions)
         && stableValue(left.changes.map(deploySnapshotChange))
             === stableValue(right.changes.map(deploySnapshotChange))
+        && stableValue(left.linkOutcomes) === stableValue(right.linkOutcomes)
         && stableValue(left.issues.map((issue) => [issue.severity, issue.code]))
             === stableValue(right.issues.map((issue) => [issue.severity, issue.code]));
 }
@@ -614,6 +775,11 @@ function freezeDeployPlan(plan) {
         Object.freeze(change);
     }
     Object.freeze(plan.changes);
+    for (const outcome of plan.linkOutcomes) {
+        Object.freeze(outcome.packageNames);
+        Object.freeze(outcome);
+    }
+    Object.freeze(plan.linkOutcomes);
     for (const issue of plan.issues)
         Object.freeze(issue);
     Object.freeze(plan.issues);

@@ -19,6 +19,11 @@ export function renderStatusPlain(report: StatusReport): string[] {
   lines.push(
     `Pending deployment: ${pending.total} ${plural(pending.total, 'change')} (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete)`,
   );
+  for (const outcome of report.linkOutcomes) {
+    lines.push(
+      `Linked Skills: ${outcome.status === 'satisfied-via-link' ? 'Satisfied via link' : 'Blocked'} · ${outcome.ownership} · ${outcome.packageNames.length} ${plural(outcome.packageNames.length, 'package')} · ${outcome.affectedFileCount} affected ${plural(outcome.affectedFileCount, 'file')}`,
+    );
+  }
   const local = report.postDeployLocalState;
   lines.push(
     `Post-deploy local state: ${local.unchanged} unchanged, ${styleText(String(local.drift), local.drift > 0 ? 'yellow' : 'green')} Drift, ${styleText(String(local.missing), local.missing > 0 ? 'red' : 'green')} missing`,

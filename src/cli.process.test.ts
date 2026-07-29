@@ -537,6 +537,87 @@ describe('packaged mcv CLI', () => {
     }
   });
 
+  it('reports and applies a matching external Skill link through the packaged CLI', () => {
+    const isolatedRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-linked-skill-')));
+    const repositoryPath = path.join(isolatedRoot, 'repository');
+    const sourceSkill = path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md');
+    const externalRoot = path.join(isolatedRoot, 'external-skills');
+    const externalSkill = path.join(externalRoot, 'review', 'SKILL.md');
+    const linkedRoot = path.join(isolatedRoot, '.claude', 'skills');
+    fs.mkdirSync(path.dirname(sourceSkill), { recursive: true });
+    fs.mkdirSync(path.dirname(externalSkill), { recursive: true });
+    fs.mkdirSync(path.dirname(linkedRoot), { recursive: true });
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 2',
+      'repositoryId: process-linked-skill-id',
+      'initializedAt: 2026-07-29T00:00:00.000Z',
+      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets:',
+      '  claudeCode:',
+      '    enabled: true',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(sourceSkill, '# Review\n');
+    fs.writeFileSync(externalSkill, '# Review\n');
+    fs.symlinkSync(externalRoot, linkedRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      const planResult = spawnSync(
+        process.execPath,
+        [cliPath, 'deploy', '--dry-run', '--json'],
+        {
+          cwd: repositoryPath,
+          encoding: 'utf8',
+          env: isolatedEnvironment(isolatedRoot),
+        },
+      );
+
+      expect(planResult.status).toBe(0);
+      expect(planResult.stderr).toBe('');
+      const plan = JSON.parse(planResult.stdout);
+      expect(plan).toMatchObject({
+        operation: 'deploy',
+        status: 'planned',
+        readyToApply: true,
+        changes: [],
+        linkOutcomes: [expect.objectContaining({
+          status: 'satisfied-via-link',
+          ownership: 'external',
+          scope: 'shared-link-root',
+          linkPath: linkedRoot,
+          resolvedPath: externalRoot,
+          packageNames: ['review'],
+          affectedFileCount: 1,
+        })],
+        issues: [expect.objectContaining({
+          severity: 'notice',
+          message: expect.stringContaining('Satisfied via link'),
+        })],
+      });
+
+      const applyResult = spawnSync(
+        process.execPath,
+        [cliPath, 'deploy', '--yes', '--json'],
+        {
+          cwd: repositoryPath,
+          encoding: 'utf8',
+          env: isolatedEnvironment(isolatedRoot),
+        },
+      );
+      expect(applyResult.status).toBe(0);
+      expect(JSON.parse(applyResult.stdout)).toMatchObject({
+        operation: 'deploy',
+        status: 'succeeded',
+        data: { appliedChangeIds: [], writtenPaths: [], deletedPaths: [] },
+      });
+      expect(fs.readFileSync(externalSkill, 'utf8')).toBe('# Review\n');
+    } finally {
+      fs.rmSync(isolatedRoot, { recursive: true, force: true });
+    }
+  });
+
   it('prints exactly one read-only Restore Plan JSON document', () => {
     const isolatedRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-restore-')));
     const targetPath = path.join(isolatedRoot, 'target', 'settings.json');

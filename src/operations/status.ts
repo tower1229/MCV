@@ -10,6 +10,7 @@ import { readState } from '../utils/state.js';
 import {
   createDeployPlan,
   type DeployChange,
+  type DeployLinkOutcome,
 } from './deploy.js';
 import {
   OPERATION_SCHEMA_VERSION,
@@ -77,6 +78,7 @@ export type StatusReport = Report<DeployChange> & {
   pendingDeployment: PendingDeploymentSummary;
   postDeployLocalState: PostDeployLocalStateSummary;
   environment: StatusEnvironmentSummary;
+  linkOutcomes: DeployLinkOutcome[];
   lastOperation: ReturnType<typeof readState>['lastOperation'] | null;
 };
 
@@ -108,6 +110,7 @@ export async function inspectStatus(context: DeviceContext): Promise<StatusRepor
       ...(repositoryReport.git ? { git: repositoryReport.git } : {}),
     },
     changes,
+    linkOutcomes: deployPlan.linkOutcomes,
     pendingDeployment: summarizePendingDeployment(changes),
     postDeployLocalState: summarizePostDeployLocalState(state.baselineSnapshot?.files ?? {}),
     environment: {

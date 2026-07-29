@@ -305,6 +305,7 @@ describe('TUI Shell view', () => {
             },
           ],
         },
+        linkOutcomes: [],
         lastOperation: {
           kind: 'deploy',
           time: '2026-07-27T00:00:00.000Z',
@@ -465,6 +466,35 @@ describe('TUI Shell view', () => {
     `);
     expect(Object.values(rendered).join('')).not.toMatch(/\u001b\[/);
     expect(Object.values(rendered).join('')).not.toContain('source-secret-value');
+  });
+
+  it('keeps satisfied external Skill links visible in wide and compact Overview', () => {
+    const state = overviewState([{
+      status: 'satisfied-via-link',
+      ownership: 'external',
+      scope: 'shared-link-root',
+      ide: 'claude-code',
+      linkPath: '/Users/张涛/.claude/skills',
+      resolvedPath: '/Users/张涛/.agents/skills',
+      packageNames: ['review'],
+      affectedFileCount: 42,
+    }]);
+
+    const wide = renderToString(
+      <ShellView state={state} terminalColumns={120} terminalRows={30} />,
+      { columns: 120 },
+    );
+    const compact = renderToString(
+      <ShellView state={state} terminalColumns={72} terminalRows={14} />,
+      { columns: 72 },
+    );
+
+    for (const rendered of [wide, compact]) {
+      const normalized = rendered.replace(/\s+/g, ' ');
+      expect(normalized).toContain('Linked Skills');
+      expect(normalized).toContain('Satisfied via link');
+      expect(normalized).toContain('External · 1 package · 42 affected files');
+    }
   });
 
   it('snapshots grouped Capture selection at narrow width with Unicode and many changes', () => {
@@ -798,6 +828,31 @@ describe('TUI Shell view', () => {
         Page   Home/End   Enter Review   q Quit   Ctrl+C Cancel
         Accelerators: d Diff   a Cleanup"
       `);
+  });
+
+  it('shows package-level external link outcomes without relying on color', () => {
+    const plan = deployPlan();
+    plan.linkOutcomes = [{
+      status: 'satisfied-via-link',
+      ownership: 'external',
+      scope: 'shared-link-root',
+      ide: 'codex',
+      linkPath: '/Users/张涛/.claude/skills',
+      resolvedPath: '/Users/张涛/.agents/skills',
+      packageNames: ['hatch-pet', 'review'],
+      affectedFileCount: 18,
+    }];
+    const state = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan,
+    });
+
+    const rendered = renderToString(<ShellView state={state} />, { columns: 100 });
+
+    expect(rendered).toContain(
+      'Satisfied via link · External · 2 Skill packages · 18 affected files',
+    );
+    expect(rendered).toContain('/Users/张涛/.claude/skills → /Users/张涛/.agents/skills');
   });
 
   it('summarizes a large Deploy Plan by capability within a 24-row terminal', () => {
@@ -1149,6 +1204,7 @@ function deployPlan(): DeployPlan {
         },
       },
     ],
+    linkOutcomes: [],
     issues: [{
       severity: 'warning',
       code: 'deploy.warning',
@@ -1204,6 +1260,7 @@ function largeDeployPlan(): DeployPlan {
     preconditions: {},
     repositoryPath: '/Users/张涛/Configuration Repository',
     changes: [...standard, ...advanced],
+    linkOutcomes: [],
     issues: [],
     nextActions: [],
   };
@@ -1510,7 +1567,7 @@ function repositoryRecoveryMenuState(): ShellState {
   });
 }
 
-function overviewState(): ShellState {
+function overviewState(linkOutcomes: StatusReport['linkOutcomes'] = []): ShellState {
   const report: StatusReport = {
     schemaVersion: 1,
     operation: 'status',
@@ -1541,7 +1598,7 @@ function overviewState(): ShellState {
       total: 20_419,
       files: [],
     },
-    environment: {
+      environment: {
       missingVariables: ['OPENAI_API_KEY', 'GEMINI_API_KEY'],
       ideSupport: [
         {
@@ -1565,9 +1622,10 @@ function overviewState(): ShellState {
           detected: false,
           surfaces: [],
         },
-      ],
-    },
-    lastOperation: {
+        ],
+      },
+      linkOutcomes,
+      lastOperation: {
       kind: 'deploy',
       time: '2026-07-27T00:00:00.000Z',
       success: false,

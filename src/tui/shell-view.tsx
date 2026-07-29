@@ -910,6 +910,11 @@ function OverviewStatus({ report }: { report: StatusReport }): ReactNode {
       <StatusLine tone={status.pending.tone} label={status.pending.label}>
         {statusItemText(status.pending)}
       </StatusLine>
+      {status.linkedSkills.map((item) => (
+        <StatusLine key={item.key} tone={item.tone} label={item.label}>
+          {statusItemText(item)}
+        </StatusLine>
+      ))}
       <StatusLine tone={status.drift.tone} label={status.drift.label}>
         {statusItemText(status.drift)}
       </StatusLine>
@@ -987,6 +992,15 @@ function CompactOverview({
       <StatusLine tone={status.pending.tone} label={status.pending.label}>
         {statusItemText(status.pending)}
       </StatusLine>
+      {status.linkedSkills.length > 0 && (
+        <Text wrap="wrap">
+          {status.linkedSkills.map((item) => (
+            <StatusFragment key={item.key} tone={item.tone} prefix="  ">
+              {item.label}: {statusItemText(item)}
+            </StatusFragment>
+          ))}
+        </Text>
+      )}
       <Text wrap="wrap">
         <StatusFragment tone={status.drift.tone}>
           {status.drift.label}: {statusItemText(status.drift)}
@@ -1038,6 +1052,7 @@ interface OverviewStatusViewModel {
   repository: OverviewStatusItem;
   git?: OverviewStatusItem;
   pending: OverviewStatusItem;
+  linkedSkills: OverviewStatusItem[];
   drift: OverviewStatusItem;
   environment: OverviewStatusItem;
   ideSupport: OverviewStatusItem[];
@@ -1083,6 +1098,13 @@ function createOverviewStatusViewModel(
       state: pending.total > 0 ? 'Review' : 'None',
       details: `${pending.total} changes (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete)`,
     },
+    linkedSkills: report.linkOutcomes.map((outcome) => ({
+      key: `linked-skills:${outcome.ide}:${outcome.linkPath}`,
+      tone: outcome.status === 'satisfied-via-link' ? 'info' : 'error',
+      label: 'Linked Skills',
+      state: outcome.status === 'satisfied-via-link' ? 'Satisfied via link' : 'Blocked',
+      details: `External · ${outcome.packageNames.length} ${outcome.packageNames.length === 1 ? 'package' : 'packages'} · ${outcome.affectedFileCount} affected ${outcome.affectedFileCount === 1 ? 'file' : 'files'}`,
+    })),
     drift: {
       key: 'drift',
       tone: local.drift > 0 || local.missing > 0 ? 'warning' : 'success',
@@ -1120,7 +1142,9 @@ function createOverviewStatusViewModel(
         label: 'Last operation',
         state: 'None',
       },
-    issues: report.issues.map((issue) => ({
+    issues: report.issues
+      .filter((issue) => !issue.code.startsWith('deploy.skillsLinked.'))
+      .map((issue) => ({
       key: issue.code,
       tone: issue.severity === 'error'
         ? 'error'
@@ -1134,7 +1158,7 @@ function createOverviewStatusViewModel(
           : 'Warning',
       state: issue.code,
       details: issue.message,
-    })),
+      })),
   };
 }
 
@@ -1564,6 +1588,23 @@ function DeploySelection({
       <Text>
         {workflow.plan.changes.length} changes · {workflow.selectedIds.length} selected
       </Text>
+      {workflow.plan.linkOutcomes.map((outcome) => (
+        <Box key={`${outcome.ide}:${outcome.linkPath}`} flexDirection="column">
+          <Text wrap="truncate-middle">
+            {outcome.status === 'satisfied-via-link'
+              ? 'Satisfied via link'
+              : `Blocked · ${outcome.reason?.replaceAll('-', ' ') ?? 'unclassified'}`}
+            {' '}· External · {outcome.packageNames.length} Skill{' '}
+            {outcome.packageNames.length === 1 ? 'package' : 'packages'} ·{' '}
+            {outcome.affectedFileCount} affected{' '}
+            {outcome.affectedFileCount === 1 ? 'file' : 'files'}
+          </Text>
+          <Text wrap="truncate-middle">
+            {'  '}{outcome.linkPath}
+            {outcome.resolvedPath ? ` → ${outcome.resolvedPath}` : ''}
+          </Text>
+        </Box>
+      ))}
       <Text> </Text>
       {!viewport.combinedIndicator && viewport.hiddenBefore > 0 && (
         <Text dimColor>  … {viewport.hiddenBefore} earlier</Text>
