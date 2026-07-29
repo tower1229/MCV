@@ -760,31 +760,62 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
       dispatch({ type: 'capture.move', delta: 1 });
       return;
     }
+    if (intent.type === 'page.previous') {
+      dispatch({
+        type: 'capture.page',
+        delta: -Math.max(1, windowSize.rows - 10),
+      });
+      return;
+    }
+    if (intent.type === 'page.next') {
+      dispatch({
+        type: 'capture.page',
+        delta: Math.max(1, windowSize.rows - 10),
+      });
+      return;
+    }
+    if (intent.type === 'focus.first') {
+      dispatch({ type: 'capture.focus', position: 'first' });
+      return;
+    }
+    if (intent.type === 'focus.last') {
+      dispatch({ type: 'capture.focus', position: 'last' });
+      return;
+    }
     if (captureWorkflow?.status === 'selection') {
       if (intent.type === 'toggle') dispatch({ type: 'capture.toggleSelection' });
+      else if (intent.type === 'open') dispatch({ type: 'capture.open' });
       else if (intent.type === 'text' && intent.value === 'd') {
         dispatch({ type: 'capture.openDiff' });
       }
       else if (intent.type === 'confirm') dispatch({ type: 'capture.continue' });
-      else if (intent.type === 'cancel') {
-        dispatch({ type: 'navigate', route: 'overview' });
+      else if (intent.type === 'back' || intent.type === 'cancel') {
+        dispatch({ type: 'capture.back' });
       }
       return;
     }
-    if (captureWorkflow?.status === 'diff' && intent.type === 'cancel') {
-      dispatch({ type: 'capture.closeDiff' });
+    if (
+      captureWorkflow?.status === 'diff'
+      && (intent.type === 'back' || intent.type === 'cancel')
+    ) {
+      dispatch({ type: 'capture.back' });
       return;
     }
     if (captureWorkflow?.status === 'decision') {
       if (intent.type === 'toggle') dispatch({ type: 'capture.chooseDecision' });
+      else if (intent.type === 'open') dispatch({ type: 'capture.open' });
       else if (intent.type === 'confirm') dispatch({ type: 'capture.continue' });
-      else if (intent.type === 'cancel') dispatch({ type: 'capture.back' });
+      else if (intent.type === 'back' || intent.type === 'cancel') {
+        dispatch({ type: 'capture.back' });
+      }
       return;
     }
     if (captureWorkflow?.status === 'confirmation') {
       if (intent.type === 'toggle') dispatch({ type: 'capture.toggleWarning' });
       else if (intent.type === 'confirm') dispatch({ type: 'capture.apply' });
-      else if (intent.type === 'cancel') dispatch({ type: 'capture.back' });
+      else if (intent.type === 'back' || intent.type === 'cancel') {
+        dispatch({ type: 'capture.back' });
+      }
     }
   });
 

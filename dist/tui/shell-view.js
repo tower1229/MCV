@@ -20,7 +20,7 @@ export function ShellView({ state, terminalColumns, terminalRows, }) {
                             ? _jsx(ScrollablePageContent, { state: state })
                             : _jsx(RepositoryWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'environment' && (_jsx(ScrollablePageContent, { state: state })), page.status === 'ready' && page.route === 'help' && (_jsx(ScrollablePageContent, { state: state })), page.status === 'ready' && page.route === 'capture' && (page.workflow.status === 'result'
                             ? _jsx(ScrollablePageContent, { state: state })
-                            : _jsx(CaptureWorkflow, { workflow: page.workflow })), page.status === 'ready' && page.route === 'deploy' && (page.workflow.status === 'result'
+                            : (_jsx(CaptureWorkflow, { workflow: page.workflow, terminalRows: rows }))), page.status === 'ready' && page.route === 'deploy' && (page.workflow.status === 'result'
                             ? _jsx(ScrollablePageContent, { state: state })
                             : (_jsx(DeployWorkflow, { workflow: page.workflow, terminalRows: rows }))), page.status === 'ready' && page.route === 'restore' && (page.workflow.status === 'result'
                             ? _jsx(ScrollablePageContent, { state: state })
@@ -152,26 +152,24 @@ function scrollablePageLines(state) {
     if (page.route === 'capture') {
         const result = page.workflow.result;
         if (result.status === 'succeeded') {
-            return pageLines('capture-success', [
-                'Capture succeeded.',
+            return statusPageLines('capture-success', 'success', [
+                'Succeeded: Capture completed.',
                 `Applied: ${result.data?.appliedChangeIds.length ?? 0} changes`,
                 `Written: ${result.data?.writtenPaths.length ?? 0} paths`,
                 `Deleted: ${result.data?.deletedPaths.length ?? 0} paths`,
                 ...result.issues.map((issue) => `Warning: ${issue.message}`),
-            ], (index) => index === 0
-                ? 'green'
-                : index >= 4 ? 'yellow' : undefined);
+            ], (index) => index >= 4 ? 'warning' : undefined);
         }
         if (result.status === 'blocked') {
-            return pageLines('capture-blocked', [
-                'Capture was blocked; Repository was not changed.',
+            return statusPageLines('capture-blocked', 'error', [
+                'Blocked: Capture did not change the Repository.',
                 ...result.issues.map((issue) => issue.message),
-            ], (index) => index === 0 ? 'yellow' : undefined);
+            ]);
         }
-        return pageLines('capture-failed', [
-            `Capture failed: ${result.error.message}`,
+        return statusPageLines('capture-failed', 'error', [
+            `Failed: ${result.error.message}`,
             'Repository transaction was not completed.',
-        ], (index) => index === 0 ? 'red' : undefined);
+        ]);
     }
     if (page.route === 'deploy') {
         const result = page.workflow.result;
@@ -222,8 +220,17 @@ function pageLines(prefix, texts, colorForIndex = () => undefined) {
         color: colorForIndex(index),
     }));
 }
+function statusPageLines(prefix, tone, texts, toneForIndex = () => undefined) {
+    return texts.map((text, index) => ({
+        key: `${prefix}:${index}`,
+        text,
+        tone: index === 0 ? tone : toneForIndex(index),
+    }));
+}
 function ScrollablePageContent({ state, }) {
-    return (_jsx(Box, { flexDirection: "column", children: scrollablePageLines(state).map((line) => (_jsx(Text, { color: line.color, wrap: "wrap", children: line.text }, line.key))) }));
+    return (_jsx(Box, { flexDirection: "column", children: scrollablePageLines(state).map((line) => (line.tone
+            ? (_jsxs(Text, { color: statusToneStyle(line.tone).color, dimColor: statusToneStyle(line.tone).dimColor, wrap: "wrap", children: [statusToneStyle(line.tone).symbol, " ", line.text] }, line.key))
+            : (_jsx(Text, { color: line.color, wrap: "wrap", children: line.text }, line.key)))) }));
 }
 function pageTitle(state) {
     const { page } = state;
@@ -357,13 +364,19 @@ function pageControls(state, terminalRows) {
     }
     switch (page.workflow.status) {
         case 'selection':
-            return '↑↓ Move   Space Select   d Diff   Enter Continue   q Quit   Ctrl+C Cancel';
+            return terminalRows <= 12
+                ? '↑↓/PgUp/PgDn Move   Home/End   ← Back   → Diff   Space Select   Enter Review   q Quit'
+                : '↑↓ Move   PgUp/PgDn Page   Home/End   ← Back   → Diff   Space Select   Enter Review   q Quit   Ctrl+C Cancel';
         case 'diff':
-            return 'Escape Back   q Quit   Ctrl+C Cancel';
+            return '←/Escape Close Diff   q Quit   Ctrl+C Cancel';
         case 'decision':
-            return '↑↓ Move   Space Choose   Enter Continue   Escape Back   q Quit   Ctrl+C Cancel';
+            return terminalRows <= 12
+                ? '↑↓/Pg Move   Home/End   ← Back   → Next   Space Choose   q Quit'
+                : '↑↓/Pg Move   Home/End   ← Back   →/Enter Next   Space Choose   q Quit   Ctrl+C Cancel';
         case 'confirmation':
-            return '↑↓ Move   Space Confirm Warning   Enter Apply   Escape Back   q Quit   Ctrl+C Cancel';
+            return terminalRows <= 12
+                ? '↑↓/Pg Move   Home/End   Space Confirm   Enter Apply   ← Back   q Quit'
+                : '↑↓/Pg Move   Home/End   Space Confirm Warning   Enter Apply   ←/Escape Back   q Quit   Ctrl+C Cancel';
         case 'applying':
             return undefined;
         case 'regenerating':
@@ -582,36 +595,39 @@ function StatusLine({ tone, label, indent = 0, children, }) {
     const style = statusToneStyle(tone);
     return (_jsxs(Text, { color: style.color, dimColor: style.dimColor, wrap: "wrap", children: [' '.repeat(indent), style.symbol, " ", label, ": ", children] }));
 }
-function CaptureWorkflow({ workflow, }) {
+function CaptureWorkflow({ workflow, terminalRows, }) {
     switch (workflow.status) {
         case 'selection':
-            return _jsx(CaptureSelection, { workflow: workflow });
+            return (_jsx(CaptureSelection, { workflow: workflow, terminalRows: terminalRows }));
         case 'diff':
             return _jsx(CaptureDiff, { workflow: workflow });
         case 'decision':
-            return _jsx(CaptureDecision, { workflow: workflow });
+            return (_jsx(CaptureDecision, { workflow: workflow, terminalRows: terminalRows }));
         case 'confirmation':
-            return _jsx(CaptureConfirmation, { workflow: workflow });
+            return (_jsx(CaptureConfirmation, { workflow: workflow, terminalRows: terminalRows }));
         case 'applying':
             return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(StatusLine, { tone: "info", label: "Applying", children: [workflow.selectedIds.length, " selected changes transactionally..."] }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait; input is disabled during Apply." })] }));
         case 'regenerating':
-            return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "The Capture Plan became stale. Regenerating a safe preview..." }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait." })] }));
+            return (_jsxs(Box, { flexDirection: "column", children: [_jsx(StatusLine, { tone: "warning", label: "Review required", children: "The Capture Plan became stale. Regenerating a safe preview..." }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Please wait." })] }));
         case 'result':
             return null;
     }
 }
-function CaptureSelection({ workflow, }) {
-    const maximumVisible = 12;
-    const visibleStart = Math.min(Math.max(workflow.cursor - maximumVisible + 1, 0), Math.max(workflow.plan.changes.length - maximumVisible, 0));
-    const visibleChanges = workflow.plan.changes.slice(visibleStart, visibleStart + maximumVisible);
-    let previousGroup = '';
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: ["Repository: ", workflow.plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: [workflow.plan.changes.length, " changes \u00B7 ", workflow.selectedIds.length, " selected"] }), _jsx(Text, { children: " " }), visibleStart > 0 && _jsxs(Text, { children: ["\u2026 ", visibleStart, " earlier changes"] }), visibleChanges.map((change, visibleIndex) => {
-                const index = visibleStart + visibleIndex;
-                const group = `${change.ide}/${change.itemType}`;
-                const showGroup = group !== previousGroup;
-                previousGroup = group;
-                return (_jsxs(Box, { flexDirection: "column", children: [showGroup && _jsx(Text, { children: displayGroup(change) }), _jsxs(Text, { children: [index === workflow.cursor ? '>' : ' ', ' ', "[", workflow.selectedIds.includes(change.id) ? 'x' : ' ', "] [", change.change, "] ", change.name] })] }, change.id));
-            }), workflow.plan.changes.length > visibleStart + visibleChanges.length && (_jsxs(Text, { children: ["\u2026 ", workflow.plan.changes.length - visibleStart - visibleChanges.length, " more changes"] })), workflow.plan.issues.some((issue) => issue.severity === 'error') && (_jsx(Text, { color: "red", children: "Apply disabled: resolve every error before continuing." }))] }));
+function CaptureSelection({ workflow, terminalRows, }) {
+    const viewport = listViewport(workflow.plan.changes, workflow.cursor, Math.max(1, terminalRows - (terminalRows <= 12 ? 9 : 10)));
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: ["Repository: ", workflow.plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: [workflow.plan.changes.length, " changes \u00B7 ", workflow.selectedIds.length, " selected"] }), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: change }, visibleIndex) => {
+                const index = viewport.start + visibleIndex;
+                const selected = workflow.selectedIds.includes(change.id);
+                const destructive = change.change === 'delete';
+                const tone = destructive
+                    ? 'error'
+                    : selected ? 'success' : 'muted';
+                const style = statusToneStyle(tone);
+                const label = destructive
+                    ? 'Destructive'
+                    : selected ? 'Selected' : 'Unselected';
+                return (_jsxs(Text, { color: style.color, dimColor: style.dimColor, wrap: "truncate-end", children: [index === workflow.cursor ? '>' : ' ', ' ', "[", selected ? 'x' : ' ', "] ", style.symbol, " ", label, " \u00B7 [", change.change, "]", ' ', change.name, " \u00B7 ", displayGroup(change)] }, change.id));
+            }), !viewport.combinedIndicator && viewport.hiddenAfter > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenAfter, " more"] })), viewport.combinedIndicator && (_jsxs(Text, { dimColor: true, children: ['  ', "\u2026 ", viewport.hiddenBefore, " earlier \u00B7 ", viewport.hiddenAfter, " more"] })), workflow.plan.issues.some((issue) => issue.severity === 'error') && (_jsx(StatusLine, { tone: "error", label: "Blocked", children: "resolve every error before continuing." }))] }));
 }
 function CaptureDiff({ workflow, }) {
     const change = workflow.plan.changes.find((item) => item.id === workflow.changeId);
@@ -625,17 +641,27 @@ function CapturePreviewView({ preview, }) {
     }
     return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: preview.repositoryPath }), preview.diff.split('\n').map((line, index) => (_jsxs(Text, { children: ['  ', line] }, `${preview.repositoryPath}:${index}`)))] }));
 }
-function CaptureDecision({ workflow, }) {
+function CaptureDecision({ workflow, terminalRows, }) {
     const groups = captureDecisionGroups(workflow.plan);
     const choices = groups[workflow.groupIndex] ?? [];
     const groupName = choices[0]?.name ?? 'required choice';
     const selected = choices.some((choice) => workflow.selectedIds.includes(choice.id));
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: ["Decision ", workflow.groupIndex + 1, "/", groups.length, ": ", groupName] }), choices.map((choice, index) => (_jsxs(Text, { children: [index === workflow.cursor ? '>' : ' ', ' ', "[", workflow.selectedIds.includes(choice.id) ? 'x' : ' ', "] ", choice.sourceLabel ?? choice.name] }, choice.id))), !selected && (_jsxs(_Fragment, { children: [_jsx(Text, { children: " " }), _jsx(Text, { color: "yellow", children: "Continue disabled: choose exactly one option." })] }))] }));
+    const viewport = listViewport(choices, workflow.cursor, Math.max(1, terminalRows - (terminalRows <= 12 ? 8 : 10)));
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: ["Decision ", workflow.groupIndex + 1, "/", groups.length, ": ", groupName] }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: choice }, index) => (_jsx(CaptureChoiceLine, { choice: choice, focused: viewport.start + index === workflow.cursor, selected: workflow.selectedIds.includes(choice.id) }, choice.id))), !viewport.combinedIndicator && viewport.hiddenAfter > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenAfter, " more"] })), viewport.combinedIndicator && (_jsxs(Text, { dimColor: true, children: ['  ', "\u2026 ", viewport.hiddenBefore, " earlier \u00B7 ", viewport.hiddenAfter, " more"] })), !selected && (_jsxs(_Fragment, { children: [_jsx(Text, { children: " " }), _jsx(StatusLine, { tone: "error", label: "Blocked", children: "choose exactly one option before continuing." })] }))] }));
 }
-function CaptureConfirmation({ workflow, }) {
+function CaptureChoiceLine({ choice, focused, selected, }) {
+    const style = statusToneStyle(selected ? 'success' : 'muted');
+    return (_jsxs(Text, { color: style.color, dimColor: style.dimColor, children: [focused ? '>' : ' ', ' ', "[", selected ? 'x' : ' ', "] ", style.symbol, " ", selected ? 'Selected' : 'Unselected', " \u00B7", ' ', choice.sourceLabel ?? choice.name] }));
+}
+function CaptureConfirmation({ workflow, terminalRows, }) {
     const warnings = captureWarnings(workflow.plan);
     const allConfirmed = warnings.every((warning) => workflow.confirmedIssueCodes.includes(warning.code));
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: [workflow.selectedIds.length, " selected changes"] }), warnings.length > 0 && _jsx(Text, { children: "Warnings require explicit confirmation:" }), warnings.map((warning, index) => (_jsxs(Text, { children: [index === workflow.warningCursor ? '>' : ' ', ' ', "[", workflow.confirmedIssueCodes.includes(warning.code) ? 'x' : ' ', "] ", warning.message] }, warning.code))), !allConfirmed && (_jsxs(_Fragment, { children: [_jsx(Text, { children: " " }), _jsx(Text, { color: "yellow", children: "Apply disabled: confirm every warning." })] }))] }));
+    const viewport = listViewport(warnings, workflow.warningCursor, Math.max(1, terminalRows - (terminalRows <= 12 ? 8 : 10)));
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: [workflow.selectedIds.length, " selected changes"] }), warnings.length > 0 && _jsx(Text, { children: "Warnings require explicit confirmation:" }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: warning }, index) => {
+                const confirmed = workflow.confirmedIssueCodes.includes(warning.code);
+                const style = statusToneStyle(confirmed ? 'success' : 'warning');
+                return (_jsxs(Text, { color: style.color, dimColor: style.dimColor, children: [viewport.start + index === workflow.warningCursor ? '>' : ' ', ' ', "[", confirmed ? 'x' : ' ', "] ", style.symbol, ' ', confirmed ? 'Confirmed' : 'Warning', " \u00B7 ", warning.message] }, warning.code));
+            }), !viewport.combinedIndicator && viewport.hiddenAfter > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenAfter, " more"] })), viewport.combinedIndicator && (_jsxs(Text, { dimColor: true, children: ['  ', "\u2026 ", viewport.hiddenBefore, " earlier \u00B7 ", viewport.hiddenAfter, " more"] })), !allConfirmed && (_jsx(StatusLine, { tone: "error", label: "Blocked", children: "confirm every warning." }))] }));
 }
 function displayGroup(change) {
     const ide = change.ide === 'shared'

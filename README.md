@@ -75,7 +75,7 @@ mcv discover --json
 mcv capture
 ```
 
-TTY workflow 会按 IDE 与 File、Skill、MCP 分组显示经过处理的安全预览。`Space` 选择项目，`d` 查看 Diff，`Enter` 继续；删除候选默认不选，warning 必须逐项显式确认，decision required 与 error 未解决时 Apply 不可用。Apply 前后检测到 Plan 已过期时会重新生成预览，不会执行旧选择。只有最终确认后才写入仓库。处理包括：
+TTY workflow 会按 IDE 与 File、Skill、MCP 显示经过处理的安全预览。按 `↑` / `↓` 移动焦点，按 `→` 打开 Diff 或推进到下一审阅面，按 `←` 关闭 Diff 或返回上一审阅面并恢复原焦点；`Home`、`End`、`Page Up`、`Page Down` 用于长列表。`Space` 选择项目、required choice 或 warning confirmation，只有最终确认面的 `Enter` 可以开始 Apply；`d` 仍是可选 Diff 快捷键。选择、warning、blocked、applying 与 Result 使用带显式符号和文字的共享状态语义，关闭颜色时信息不减少。删除候选默认不选，warning 必须逐项显式确认，decision required 与 error 未解决时 Apply 不可用。Apply 前后检测到 Plan 已过期时会重新生成预览并要求重新审阅，不会保留旧选择或授权。只有最终确认后才写入仓库。处理包括：
 
 - 按文件名排除 `.env`、credential 文件、私钥等已知敏感文件；
 - 按字段名识别 `secret`、`token`、`key`、`password`、`credential`；

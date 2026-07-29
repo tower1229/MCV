@@ -115,7 +115,12 @@ export function ShellView({
           {page.status === 'ready' && page.route === 'capture' && (
             page.workflow.status === 'result'
               ? <ScrollablePageContent state={state} />
-              : <CaptureWorkflow workflow={page.workflow} />
+              : (
+                <CaptureWorkflow
+                  workflow={page.workflow}
+                  terminalRows={rows}
+                />
+              )
           )}
           {page.status === 'ready' && page.route === 'deploy' && (
             page.workflow.status === 'result'
@@ -250,6 +255,7 @@ interface ScrollablePageLine {
   key: string;
   text: string;
   color?: 'green' | 'yellow' | 'red';
+  tone?: StatusTone;
 }
 
 function scrollablePageLines(state: ShellState): ScrollablePageLine[] {
@@ -307,26 +313,24 @@ function scrollablePageLines(state: ShellState): ScrollablePageLine[] {
   if (page.route === 'capture') {
     const result = page.workflow.result;
     if (result.status === 'succeeded') {
-      return pageLines('capture-success', [
-        'Capture succeeded.',
+      return statusPageLines('capture-success', 'success', [
+        'Succeeded: Capture completed.',
         `Applied: ${result.data?.appliedChangeIds.length ?? 0} changes`,
         `Written: ${result.data?.writtenPaths.length ?? 0} paths`,
         `Deleted: ${result.data?.deletedPaths.length ?? 0} paths`,
         ...result.issues.map((issue) => `Warning: ${issue.message}`),
-      ], (index) => index === 0
-        ? 'green'
-        : index >= 4 ? 'yellow' : undefined);
+      ], (index) => index >= 4 ? 'warning' : undefined);
     }
     if (result.status === 'blocked') {
-      return pageLines('capture-blocked', [
-        'Capture was blocked; Repository was not changed.',
+      return statusPageLines('capture-blocked', 'error', [
+        'Blocked: Capture did not change the Repository.',
         ...result.issues.map((issue) => issue.message),
-      ], (index) => index === 0 ? 'yellow' : undefined);
+      ]);
     }
-    return pageLines('capture-failed', [
-      `Capture failed: ${result.error.message}`,
+    return statusPageLines('capture-failed', 'error', [
+      `Failed: ${result.error.message}`,
       'Repository transaction was not completed.',
-    ], (index) => index === 0 ? 'red' : undefined);
+    ]);
   }
   if (page.route === 'deploy') {
     const result = page.workflow.result;
@@ -385,6 +389,19 @@ function pageLines(
   }));
 }
 
+function statusPageLines(
+  prefix: string,
+  tone: StatusTone,
+  texts: string[],
+  toneForIndex: (index: number) => StatusTone | undefined = () => undefined,
+): ScrollablePageLine[] {
+  return texts.map((text, index) => ({
+    key: `${prefix}:${index}`,
+    text,
+    tone: index === 0 ? tone : toneForIndex(index),
+  }));
+}
+
 function ScrollablePageContent({
   state,
 }: {
@@ -393,9 +410,22 @@ function ScrollablePageContent({
   return (
     <Box flexDirection="column">
       {scrollablePageLines(state).map((line) => (
-        <Text key={line.key} color={line.color} wrap="wrap">
-          {line.text}
-        </Text>
+        line.tone
+          ? (
+            <Text
+              key={line.key}
+              color={statusToneStyle(line.tone).color}
+              dimColor={statusToneStyle(line.tone).dimColor}
+              wrap="wrap"
+            >
+              {statusToneStyle(line.tone).symbol} {line.text}
+            </Text>
+          )
+          : (
+            <Text key={line.key} color={line.color} wrap="wrap">
+              {line.text}
+            </Text>
+          )
       ))}
     </Box>
   );
@@ -529,13 +559,19 @@ function pageControls(
   }
   switch (page.workflow.status) {
     case 'selection':
-      return '↑↓ Move   Space Select   d Diff   Enter Continue   q Quit   Ctrl+C Cancel';
+      return terminalRows <= 12
+        ? '↑↓/PgUp/PgDn Move   Home/End   ← Back   → Diff   Space Select   Enter Review   q Quit'
+        : '↑↓ Move   PgUp/PgDn Page   Home/End   ← Back   → Diff   Space Select   Enter Review   q Quit   Ctrl+C Cancel';
     case 'diff':
-      return 'Escape Back   q Quit   Ctrl+C Cancel';
+      return '←/Escape Close Diff   q Quit   Ctrl+C Cancel';
     case 'decision':
-      return '↑↓ Move   Space Choose   Enter Continue   Escape Back   q Quit   Ctrl+C Cancel';
+      return terminalRows <= 12
+        ? '↑↓/Pg Move   Home/End   ← Back   → Next   Space Choose   q Quit'
+        : '↑↓/Pg Move   Home/End   ← Back   →/Enter Next   Space Choose   q Quit   Ctrl+C Cancel';
     case 'confirmation':
-      return '↑↓ Move   Space Confirm Warning   Enter Apply   Escape Back   q Quit   Ctrl+C Cancel';
+      return terminalRows <= 12
+        ? '↑↓/Pg Move   Home/End   Space Confirm   Enter Apply   ← Back   q Quit'
+        : '↑↓/Pg Move   Home/End   Space Confirm Warning   Enter Apply   ←/Escape Back   q Quit   Ctrl+C Cancel';
     case 'applying':
       return undefined;
     case 'regenerating':
@@ -1081,18 +1117,35 @@ function StatusLine({
 
 function CaptureWorkflow({
   workflow,
+  terminalRows,
 }: {
   workflow: CaptureWorkflowState;
+  terminalRows: number;
 }): ReactNode {
   switch (workflow.status) {
     case 'selection':
-      return <CaptureSelection workflow={workflow} />;
+      return (
+        <CaptureSelection
+          workflow={workflow}
+          terminalRows={terminalRows}
+        />
+      );
     case 'diff':
       return <CaptureDiff workflow={workflow} />;
     case 'decision':
-      return <CaptureDecision workflow={workflow} />;
+      return (
+        <CaptureDecision
+          workflow={workflow}
+          terminalRows={terminalRows}
+        />
+      );
     case 'confirmation':
-      return <CaptureConfirmation workflow={workflow} />;
+      return (
+        <CaptureConfirmation
+          workflow={workflow}
+          terminalRows={terminalRows}
+        />
+      );
     case 'applying':
       return (
         <Box flexDirection="column">
@@ -1106,7 +1159,9 @@ function CaptureWorkflow({
     case 'regenerating':
       return (
         <Box flexDirection="column">
-          <Text>The Capture Plan became stale. Regenerating a safe preview...</Text>
+          <StatusLine tone="warning" label="Review required">
+            The Capture Plan became stale. Regenerating a safe preview...
+          </StatusLine>
           <Text> </Text>
           <Text dimColor>Please wait.</Text>
         </Box>
@@ -1118,50 +1173,65 @@ function CaptureWorkflow({
 
 function CaptureSelection({
   workflow,
+  terminalRows,
 }: {
   workflow: Extract<CaptureWorkflowState, { status: 'selection' }>;
+  terminalRows: number;
 }): ReactNode {
-  const maximumVisible = 12;
-  const visibleStart = Math.min(
-    Math.max(workflow.cursor - maximumVisible + 1, 0),
-    Math.max(workflow.plan.changes.length - maximumVisible, 0),
+  const viewport = listViewport(
+    workflow.plan.changes,
+    workflow.cursor,
+    Math.max(1, terminalRows - (terminalRows <= 12 ? 9 : 10)),
   );
-  const visibleChanges = workflow.plan.changes.slice(
-    visibleStart,
-    visibleStart + maximumVisible,
-  );
-  let previousGroup = '';
 
   return (
     <Box flexDirection="column">
-      <Text>Repository: {workflow.plan.repositoryPath ?? 'not bound'}</Text>
+      <Text wrap="truncate-middle">
+        Repository: {workflow.plan.repositoryPath ?? 'not bound'}
+      </Text>
       <Text>
         {workflow.plan.changes.length} changes · {workflow.selectedIds.length} selected
       </Text>
       <Text> </Text>
-      {visibleStart > 0 && <Text>… {visibleStart} earlier changes</Text>}
-      {visibleChanges.map((change, visibleIndex) => {
-        const index = visibleStart + visibleIndex;
-        const group = `${change.ide}/${change.itemType}`;
-        const showGroup = group !== previousGroup;
-        previousGroup = group;
+      {!viewport.combinedIndicator && viewport.hiddenBefore > 0 && (
+        <Text dimColor>  … {viewport.hiddenBefore} earlier</Text>
+      )}
+      {viewport.items.map(({ item: change }, visibleIndex) => {
+        const index = viewport.start + visibleIndex;
+        const selected = workflow.selectedIds.includes(change.id);
+        const destructive = change.change === 'delete';
+        const tone: StatusTone = destructive
+          ? 'error'
+          : selected ? 'success' : 'muted';
+        const style = statusToneStyle(tone);
+        const label = destructive
+          ? 'Destructive'
+          : selected ? 'Selected' : 'Unselected';
         return (
-          <Box key={change.id} flexDirection="column">
-            {showGroup && <Text>{displayGroup(change)}</Text>}
-            <Text>
-              {index === workflow.cursor ? '>' : ' '}{' '}
-              [{workflow.selectedIds.includes(change.id) ? 'x' : ' '}] [{change.change}] {change.name}
-            </Text>
-          </Box>
+          <Text
+            key={change.id}
+            color={style.color}
+            dimColor={style.dimColor}
+            wrap="truncate-end"
+          >
+            {index === workflow.cursor ? '>' : ' '}{' '}
+            [{selected ? 'x' : ' '}] {style.symbol} {label} · [{change.change}]{' '}
+            {change.name} · {displayGroup(change)}
+          </Text>
         );
       })}
-      {workflow.plan.changes.length > visibleStart + visibleChanges.length && (
-        <Text>
-          … {workflow.plan.changes.length - visibleStart - visibleChanges.length} more changes
+      {!viewport.combinedIndicator && viewport.hiddenAfter > 0 && (
+        <Text dimColor>  … {viewport.hiddenAfter} more</Text>
+      )}
+      {viewport.combinedIndicator && (
+        <Text dimColor>
+          {'  '}… {viewport.hiddenBefore} earlier · {viewport.hiddenAfter} more
         </Text>
       )}
       {workflow.plan.issues.some((issue) => issue.severity === 'error') && (
-        <Text color="red">Apply disabled: resolve every error before continuing.</Text>
+        <StatusLine tone="error" label="Blocked">
+          resolve every error before continuing.
+        </StatusLine>
       )}
     </Box>
   );
@@ -1215,55 +1285,122 @@ function CapturePreviewView({
 
 function CaptureDecision({
   workflow,
+  terminalRows,
 }: {
   workflow: Extract<CaptureWorkflowState, { status: 'decision' }>;
+  terminalRows: number;
 }): ReactNode {
   const groups = captureDecisionGroups(workflow.plan);
   const choices = groups[workflow.groupIndex] ?? [];
   const groupName = choices[0]?.name ?? 'required choice';
   const selected = choices.some((choice) => workflow.selectedIds.includes(choice.id));
+  const viewport = listViewport(
+    choices,
+    workflow.cursor,
+    Math.max(1, terminalRows - (terminalRows <= 12 ? 8 : 10)),
+  );
   return (
     <Box flexDirection="column">
       <Text>Decision {workflow.groupIndex + 1}/{groups.length}: {groupName}</Text>
-      {choices.map((choice, index) => (
-        <Text key={choice.id}>
-          {index === workflow.cursor ? '>' : ' '}{' '}
-          [{workflow.selectedIds.includes(choice.id) ? 'x' : ' '}] {choice.sourceLabel ?? choice.name}
-        </Text>
+      {!viewport.combinedIndicator && viewport.hiddenBefore > 0 && (
+        <Text dimColor>  … {viewport.hiddenBefore} earlier</Text>
+      )}
+      {viewport.items.map(({ item: choice }, index) => (
+        <CaptureChoiceLine
+          key={choice.id}
+          choice={choice}
+          focused={viewport.start + index === workflow.cursor}
+          selected={workflow.selectedIds.includes(choice.id)}
+        />
       ))}
+      {!viewport.combinedIndicator && viewport.hiddenAfter > 0 && (
+        <Text dimColor>  … {viewport.hiddenAfter} more</Text>
+      )}
+      {viewport.combinedIndicator && (
+        <Text dimColor>
+          {'  '}… {viewport.hiddenBefore} earlier · {viewport.hiddenAfter} more
+        </Text>
+      )}
       {!selected && (
         <>
           <Text> </Text>
-          <Text color="yellow">Continue disabled: choose exactly one option.</Text>
+          <StatusLine tone="error" label="Blocked">
+            choose exactly one option before continuing.
+          </StatusLine>
         </>
       )}
     </Box>
   );
 }
 
+function CaptureChoiceLine({
+  choice,
+  focused,
+  selected,
+}: {
+  choice: CaptureChange;
+  focused: boolean;
+  selected: boolean;
+}): ReactNode {
+  const style = statusToneStyle(selected ? 'success' : 'muted');
+  return (
+    <Text color={style.color} dimColor={style.dimColor}>
+      {focused ? '>' : ' '}{' '}
+      [{selected ? 'x' : ' '}] {style.symbol} {selected ? 'Selected' : 'Unselected'} ·{' '}
+      {choice.sourceLabel ?? choice.name}
+    </Text>
+  );
+}
+
 function CaptureConfirmation({
   workflow,
+  terminalRows,
 }: {
   workflow: Extract<CaptureWorkflowState, { status: 'confirmation' }>;
+  terminalRows: number;
 }): ReactNode {
   const warnings = captureWarnings(workflow.plan);
   const allConfirmed = warnings.every((warning) =>
     workflow.confirmedIssueCodes.includes(warning.code));
+  const viewport = listViewport(
+    warnings,
+    workflow.warningCursor,
+    Math.max(1, terminalRows - (terminalRows <= 12 ? 8 : 10)),
+  );
   return (
     <Box flexDirection="column">
       <Text>{workflow.selectedIds.length} selected changes</Text>
       {warnings.length > 0 && <Text>Warnings require explicit confirmation:</Text>}
-      {warnings.map((warning, index) => (
-        <Text key={warning.code}>
-          {index === workflow.warningCursor ? '>' : ' '}{' '}
-          [{workflow.confirmedIssueCodes.includes(warning.code) ? 'x' : ' '}] {warning.message}
+      {!viewport.combinedIndicator && viewport.hiddenBefore > 0 && (
+        <Text dimColor>  … {viewport.hiddenBefore} earlier</Text>
+      )}
+      {viewport.items.map(({ item: warning }, index) => {
+        const confirmed = workflow.confirmedIssueCodes.includes(warning.code);
+        const style = statusToneStyle(confirmed ? 'success' : 'warning');
+        return (
+          <Text
+            key={warning.code}
+            color={style.color}
+            dimColor={style.dimColor}
+          >
+            {viewport.start + index === workflow.warningCursor ? '>' : ' '}{' '}
+            [{confirmed ? 'x' : ' '}] {style.symbol}{' '}
+            {confirmed ? 'Confirmed' : 'Warning'} · {warning.message}
+          </Text>
+        );
+      })}
+      {!viewport.combinedIndicator && viewport.hiddenAfter > 0 && (
+        <Text dimColor>  … {viewport.hiddenAfter} more</Text>
+      )}
+      {viewport.combinedIndicator && (
+        <Text dimColor>
+          {'  '}… {viewport.hiddenBefore} earlier · {viewport.hiddenAfter} more
         </Text>
-      ))}
+      )}
       {!allConfirmed && (
-        <>
-          <Text> </Text>
-          <Text color="yellow">Apply disabled: confirm every warning.</Text>
-        </>
+        <StatusLine tone="error" label="Blocked">
+          confirm every warning.
+        </StatusLine>
       )}
     </Box>
   );

@@ -439,6 +439,49 @@ describe('TUI Shell reducer', () => {
     });
   });
 
+  it('pages Capture changes and restores stable focus after directional Diff review', () => {
+    const plan = capturePlan();
+    plan.changes.push(...Array.from({ length: 12 }, (_, index) => ({
+      ...plan.changes[0],
+      id: `capture-file-${index + 2}`,
+      name: `settings-${index + 2}.json`,
+      defaultSelected: false,
+    })));
+    let state = shellReducer(createInitialShellState('capture'), {
+      type: 'capture.loaded',
+      plan,
+    });
+
+    state = shellReducer(state, { type: 'capture.focus', position: 'last' });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'selection', cursor: 15 },
+    });
+    state = shellReducer(state, { type: 'capture.page', delta: -6 });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'selection', cursor: 9 },
+    });
+    state = shellReducer(state, { type: 'capture.open' });
+    expect(state.page).toMatchObject({
+      workflow: {
+        status: 'diff',
+        cursor: 9,
+        changeId: 'capture-file-7',
+      },
+    });
+    state = shellReducer(state, { type: 'capture.back' });
+    expect(state.page).toMatchObject({
+      workflow: {
+        status: 'selection',
+        cursor: 9,
+        selectedIds: ['capture-file'],
+      },
+    });
+    state = shellReducer(state, { type: 'capture.focus', position: 'first' });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'selection', cursor: 0 },
+    });
+  });
+
   it('moves through Diff and required decisions before confirmation', () => {
     const loaded = shellReducer(createInitialShellState('capture'), {
       type: 'capture.loaded',
@@ -456,6 +499,58 @@ describe('TUI Shell reducer', () => {
     expectCaptureStatus(confirmation, 'confirmation');
   });
 
+  it('advances and backs through Capture review surfaces while restoring focus', () => {
+    const plan = capturePlan();
+    plan.changes.push(
+      {
+        ...plan.changes[2],
+        id: 'capture-choice-second',
+        name: 'second',
+        decisionGroupId: 'mcp-second',
+        sourceLabel: 'Gemini',
+      },
+      {
+        ...plan.changes[3],
+        id: 'capture-skip-second',
+        name: 'second',
+        decisionGroupId: 'mcp-second',
+        sourceLabel: 'Skip second',
+      },
+    );
+    let state = shellReducer(createInitialShellState('capture'), {
+      type: 'capture.loaded',
+      plan,
+    });
+    state = shellReducer(state, { type: 'capture.move', delta: 2 });
+    state = shellReducer(state, { type: 'capture.open' });
+    expectCaptureStatus(state, 'decision');
+    state = shellReducer(state, { type: 'capture.chooseDecision' });
+    state = shellReducer(state, { type: 'capture.open' });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'decision', groupIndex: 1, cursor: 0 },
+    });
+    state = shellReducer(state, { type: 'capture.move', delta: 1 });
+    state = shellReducer(state, { type: 'capture.chooseDecision' });
+    state = shellReducer(state, { type: 'capture.open' });
+    expectCaptureStatus(state, 'confirmation');
+
+    const directionalNoop = shellReducer(state, { type: 'capture.open' });
+    expectCaptureStatus(directionalNoop, 'confirmation');
+
+    state = shellReducer(state, { type: 'capture.back' });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'decision', groupIndex: 1, cursor: 1 },
+    });
+    state = shellReducer(state, { type: 'capture.back' });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'decision', groupIndex: 0, cursor: 0 },
+    });
+    state = shellReducer(state, { type: 'capture.back' });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'selection', cursor: 2 },
+    });
+  });
+
   it('requires every warning acknowledgement before applying', () => {
     const loaded = shellReducer(createInitialShellState('capture'), {
       type: 'capture.loaded',
@@ -471,6 +566,47 @@ describe('TUI Shell reducer', () => {
     const confirmed = shellReducer(confirmation, { type: 'capture.toggleWarning' });
     const applying = shellReducer(confirmed, { type: 'capture.apply' });
     expectCaptureStatus(applying, 'applying');
+
+    for (const action of [
+      { type: 'capture.move', delta: 1 },
+      { type: 'capture.page', delta: 10 },
+      { type: 'capture.focus', position: 'last' },
+      { type: 'capture.open' },
+      { type: 'capture.back' },
+      { type: 'capture.toggleSelection' },
+      { type: 'exit' },
+      { type: 'cancel' },
+    ] as const) {
+      expect(shellReducer(applying, action)).toBe(applying);
+    }
+  });
+
+  it('pages and focuses long Capture warning collections', () => {
+    const plan = capturePlan();
+    plan.issues.push(...Array.from({ length: 14 }, (_, index) => ({
+      severity: 'warning' as const,
+      code: `capture.warning.${index + 2}`,
+      message: `Review warning ${index + 2}.`,
+    })));
+    let state = shellReducer(createInitialShellState('capture'), {
+      type: 'capture.loaded',
+      plan,
+    });
+    state = shellReducer(state, { type: 'capture.continue' });
+    state = shellReducer(state, { type: 'capture.chooseDecision' });
+    state = shellReducer(state, { type: 'capture.continue' });
+    state = shellReducer(state, { type: 'capture.page', delta: 10 });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'confirmation', warningCursor: 10 },
+    });
+    state = shellReducer(state, { type: 'capture.focus', position: 'last' });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'confirmation', warningCursor: 14 },
+    });
+    state = shellReducer(state, { type: 'capture.focus', position: 'first' });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'confirmation', warningCursor: 0 },
+    });
   });
 
   it('turns a stale Apply result into regeneration instead of reusing the Plan', () => {
@@ -490,6 +626,18 @@ describe('TUI Shell reducer', () => {
     });
 
     expectCaptureStatus(regenerating, 'regenerating');
+
+    const refreshed = shellReducer(regenerating, {
+      type: 'capture.loaded',
+      plan: capturePlan(),
+    });
+    expect(refreshed.page).toMatchObject({
+      workflow: {
+        status: 'selection',
+        cursor: 0,
+        selectedIds: ['capture-file'],
+      },
+    });
   });
 
   it('loads Deploy with the last successful IDE/capability selection and hides cleanup', () => {

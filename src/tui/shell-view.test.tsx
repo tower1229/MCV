@@ -459,31 +459,48 @@ describe('TUI Shell view', () => {
       "MCV
       Capture · Select Changes
 
-      Repository: /Users/张涛/Configuration
-      Repository/超长路径
+      Repository: /Users/张涛…on Repository/超长路径
       16 changes · 15 selected
 
-      Claude Code / File
-      > [x] [modify] 设置.json
-      Codex / Skill
-        [x] [add] 工具 Skill
-      Shared / MCP
-        [x] [add] 本地服务
-      Claude Code / File
-        [x] [add] config-4.json
-        [x] [add] config-5.json
-        [x] [add] config-6.json
-        [x] [add] config-7.json
-        [x] [add] config-8.json
-        [x] [add] config-9.json
-        [x] [add] config-10.json
-        [x] [add] config-11.json
-        [x] [add] config-12.json
-      … 4 more changes
+      > [x] ✓ Selected · [modify] 设置.json · Claud…
+        [x] ✓ Selected · [add] 工具 Skill · Codex /…
+        [x] ✓ Selected · [add] 本地服务 · Shared / …
+        [x] ✓ Selected · [add] config-4.json · Clau…
+        [x] ✓ Selected · [add] config-5.json · Clau…
+        [x] ✓ Selected · [add] config-6.json · Clau…
+        [x] ✓ Selected · [add] config-7.json · Clau…
+        [x] ✓ Selected · [add] config-8.json · Clau…
+        [x] ✓ Selected · [add] config-9.json · Clau…
+        [x] ✓ Selected · [add] config-10.json · Cla…
+        [x] ✓ Selected · [add] config-11.json · Cla…
+        [x] ✓ Selected · [add] config-12.json · Cla…
+        … 4 more
 
-      ↑↓ Move   Space Select   d Diff   Enter
-      Continue   q Quit   Ctrl+C Cancel"
+      ↑↓ Move   PgUp/PgDn Page   Home/End   ← Back
+       → Diff   Space Select   Enter Review   q Quit
+         Ctrl+C Cancel"
     `);
+  });
+
+  it('keeps the focused Capture change visible in a short terminal viewport', () => {
+    const plan = capturePlan(16);
+    let state = shellReducer(createInitialShellState('capture'), {
+      type: 'capture.loaded',
+      plan,
+    });
+    state = shellReducer(state, { type: 'capture.focus', position: 'last' });
+
+    const rendered = renderToString(
+      <ShellView state={state} terminalRows={12} />,
+      { columns: 100 },
+    );
+
+    expect(rendered.split('\n').length).toBeLessThanOrEqual(12);
+    expect(rendered).toContain('> [ ] × Destructive · [delete] config-16.json');
+    expect(rendered).toContain('earlier');
+    expect(rendered).not.toContain('设置.json');
+    expect(rendered).toContain('→ Diff');
+    expect(rendered).toContain('PgUp/PgDn');
   });
 
   it('snapshots sanitized text Diff and binary metadata without raw content', () => {
@@ -510,7 +527,7 @@ describe('TUI Shell view', () => {
         binary · 42 bytes · sha256
       bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 
-      Escape Back   q Quit   Ctrl+C Cancel",
+      ←/Escape Close Diff   q Quit   Ctrl+C Cancel",
         "text": "MCV
       Capture · Diff
 
@@ -519,7 +536,7 @@ describe('TUI Shell view', () => {
         - "theme": "light"
         + "theme": "dark"
 
-      Escape Back   q Quit   Ctrl+C Cancel",
+      ←/Escape Close Diff   q Quit   Ctrl+C Cancel",
       }
     `);
     expect(JSON.stringify(rendered)).not.toContain('raw-secret-must-not-render');
@@ -570,32 +587,32 @@ describe('TUI Shell view', () => {
 
       2 selected changes
       Warnings require explicit confirmation:
-      > [ ] A source item was skipped safely.
+      > [ ] ! Warning · A source item was skipped safely.
+      × Blocked: confirm every warning.
 
-      Apply disabled: confirm every warning.
-
-      ↑↓ Move   Space Confirm Warning   Enter Apply   Escape Back   q Quit   Ctrl+C
-      Cancel",
+      ↑↓/Pg Move   Home/End   Space Confirm Warning   Enter Apply   ←/Escape Back   q
+      Quit   Ctrl+C Cancel",
         "decision": "MCV
       Capture · Resolve Decisions
 
       Decision 1/1: shared
-      > [ ] Claude Code
-        [ ] Skip this MCP
+      > [ ] ○ Unselected · Claude Code
+        [ ] ○ Unselected · Skip this MCP
 
-      Continue disabled: choose exactly one option.
+      × Blocked: choose exactly one option before continuing.
 
-      ↑↓ Move   Space Choose   Enter Continue   Escape Back   q Quit   Ctrl+C Cancel",
+      ↑↓/Pg Move   Home/End   ← Back   →/Enter Next   Space Choose   q Quit   Ctrl+C
+      Cancel",
         "regenerating": "MCV
       Capture · Regenerating
 
-      The Capture Plan became stale. Regenerating a safe preview...
+      ! Review required: The Capture Plan became stale. Regenerating a safe preview...
 
       Please wait.",
         "result": "MCV
       Capture · Result
 
-      Capture succeeded.
+      ✓ Succeeded: Capture completed.
       Applied: 2 changes
       Written: 2 paths
       Deleted: 0 paths
@@ -604,6 +621,137 @@ describe('TUI Shell view', () => {
       }
     `);
     expect(Object.values(rendered).join('')).not.toMatch(/\u001b\[/);
+  });
+
+  it('keeps Capture workflow status semantics explicit without ANSI color', () => {
+    const plan = capturePlan(1, true);
+    const loaded = shellReducer(createInitialShellState('capture'), {
+      type: 'capture.loaded',
+      plan,
+    });
+    const decision = shellReducer(loaded, { type: 'capture.continue' });
+    const chosen = shellReducer(decision, { type: 'capture.chooseDecision' });
+    const confirmation = shellReducer(chosen, { type: 'capture.continue' });
+    const confirmed = shellReducer(confirmation, {
+      type: 'capture.toggleWarning',
+    });
+    const applying = shellReducer(confirmed, { type: 'capture.apply' });
+    const succeeded = shellReducer(applying, {
+      type: 'capture.applied',
+      result: successfulCaptureResult(),
+    });
+    const succeededWithWarning = shellReducer(applying, {
+      type: 'capture.applied',
+      result: {
+        ...successfulCaptureResult(),
+        issues: [{
+          severity: 'warning',
+          code: 'capture.stateRecordFailed',
+          message: 'Local history was not updated.',
+        }],
+      },
+    });
+    const blocked = shellReducer(applying, {
+      type: 'capture.applied',
+      result: {
+        schemaVersion: 1,
+        operation: 'capture',
+        status: 'blocked',
+        repositoryPath: '/tmp/mcv',
+        changes: [],
+        issues: [{
+          severity: 'warning',
+          code: 'capture.blocked',
+          message: 'Review is incomplete.',
+        }],
+        nextActions: ['Review the Capture Plan again.'],
+      },
+    });
+
+    const previousNoColor = process.env.NO_COLOR;
+    process.env.NO_COLOR = '1';
+    const rendered = {
+      selection: renderToString(<ShellView state={loaded} />, { columns: 100 }),
+      decision: renderToString(<ShellView state={decision} />, { columns: 100 }),
+      warning: renderToString(<ShellView state={confirmation} />, { columns: 100 }),
+      confirmed: renderToString(<ShellView state={confirmed} />, { columns: 100 }),
+      applying: renderToString(<ShellView state={applying} />, { columns: 100 }),
+      succeeded: renderToString(<ShellView state={succeeded} />, { columns: 100 }),
+      succeededWithWarning: renderToString(
+        <ShellView state={succeededWithWarning} />,
+        { columns: 100 },
+      ),
+      blocked: renderToString(<ShellView state={blocked} />, { columns: 100 }),
+    };
+    if (previousNoColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = previousNoColor;
+
+    expect(Object.values(rendered).join('')).not.toMatch(/\u001b\[/);
+    expect(rendered.selection).toContain('[x] ✓ Selected ·');
+    expect(rendered.decision).toContain('[ ] ○ Unselected · Claude Code');
+    expect(rendered.warning).toContain('[ ] ! Warning · A source item was skipped safely.');
+    expect(rendered.warning).toContain('× Blocked: confirm every warning.');
+    expect(rendered.confirmed).toContain('[x] ✓ Confirmed · A source item was skipped safely.');
+    expect(rendered.applying).toContain('● Applying:');
+    expect(rendered.succeeded).toContain('✓ Succeeded: Capture completed.');
+    expect(rendered.succeededWithWarning).toContain(
+      '! Warning: Local history was not updated.',
+    );
+    expect(rendered.blocked).toContain('× Blocked: Capture did not change the Repository.');
+  });
+
+  it('keeps the focused Capture warning visible in a short terminal viewport', () => {
+    const plan = capturePlan(1, true);
+    plan.issues.push(...Array.from({ length: 14 }, (_, index) => ({
+      severity: 'warning' as const,
+      code: `capture.warning.${index + 2}`,
+      message: `Review warning ${index + 2}.`,
+    })));
+    let state = shellReducer(createInitialShellState('capture'), {
+      type: 'capture.loaded',
+      plan,
+    });
+    state = shellReducer(state, { type: 'capture.continue' });
+    state = shellReducer(state, { type: 'capture.chooseDecision' });
+    state = shellReducer(state, { type: 'capture.continue' });
+    state = shellReducer(state, { type: 'capture.focus', position: 'last' });
+
+    const rendered = renderToString(
+      <ShellView state={state} terminalRows={10} />,
+      { columns: 120 },
+    );
+
+    expect(rendered.split('\n').length).toBeLessThanOrEqual(10);
+    expect(rendered).toContain('> [ ] ! Warning · Review warning 15.');
+    expect(rendered).toContain('earlier');
+    expect(rendered).not.toContain('A source item was skipped safely.');
+  });
+
+  it('keeps the focused Capture required choice visible in a short terminal viewport', () => {
+    const plan = capturePlan(1, true);
+    const choice = plan.changes.find((change) =>
+      change.decision === 'candidate')!;
+    plan.changes.push(...Array.from({ length: 14 }, (_, index) => ({
+      ...choice,
+      id: `capture-choice-${index + 2}`,
+      sourceLabel: `Source ${index + 2}`,
+    })));
+    let state = shellReducer(createInitialShellState('capture'), {
+      type: 'capture.loaded',
+      plan,
+    });
+    state = shellReducer(state, { type: 'capture.continue' });
+    state = shellReducer(state, { type: 'capture.focus', position: 'last' });
+
+    const rendered = renderToString(
+      <ShellView state={state} terminalRows={10} />,
+      { columns: 120 },
+    );
+
+    expect(rendered.split('\n').length).toBeLessThanOrEqual(10);
+    expect(rendered).toContain('> [ ] ○ Unselected · Source 15');
+    expect(rendered).toContain('earlier');
+    expect(rendered).not.toContain('Claude Code');
   });
 
   it('snapshots grouped Deploy selection with collapsed advanced cleanup', () => {

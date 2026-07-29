@@ -118,6 +118,7 @@ interface CaptureDecisionState {
   status: 'decision';
   plan: CapturePlan;
   selectedIds: string[];
+  selectionCursor: number;
   groupIndex: number;
   cursor: number;
 }
@@ -126,6 +127,7 @@ interface CaptureConfirmationState {
   status: 'confirmation';
   plan: CapturePlan;
   selectedIds: string[];
+  selectionCursor: number;
   confirmedIssueCodes: string[];
   warningCursor: number;
 }
@@ -314,6 +316,9 @@ export type ShellAction =
   | { type: 'environment.loaded'; report: EnvironmentReport }
   | { type: 'capture.loaded'; plan: CapturePlan }
   | { type: 'capture.move'; delta: number }
+  | { type: 'capture.page'; delta: number }
+  | { type: 'capture.focus'; position: 'first' | 'last' }
+  | { type: 'capture.open' }
   | { type: 'capture.toggleSelection' }
   | { type: 'capture.openDiff' }
   | { type: 'capture.closeDiff' }
@@ -580,6 +585,14 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
     case 'capture.move':
       return updateCaptureWorkflow(state, (workflow) =>
         moveCaptureCursor(workflow, action.delta));
+    case 'capture.page':
+      return updateCaptureWorkflow(state, (workflow) =>
+        pageCaptureCursor(workflow, action.delta));
+    case 'capture.focus':
+      return updateCaptureWorkflow(state, (workflow) =>
+        focusCaptureCursor(workflow, action.position));
+    case 'capture.open':
+      return updateCaptureWorkflow(state, openCaptureReviewSurface);
     case 'capture.toggleSelection':
       return updateCaptureWorkflow(state, toggleCaptureSelection);
     case 'capture.openDiff':
@@ -593,6 +606,17 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
     case 'capture.continue':
       return updateCaptureWorkflow(state, continueCaptureWorkflow);
     case 'capture.back':
+      if (
+        state.page.route === 'capture'
+        && state.page.status === 'ready'
+        && state.page.workflow.status === 'selection'
+      ) {
+        return {
+          ...state,
+          scrollOffset: 0,
+          page: { route: 'overview', status: 'loading' },
+        };
+      }
       return updateCaptureWorkflow(state, backCaptureWorkflow);
     case 'capture.apply':
       return updateCaptureWorkflow(state, beginCaptureApply);
@@ -1012,6 +1036,68 @@ function moveCaptureCursor(
   return workflow;
 }
 
+function pageCaptureCursor(
+  workflow: CaptureWorkflowState,
+  delta: number,
+): CaptureWorkflowState {
+  if (workflow.status === 'selection') {
+    return {
+      ...workflow,
+      cursor: clampIndex(workflow.cursor + delta, workflow.plan.changes.length),
+    };
+  }
+  if (workflow.status === 'decision') {
+    return {
+      ...workflow,
+      cursor: clampIndex(
+        workflow.cursor + delta,
+        currentDecisionChoices(workflow).length,
+      ),
+    };
+  }
+  if (workflow.status === 'confirmation') {
+    return {
+      ...workflow,
+      warningCursor: clampIndex(
+        workflow.warningCursor + delta,
+        captureWarnings(workflow.plan).length,
+      ),
+    };
+  }
+  return workflow;
+}
+
+function focusCaptureCursor(
+  workflow: CaptureWorkflowState,
+  position: 'first' | 'last',
+): CaptureWorkflowState {
+  if (workflow.status === 'selection') {
+    return {
+      ...workflow,
+      cursor: position === 'first'
+        ? 0
+        : Math.max(0, workflow.plan.changes.length - 1),
+    };
+  }
+  if (workflow.status === 'decision') {
+    return {
+      ...workflow,
+      cursor: position === 'first'
+        ? 0
+        : Math.max(0, currentDecisionChoices(workflow).length - 1),
+    };
+  }
+  if (workflow.status === 'confirmation') {
+    return {
+      ...workflow,
+      warningCursor: position === 'first'
+        ? 0
+        : Math.max(0, captureWarnings(workflow.plan).length - 1),
+    };
+  }
+  return workflow;
+}
+
 function toggleCaptureSelection(
   workflow: CaptureWorkflowState,
 ): CaptureWorkflowState {
@@ -1037,6 +1123,19 @@ function openCaptureDiff(
     selectedIds: workflow.selectedIds,
     changeId: change.id,
   };
+}
+
+function openCaptureReviewSurface(
+  workflow: CaptureWorkflowState,
+): CaptureWorkflowState {
+  if (workflow.status === 'selection') {
+    const change = workflow.plan.changes[workflow.cursor];
+    return change && change.previews.length > 0
+      ? openCaptureDiff(workflow)
+      : continueCaptureWorkflow(workflow);
+  }
+  if (workflow.status === 'decision') return continueCaptureWorkflow(workflow);
+  return workflow;
 }
 
 function closeCaptureDiff(
@@ -1096,12 +1195,17 @@ function continueCaptureWorkflow(
         status: 'decision',
         plan: workflow.plan,
         selectedIds: workflow.selectedIds,
+        selectionCursor: workflow.cursor,
         groupIndex: 0,
         cursor: 0,
       };
     }
     if (hasUnresolvedDecisionIssue(workflow.plan)) return workflow;
-    return createCaptureConfirmation(workflow.plan, workflow.selectedIds);
+    return createCaptureConfirmation(
+      workflow.plan,
+      workflow.selectedIds,
+      workflow.cursor,
+    );
   }
   if (workflow.status === 'decision') {
     const choices = currentDecisionChoices(workflow);
@@ -1116,7 +1220,11 @@ function continueCaptureWorkflow(
         cursor: 0,
       };
     }
-    return createCaptureConfirmation(workflow.plan, workflow.selectedIds);
+    return createCaptureConfirmation(
+      workflow.plan,
+      workflow.selectedIds,
+      workflow.selectionCursor,
+    );
   }
   return workflow;
 }
@@ -1125,11 +1233,43 @@ function backCaptureWorkflow(
   workflow: CaptureWorkflowState,
 ): CaptureWorkflowState {
   if (workflow.status === 'diff') return closeCaptureDiff(workflow);
-  if (workflow.status === 'decision' || workflow.status === 'confirmation') {
+  if (workflow.status === 'confirmation') {
+    const groups = captureDecisionGroups(workflow.plan);
+    if (groups.length > 0) {
+      const groupIndex = groups.length - 1;
+      return {
+        status: 'decision',
+        plan: workflow.plan,
+        selectedIds: workflow.selectedIds,
+        selectionCursor: workflow.selectionCursor,
+        groupIndex,
+        cursor: selectedCaptureDecisionCursor(
+          groups[groupIndex] ?? [],
+          workflow.selectedIds,
+        ),
+      };
+    }
     return {
       status: 'selection',
       plan: workflow.plan,
-      cursor: 0,
+      cursor: workflow.selectionCursor,
+      selectedIds: workflow.selectedIds,
+    };
+  }
+  if (workflow.status === 'decision') {
+    if (workflow.groupIndex > 0) {
+      const groupIndex = workflow.groupIndex - 1;
+      const choices = captureDecisionGroups(workflow.plan)[groupIndex] ?? [];
+      return {
+        ...workflow,
+        groupIndex,
+        cursor: selectedCaptureDecisionCursor(choices, workflow.selectedIds),
+      };
+    }
+    return {
+      status: 'selection',
+      plan: workflow.plan,
+      cursor: workflow.selectionCursor,
       selectedIds: workflow.selectedIds,
     };
   }
@@ -1158,14 +1298,25 @@ function beginCaptureApply(
 function createCaptureConfirmation(
   plan: CapturePlan,
   selectedIds: string[],
+  selectionCursor: number,
 ): CaptureConfirmationState {
   return {
     status: 'confirmation',
     plan,
     selectedIds,
+    selectionCursor,
     confirmedIssueCodes: [],
     warningCursor: 0,
   };
+}
+
+function selectedCaptureDecisionCursor(
+  choices: CaptureChange[],
+  selectedIds: string[],
+): number {
+  const selectedIndex = choices.findIndex((choice) =>
+    selectedIds.includes(choice.id));
+  return Math.max(0, selectedIndex);
 }
 
 export function captureDecisionGroups(plan: CapturePlan): CaptureChange[][] {
