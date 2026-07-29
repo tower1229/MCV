@@ -320,12 +320,15 @@ function pageControls(state, terminalRows) {
         switch (page.workflow.status) {
             case 'selection':
                 return terminalRows <= 12
-                    ? '↑↓/Pg Move   ←→ Expand   Space Select   q Quit'
-                    : '↑↓ Move   ←→ Expand/Collapse   Space Select   PgUp/PgDn Page   Home/End   d Diff   a Cleanup   Enter Continue   q Quit   Ctrl+C Cancel';
+                    ? '↑↓/Pg Move   ← Back   → Open   Space Select   Enter Review   q Quit'
+                    : [
+                        '↑↓ Move   ← Collapse/Back   → Expand/Diff   Space Select   PgUp/PgDn Page   Home/End   Enter Review   q Quit   Ctrl+C Cancel',
+                        'Accelerators: d Diff   a Cleanup',
+                    ].join('\n');
             case 'diff':
-                return 'Escape Back   q Quit   Ctrl+C Cancel';
+                return '←/Escape Close Diff   q Quit   Ctrl+C Cancel';
             case 'confirmation':
-                return '↑↓ Move   Space Confirm Warning   Enter Apply   Escape Back   q Quit   Ctrl+C Cancel';
+                return '↑↓/Pg Move   Home/End   Space Confirm Warning   Enter Apply   ←/Escape Back   q Quit   Ctrl+C Cancel';
             case 'applying':
             case 'regenerating':
                 return undefined;
@@ -663,7 +666,7 @@ function DeploySelection({ workflow, terminalRows, }) {
     const tree = buildDeploySelectionTree(workflow.plan);
     const visible = flattenDeploySelectionTree(tree, workflow.expandedNodeIds);
     const advanced = workflow.plan.changes.filter((change) => change.group === 'advanced');
-    const viewport = listViewport(visible, workflow.cursor, Math.max(1, terminalRows - (terminalRows <= 12 ? 8 : 10)));
+    const viewport = listViewport(visible, workflow.cursor, Math.max(1, terminalRows - (terminalRows <= 12 ? 9 : 10)));
     return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: ["Repository: ", workflow.plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: [workflow.plan.changes.length, " changes \u00B7 ", workflow.selectedIds.length, " selected"] }), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: { node, depth } }, index) => {
                 const visibleIndex = viewport.start + index;
                 const expanded = workflow.expandedNodeIds.includes(node.id);
@@ -671,9 +674,12 @@ function DeploySelection({ workflow, terminalRows, }) {
                     ? ' '
                     : expanded ? '▼' : '▶';
                 if (node.kind === 'advanced') {
-                    return (_jsxs(Text, { wrap: "truncate-middle", children: [visibleIndex === workflow.cursor ? '>' : ' ', ' ', deployNodeSelectionMarker(node.changeIds, workflow.selectedIds), ' ', disclosure, " Advanced Cleanup: ", expanded ? 'expanded' : 'collapsed', " (", advanced.length, ' ', advanced.length === 1 ? 'deletion' : 'deletions', ",", ' ', advanced.filter((change) => workflow.selectedIds.includes(change.id)).length || 'none', " selected)"] }, node.id));
+                    const style = statusToneStyle('error');
+                    return (_jsxs(Text, { color: style.color, dimColor: style.dimColor, wrap: "truncate-middle", children: [visibleIndex === workflow.cursor ? '>' : ' ', ' ', deployNodeSelectionMarker(node.changeIds, workflow.selectedIds), ' ', disclosure, " ", style.symbol, " Destructive \u00B7 Advanced Cleanup \u00B7 ", advanced.length, ' ', advanced.length === 1 ? 'deletion' : 'deletions', " \u00B7", ' ', advanced.filter((change) => workflow.selectedIds.includes(change.id)).length || 'none', " selected"] }, node.id));
                 }
-                return (_jsxs(Text, { wrap: "truncate-middle", children: ['  '.repeat(depth), visibleIndex === workflow.cursor ? '>' : ' ', ' ', deployNodeSelectionMarker(node.changeIds, workflow.selectedIds), ' ', disclosure, " ", node.label, node.kind !== 'file' && (_jsxs(_Fragment, { children: [" \u00B7 ", node.changeIds.length, ' ', node.changeIds.length === 1 ? 'file' : 'files'] }))] }, node.id));
+                const destructive = node.change?.change === 'delete';
+                const style = destructive ? statusToneStyle('error') : undefined;
+                return (_jsxs(Text, { color: style?.color, dimColor: style?.dimColor, wrap: "truncate-middle", children: ['  '.repeat(depth), visibleIndex === workflow.cursor ? '>' : ' ', ' ', deployNodeSelectionMarker(node.changeIds, workflow.selectedIds), ' ', disclosure, " ", style && _jsxs(_Fragment, { children: [style.symbol, " Destructive \u00B7 "] }), node.label, node.kind !== 'file' && (_jsxs(_Fragment, { children: [" \u00B7 ", node.changeIds.length, ' ', node.changeIds.length === 1 ? 'file' : 'files'] }))] }, node.id));
             }), !viewport.combinedIndicator && viewport.hiddenAfter > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenAfter, " more"] })), viewport.combinedIndicator && (_jsxs(Text, { dimColor: true, children: ['  ', "\u2026 ", viewport.hiddenBefore, " earlier \u00B7 ", viewport.hiddenAfter, " more"] })), workflow.plan.issues.some((issue) => issue.severity === 'decisionRequired' || issue.severity === 'error') && (_jsx(Text, { color: "red", children: "Apply disabled: regenerate after resolving every required decision and error." }))] }));
 }
 function listViewport(items, cursor, maximumRows) {

@@ -672,24 +672,32 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
         dispatch({ type: 'deploy.move', delta: 1 });
         return;
       }
+      if (intent.type === 'page.previous') {
+        dispatch({
+          type: 'deploy.move',
+          delta: -Math.max(1, windowSize.rows - 12),
+        });
+        return;
+      }
+      if (intent.type === 'page.next') {
+        dispatch({
+          type: 'deploy.move',
+          delta: Math.max(1, windowSize.rows - 12),
+        });
+        return;
+      }
+      if (intent.type === 'focus.first') {
+        dispatch({ type: 'deploy.focus', position: 'first' });
+        return;
+      }
+      if (intent.type === 'focus.last') {
+        dispatch({ type: 'deploy.focus', position: 'last' });
+        return;
+      }
       if (deployWorkflow?.status === 'selection') {
-        if (intent.type === 'open') dispatch({ type: 'deploy.expand' });
-        else if (intent.type === 'back') dispatch({ type: 'deploy.collapse' });
-        else if (intent.type === 'page.previous') {
-          dispatch({
-            type: 'deploy.move',
-            delta: -Math.max(1, windowSize.rows - 12),
-          });
-        } else if (intent.type === 'page.next') {
-          dispatch({
-            type: 'deploy.move',
-            delta: Math.max(1, windowSize.rows - 12),
-          });
-        } else if (intent.type === 'focus.first') {
-          dispatch({ type: 'deploy.focus', position: 'first' });
-        } else if (intent.type === 'focus.last') {
-          dispatch({ type: 'deploy.focus', position: 'last' });
-        } else if (intent.type === 'toggle') {
+        if (intent.type === 'open') dispatch({ type: 'deploy.open' });
+        else if (intent.type === 'back') dispatch({ type: 'deploy.back' });
+        else if (intent.type === 'toggle') {
           dispatch({ type: 'deploy.toggleSelection' });
         }
         else if (intent.type === 'text' && intent.value === 'a') {
@@ -704,14 +712,19 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
         }
         return;
       }
-      if (deployWorkflow?.status === 'diff' && intent.type === 'cancel') {
-        dispatch({ type: 'deploy.closeDiff' });
+      if (
+        deployWorkflow?.status === 'diff'
+        && (intent.type === 'back' || intent.type === 'cancel')
+      ) {
+        dispatch({ type: 'deploy.back' });
         return;
       }
       if (deployWorkflow?.status === 'confirmation') {
         if (intent.type === 'toggle') dispatch({ type: 'deploy.toggleWarning' });
         else if (intent.type === 'confirm') dispatch({ type: 'deploy.apply' });
-        else if (intent.type === 'cancel') dispatch({ type: 'deploy.back' });
+        else if (intent.type === 'back' || intent.type === 'cancel') {
+          dispatch({ type: 'deploy.back' });
+        }
       }
       return;
     }

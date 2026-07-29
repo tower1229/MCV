@@ -507,15 +507,27 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     expectRestoredTerminal(outcome.output);
   }, 10_000);
 
-  it('keeps Deploy transactional while partial selection fails after warning review', async () => {
+  it('drives packaged Deploy through tree, Diff, warning, and transactional Apply with arrows', async () => {
     const fixturePath = createDeployWorkflowFixture();
     const outcome = await runExpect([
       'set timeout 5',
       'log_user 1',
       'spawn /bin/zsh -f -c {"$MCV_TEST_NODE" "$MCV_TEST_SCRIPT"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
       'expect -exact {Deploy · Select Changes}',
+      'send "\\033\\[C"',
+      'expect -exact {> [x] ▼ Codex / Shared Rules}',
+      'send "\\033\\[C"',
+      'expect -exact {> [x]   [modify] /tmp/AGENTS.md}',
+      'send "\\033\\[C"',
+      'expect -exact {Deploy · Diff}',
+      'expect -exact {Whole-file replacement}',
+      'send "\\033\\[D"',
+      'expect -exact {> [x]   [modify] /tmp/AGENTS.md}',
       'send " "',
       'after 100',
+      'send "\\033\\[D"',
+      'send "\\033\\[D"',
+      'send "\\033\\[B"',
       'send "\\r"',
       'expect -exact {Deploy · Confirm Apply}',
       'send " "',

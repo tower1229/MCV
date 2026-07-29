@@ -623,10 +623,11 @@ describe('TUI Shell view', () => {
 
         > [ ] ▶ Codex / Shared Rules · 1 file
           [x] ▶ Codex / MCP · 1 file
-          [ ] ▶ Advanced Cleanup: collapsed (1 deletion, none selected)
+          [ ] ▶ × Destructive · Advanced Cleanup · 1 deletion · none selected
 
-        ↑↓ Move   ←→ Expand/Collapse   Space Select   PgUp/PgDn Page   Home/End
-          d Diff   a Cleanup   Enter Continue   q Quit   Ctrl+C Cancel"
+        ↑↓ Move   ← Collapse/Back   → Expand/Diff   Space Select   PgUp/PgDn
+        Page   Home/End   Enter Review   q Quit   Ctrl+C Cancel
+        Accelerators: d Diff   a Cleanup"
       `);
   });
 
@@ -644,7 +645,33 @@ describe('TUI Shell view', () => {
     expect(rendered).toContain('Codex / Skills');
     expect(rendered).toContain('14 files');
     expect(rendered).not.toContain('hatch-pet');
-    expect(rendered).toContain('Advanced Cleanup: collapsed (14 deletions, none selected)');
+    expect(rendered).toContain(
+      '× Destructive · Advanced Cleanup · 14 deletions · none selected',
+    );
+  });
+
+  it('labels Advanced Cleanup and deletion candidates as destructive without relying on color', () => {
+    let state = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan: deployPlan(),
+    });
+    state = shellReducer(state, { type: 'deploy.focus', position: 'last' });
+    state = shellReducer(state, { type: 'deploy.open' });
+    state = shellReducer(state, { type: 'deploy.move', delta: 1 });
+    state = shellReducer(state, { type: 'deploy.open' });
+    state = shellReducer(state, { type: 'deploy.open' });
+    state = shellReducer(state, { type: 'deploy.open' });
+
+    const previousNoColor = process.env.NO_COLOR;
+    process.env.NO_COLOR = '1';
+    const noColor = renderToString(<ShellView state={state} />, { columns: 100 });
+    if (previousNoColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = previousNoColor;
+
+    expect(noColor).not.toContain('\u001b[31m');
+    expect(noColor.match(/× Destructive/g)).toHaveLength(2);
+    expect(noColor).toContain('[ ] ▼ × Destructive · Advanced Cleanup ·');
+    expect(noColor).toContain('[ ]   × Destructive · [delete]');
   });
 
   it('expands a Skill capability into one package summary', () => {
@@ -652,9 +679,7 @@ describe('TUI Shell view', () => {
       type: 'deploy.loaded',
       plan: largeDeployPlan(),
     });
-    const expanded = shellReducer(loaded, {
-      type: 'deploy.expand',
-    } as never);
+    const expanded = shellReducer(loaded, { type: 'deploy.open' });
 
     const rendered = renderToString(<ShellView state={expanded} />, {
       columns: 80,
@@ -670,9 +695,9 @@ describe('TUI Shell view', () => {
       type: 'deploy.loaded',
       plan: largeDeployPlan(),
     });
-    state = shellReducer(state, { type: 'deploy.expand' });
-    state = shellReducer(state, { type: 'deploy.expand' });
-    state = shellReducer(state, { type: 'deploy.expand' });
+    state = shellReducer(state, { type: 'deploy.open' });
+    state = shellReducer(state, { type: 'deploy.open' });
+    state = shellReducer(state, { type: 'deploy.open' });
     state = shellReducer(state, { type: 'deploy.focus', position: 'last' });
     state = shellReducer(state, { type: 'deploy.move', delta: -1 });
 
@@ -699,7 +724,7 @@ describe('TUI Shell view', () => {
     );
     expect(compact.split('\n').length).toBeLessThanOrEqual(10);
     expect(compact).toContain('file-13.md');
-    expect(compact).toContain('↑↓/Pg Move   ←→ Expand');
+    expect(compact).toContain('↑↓/Pg Move   ← Back   → Open');
   });
 
   it('shows partial selection on every ancestor after toggling one Skill file', () => {
@@ -707,9 +732,9 @@ describe('TUI Shell view', () => {
       type: 'deploy.loaded',
       plan: largeDeployPlan(),
     });
-    state = shellReducer(state, { type: 'deploy.expand' });
-    state = shellReducer(state, { type: 'deploy.expand' });
-    state = shellReducer(state, { type: 'deploy.expand' });
+    state = shellReducer(state, { type: 'deploy.open' });
+    state = shellReducer(state, { type: 'deploy.open' });
+    state = shellReducer(state, { type: 'deploy.open' });
     state = shellReducer(state, { type: 'deploy.move', delta: 1 });
     state = shellReducer(state, { type: 'deploy.toggleSelection' });
 
@@ -728,9 +753,9 @@ describe('TUI Shell view', () => {
       type: 'deploy.loaded',
       plan: largeDeployPlan(),
     });
-    state = shellReducer(state, { type: 'deploy.expand' });
-    state = shellReducer(state, { type: 'deploy.expand' });
-    state = shellReducer(state, { type: 'deploy.expand' });
+    state = shellReducer(state, { type: 'deploy.open' });
+    state = shellReducer(state, { type: 'deploy.open' });
+    state = shellReducer(state, { type: 'deploy.open' });
     state = shellReducer(state, { type: 'deploy.move', delta: 8 });
 
     expect({
@@ -750,8 +775,8 @@ describe('TUI Shell view', () => {
       type: 'deploy.loaded',
       plan: deployPlan(),
     });
-    const expanded = shellReducer(loaded, { type: 'deploy.expand' });
-    const leafFocused = shellReducer(expanded, { type: 'deploy.expand' });
+    const expanded = shellReducer(loaded, { type: 'deploy.open' });
+    const leafFocused = shellReducer(expanded, { type: 'deploy.open' });
     const diff = shellReducer(leafFocused, { type: 'deploy.openDiff' });
     const confirmation = shellReducer(loaded, { type: 'deploy.continue' });
     const confirmed = shellReducer(confirmation, { type: 'deploy.toggleWarning' });

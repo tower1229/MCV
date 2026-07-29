@@ -88,8 +88,8 @@ Warnings require explicit confirmation:
 
 Apply disabled: confirm every warning.
 
-↑↓ Move   Space Confirm Warning   Enter Apply   Escape Back   q Quit   Ctrl+C
-Cancel",
+↑↓/Pg Move   Home/End   Space Confirm Warning   Enter Apply   ←/Escape Back   q
+Quit   Ctrl+C Cancel",
   "diff": "MCV
 Deploy · Diff
 
@@ -99,7 +99,7 @@ Apply semantics: Whole-file replacement — replace the complete target file.
   - old rule
   + new rule
 
-Escape Back   q Quit   Ctrl+C Cancel",
+←/Escape Close Diff   q Quit   Ctrl+C Cancel",
   "failure": "MCV
 Deploy · Result
 
@@ -233,8 +233,9 @@ Repository: /Users/张涛/Configuration Repository
       [x]   [add] file-12.md
   … 2 more
 
-↑↓ Move   ←→ Expand/Collapse   Space Select   PgUp/PgDn Page   Home/End   d Diff   a Cleanup   Enter
- Continue   q Quit   Ctrl+C Cancel",
+↑↓ Move   ← Collapse/Back   → Expand/Diff   Space Select   PgUp/PgDn Page   Home/End   Enter Review
+  q Quit   Ctrl+C Cancel
+Accelerators: d Diff   a Cleanup",
   "narrow": "MCV
 Deploy · Select Changes
 
@@ -248,8 +249,9 @@ Repository: /Users/张涛/Configuration Repository
       [x]   [add] file-8.md
   … 6 more
 
-↑↓ Move   ←→ Expand/Collapse   Space Select
-PgUp/PgDn Page   Home/End   d Diff   a Cleanup
- Enter Continue   q Quit   Ctrl+C Cancel",
+↑↓ Move   ← Collapse/Back   → Expand/Diff
+Space Select   PgUp/PgDn Page   Home/End   Enter
+ Review   q Quit   Ctrl+C Cancel
+Accelerators: d Diff   a Cleanup",
 }
 `;

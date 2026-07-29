@@ -559,32 +559,84 @@ describe('TUI Shell reducer', () => {
     });
   });
 
-  it('expands, focuses, and collapses visible Deploy tree nodes', () => {
+  it('opens and closes Deploy tree nodes and file Diffs without losing focus', () => {
     let state = shellReducer(createInitialShellState('deploy'), {
       type: 'deploy.loaded',
       plan: deployPlan(),
     });
-    state = shellReducer(state, { type: 'deploy.expand' });
+    state = shellReducer(state, { type: 'deploy.open' });
     expect(state.page).toMatchObject({
       workflow: {
         cursor: 0,
         expandedNodeIds: ['capability:standard:codex/rules'],
       },
     });
-    state = shellReducer(state, { type: 'deploy.expand' });
+    state = shellReducer(state, { type: 'deploy.open' });
     expect(state.page).toMatchObject({ workflow: { cursor: 1 } });
-    state = shellReducer(state, { type: 'deploy.collapse' });
+    state = shellReducer(state, { type: 'deploy.open' });
+    expectDeployStatus(state, 'diff');
+    state = shellReducer(state, { type: 'deploy.back' });
+    expect(state.page).toMatchObject({
+      workflow: {
+        status: 'selection',
+        cursor: 1,
+        expandedNodeIds: ['capability:standard:codex/rules'],
+      },
+    });
+    state = shellReducer(state, { type: 'deploy.back' });
     expect(state.page).toMatchObject({ workflow: { cursor: 0 } });
+    state = shellReducer(state, { type: 'deploy.back' });
+    expect(state.page).toMatchObject({
+      workflow: { cursor: 0, expandedNodeIds: [] },
+    });
     state = shellReducer(state, {
       type: 'deploy.focus',
       position: 'last',
     });
-    expect(state.page).toMatchObject({ workflow: { cursor: 3 } });
+    expect(state.page).toMatchObject({ workflow: { cursor: 2 } });
     state = shellReducer(state, {
       type: 'deploy.focus',
       position: 'first',
     });
     expect(state.page).toMatchObject({ workflow: { cursor: 0 } });
+  });
+
+  it('moves, pages, and backs out of Deploy warning confirmation', () => {
+    const plan = deployPlan();
+    plan.issues.push({
+      severity: 'warning',
+      code: 'deploy.warning.second',
+      message: 'Review the second warning.',
+    });
+    let state = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan,
+    });
+    state = shellReducer(state, { type: 'deploy.move', delta: 1 });
+    state = shellReducer(state, { type: 'deploy.continue' });
+
+    state = shellReducer(state, { type: 'deploy.move', delta: 1 });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'confirmation', warningCursor: 1 },
+    });
+    state = shellReducer(state, {
+      type: 'deploy.focus',
+      position: 'first',
+    });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'confirmation', warningCursor: 0 },
+    });
+    state = shellReducer(state, {
+      type: 'deploy.focus',
+      position: 'last',
+    });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'confirmation', warningCursor: 1 },
+    });
+    state = shellReducer(state, { type: 'deploy.back' });
+    expect(state.page).toMatchObject({
+      workflow: { status: 'selection', cursor: 1 },
+    });
   });
 
   it('requires Deploy warnings and blocks decisionRequired or error Issues', () => {

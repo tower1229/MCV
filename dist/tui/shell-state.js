@@ -289,18 +289,14 @@ export function shellReducer(state, action) {
             return updateDeployWorkflow(state, (workflow) => moveDeployCursor(workflow, action.delta));
         case 'deploy.focus':
             return updateDeployWorkflow(state, (workflow) => focusDeployCursor(workflow, action.position));
-        case 'deploy.expand':
-            return updateDeployWorkflow(state, expandDeployNode);
-        case 'deploy.collapse':
-            return updateDeployWorkflow(state, collapseDeployNode);
+        case 'deploy.open':
+            return updateDeployWorkflow(state, openDeployNode);
         case 'deploy.toggleSelection':
             return updateDeployWorkflow(state, toggleDeploySelection);
         case 'deploy.toggleAdvanced':
             return updateDeployWorkflow(state, toggleDeployAdvanced);
         case 'deploy.openDiff':
             return updateDeployWorkflow(state, openDeployDiff);
-        case 'deploy.closeDiff':
-            return updateDeployWorkflow(state, closeDeployDiff);
         case 'deploy.toggleWarning':
             return updateDeployWorkflow(state, toggleDeployWarning);
         case 'deploy.continue':
@@ -769,14 +765,23 @@ function moveDeployCursor(workflow, delta) {
     return workflow;
 }
 function focusDeployCursor(workflow, position) {
-    if (workflow.status !== 'selection')
-        return workflow;
-    return {
-        ...workflow,
-        cursor: position === 'first'
-            ? 0
-            : Math.max(0, deployVisibleNodes(workflow).length - 1),
-    };
+    if (workflow.status === 'selection') {
+        return {
+            ...workflow,
+            cursor: position === 'first'
+                ? 0
+                : Math.max(0, deployVisibleNodes(workflow).length - 1),
+        };
+    }
+    if (workflow.status === 'confirmation') {
+        return {
+            ...workflow,
+            warningCursor: position === 'first'
+                ? 0
+                : Math.max(0, deployWarnings(workflow.plan).length - 1),
+        };
+    }
+    return workflow;
 }
 function toggleDeploySelection(workflow) {
     if (workflow.status !== 'selection')
@@ -797,12 +802,14 @@ function toggleDeploySelection(workflow) {
         selectedIds: [...selected],
     };
 }
-function expandDeployNode(workflow) {
+function openDeployNode(workflow) {
     if (workflow.status !== 'selection')
         return workflow;
     const node = deployVisibleNodes(workflow)[workflow.cursor]?.node;
-    if (!node || node.children.length === 0)
+    if (!node)
         return workflow;
+    if (node.children.length === 0)
+        return openDeployDiff(workflow);
     if (workflow.expandedNodeIds.includes(node.id)) {
         return {
             ...workflow,
@@ -893,6 +900,7 @@ function continueDeployWorkflow(workflow) {
     return {
         status: 'confirmation',
         plan: workflow.plan,
+        cursor: workflow.cursor,
         selectedIds: workflow.selectedIds,
         confirmedIssueCodes: [],
         warningCursor: 0,
@@ -902,12 +910,14 @@ function continueDeployWorkflow(workflow) {
 function backDeployWorkflow(workflow) {
     if (workflow.status === 'diff')
         return closeDeployDiff(workflow);
+    if (workflow.status === 'selection')
+        return collapseDeployNode(workflow);
     if (workflow.status !== 'confirmation')
         return workflow;
     return {
         status: 'selection',
         plan: workflow.plan,
-        cursor: 0,
+        cursor: workflow.cursor,
         selectedIds: workflow.selectedIds,
         expandedNodeIds: workflow.expandedNodeIds,
     };

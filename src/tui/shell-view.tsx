@@ -492,12 +492,15 @@ function pageControls(
     switch (page.workflow.status) {
       case 'selection':
         return terminalRows <= 12
-          ? '↑↓/Pg Move   ←→ Expand   Space Select   q Quit'
-          : '↑↓ Move   ←→ Expand/Collapse   Space Select   PgUp/PgDn Page   Home/End   d Diff   a Cleanup   Enter Continue   q Quit   Ctrl+C Cancel';
+          ? '↑↓/Pg Move   ← Back   → Open   Space Select   Enter Review   q Quit'
+          : [
+            '↑↓ Move   ← Collapse/Back   → Expand/Diff   Space Select   PgUp/PgDn Page   Home/End   Enter Review   q Quit   Ctrl+C Cancel',
+            'Accelerators: d Diff   a Cleanup',
+          ].join('\n');
       case 'diff':
-        return 'Escape Back   q Quit   Ctrl+C Cancel';
+        return '←/Escape Close Diff   q Quit   Ctrl+C Cancel';
       case 'confirmation':
-        return '↑↓ Move   Space Confirm Warning   Enter Apply   Escape Back   q Quit   Ctrl+C Cancel';
+        return '↑↓/Pg Move   Home/End   Space Confirm Warning   Enter Apply   ←/Escape Back   q Quit   Ctrl+C Cancel';
       case 'applying':
       case 'regenerating':
         return undefined;
@@ -1332,7 +1335,7 @@ function DeploySelection({
   const viewport = listViewport(
     visible,
     workflow.cursor,
-    Math.max(1, terminalRows - (terminalRows <= 12 ? 8 : 10)),
+    Math.max(1, terminalRows - (terminalRows <= 12 ? 9 : 10)),
   );
 
   return (
@@ -1354,22 +1357,35 @@ function DeploySelection({
           ? ' '
           : expanded ? '▼' : '▶';
         if (node.kind === 'advanced') {
+          const style = statusToneStyle('error');
           return (
-            <Text key={node.id} wrap="truncate-middle">
+            <Text
+              key={node.id}
+              color={style.color}
+              dimColor={style.dimColor}
+              wrap="truncate-middle"
+            >
               {visibleIndex === workflow.cursor ? '>' : ' '}{' '}
               {deployNodeSelectionMarker(node.changeIds, workflow.selectedIds)}{' '}
-              {disclosure} Advanced Cleanup: {expanded ? 'expanded' : 'collapsed'} ({advanced.length}{' '}
-              {advanced.length === 1 ? 'deletion' : 'deletions'},{' '}
-              {advanced.filter((change) => workflow.selectedIds.includes(change.id)).length || 'none'} selected)
+              {disclosure} {style.symbol} Destructive · Advanced Cleanup · {advanced.length}{' '}
+              {advanced.length === 1 ? 'deletion' : 'deletions'} ·{' '}
+              {advanced.filter((change) => workflow.selectedIds.includes(change.id)).length || 'none'} selected
             </Text>
           );
         }
+        const destructive = node.change?.change === 'delete';
+        const style = destructive ? statusToneStyle('error') : undefined;
         return (
-          <Text key={node.id} wrap="truncate-middle">
+          <Text
+            key={node.id}
+            color={style?.color}
+            dimColor={style?.dimColor}
+            wrap="truncate-middle"
+          >
             {'  '.repeat(depth)}
             {visibleIndex === workflow.cursor ? '>' : ' '}{' '}
             {deployNodeSelectionMarker(node.changeIds, workflow.selectedIds)}{' '}
-            {disclosure} {node.label}
+            {disclosure} {style && <>{style.symbol} Destructive · </>}{node.label}
             {node.kind !== 'file' && (
               <> · {node.changeIds.length}{' '}
                 {node.changeIds.length === 1 ? 'file' : 'files'}</>

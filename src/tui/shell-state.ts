@@ -175,6 +175,7 @@ interface DeployDiffState {
 interface DeployConfirmationState {
   status: 'confirmation';
   plan: DeployPlan;
+  cursor: number;
   selectedIds: string[];
   confirmedIssueCodes: string[];
   warningCursor: number;
@@ -329,12 +330,10 @@ export type ShellAction =
   }
   | { type: 'deploy.move'; delta: number }
   | { type: 'deploy.focus'; position: 'first' | 'last' }
-  | { type: 'deploy.expand' }
-  | { type: 'deploy.collapse' }
+  | { type: 'deploy.open' }
   | { type: 'deploy.toggleSelection' }
   | { type: 'deploy.toggleAdvanced' }
   | { type: 'deploy.openDiff' }
-  | { type: 'deploy.closeDiff' }
   | { type: 'deploy.toggleWarning' }
   | { type: 'deploy.continue' }
   | { type: 'deploy.back' }
@@ -665,18 +664,14 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
     case 'deploy.focus':
       return updateDeployWorkflow(state, (workflow) =>
         focusDeployCursor(workflow, action.position));
-    case 'deploy.expand':
-      return updateDeployWorkflow(state, expandDeployNode);
-    case 'deploy.collapse':
-      return updateDeployWorkflow(state, collapseDeployNode);
+    case 'deploy.open':
+      return updateDeployWorkflow(state, openDeployNode);
     case 'deploy.toggleSelection':
       return updateDeployWorkflow(state, toggleDeploySelection);
     case 'deploy.toggleAdvanced':
       return updateDeployWorkflow(state, toggleDeployAdvanced);
     case 'deploy.openDiff':
       return updateDeployWorkflow(state, openDeployDiff);
-    case 'deploy.closeDiff':
-      return updateDeployWorkflow(state, closeDeployDiff);
     case 'deploy.toggleWarning':
       return updateDeployWorkflow(state, toggleDeployWarning);
     case 'deploy.continue':
@@ -1247,13 +1242,23 @@ function focusDeployCursor(
   workflow: DeployWorkflowState,
   position: 'first' | 'last',
 ): DeployWorkflowState {
-  if (workflow.status !== 'selection') return workflow;
-  return {
-    ...workflow,
-    cursor: position === 'first'
-      ? 0
-      : Math.max(0, deployVisibleNodes(workflow).length - 1),
-  };
+  if (workflow.status === 'selection') {
+    return {
+      ...workflow,
+      cursor: position === 'first'
+        ? 0
+        : Math.max(0, deployVisibleNodes(workflow).length - 1),
+    };
+  }
+  if (workflow.status === 'confirmation') {
+    return {
+      ...workflow,
+      warningCursor: position === 'first'
+        ? 0
+        : Math.max(0, deployWarnings(workflow.plan).length - 1),
+    };
+  }
+  return workflow;
 }
 
 function toggleDeploySelection(
@@ -1274,12 +1279,13 @@ function toggleDeploySelection(
   };
 }
 
-function expandDeployNode(
+function openDeployNode(
   workflow: DeployWorkflowState,
 ): DeployWorkflowState {
   if (workflow.status !== 'selection') return workflow;
   const node = deployVisibleNodes(workflow)[workflow.cursor]?.node;
-  if (!node || node.children.length === 0) return workflow;
+  if (!node) return workflow;
+  if (node.children.length === 0) return openDeployDiff(workflow);
   if (workflow.expandedNodeIds.includes(node.id)) {
     return {
       ...workflow,
@@ -1389,6 +1395,7 @@ function continueDeployWorkflow(
   return {
     status: 'confirmation',
     plan: workflow.plan,
+    cursor: workflow.cursor,
     selectedIds: workflow.selectedIds,
     confirmedIssueCodes: [],
     warningCursor: 0,
@@ -1400,11 +1407,12 @@ function backDeployWorkflow(
   workflow: DeployWorkflowState,
 ): DeployWorkflowState {
   if (workflow.status === 'diff') return closeDeployDiff(workflow);
+  if (workflow.status === 'selection') return collapseDeployNode(workflow);
   if (workflow.status !== 'confirmation') return workflow;
   return {
     status: 'selection',
     plan: workflow.plan,
-    cursor: 0,
+    cursor: workflow.cursor,
     selectedIds: workflow.selectedIds,
     expandedNodeIds: workflow.expandedNodeIds,
   };

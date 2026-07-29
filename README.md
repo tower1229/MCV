@@ -107,7 +107,7 @@ MCV 会显示按 IDE/capability 分组的写入计划并请求确认，只执行
 
 每个选中变化都会在首次写入前备份并验证；写入或本机状态提交失败时，已写入变化会从验证过的备份回滚。成功后只更新实际 Apply 范围的 Baseline Snapshot、managed inventory，以及仅保存在本机、按 IDE/capability 记录的最近 Deploy selection。再次部署相同内容不会创建新备份。
 
-Deploy TTY workflow 会复用最近一次成功的 IDE/capability selection；Diff 明确标注 managed merge 或 whole-file replacement。删除候选只在默认折叠的 Advanced Cleanup 中显示且默认不选。Apply 或 rollback 期间输入被禁用；Plan 过期时必须重新生成并重新审阅。结果页按 `Enter` 返回刷新后的 Overview，按 `q` 退出。
+Deploy TTY workflow 会复用最近一次成功的 IDE/capability selection。按 `↑` / `↓` 浏览可见树，按 `→` 展开分组或打开焦点文件 Diff，按 `←` 关闭 Diff、回到父节点或折叠分组；`Home`、`End`、`Page Up` 和 `Page Down` 用于长 Plan，`Space` 切换选择或确认 warning。Diff 明确标注 managed merge 或 whole-file replacement。删除候选只在默认折叠、带 `× Destructive` 状态的 Advanced Cleanup 中显示且默认不选；最终 Apply 只能由 `Enter` 启动。Apply 或 rollback 期间输入被禁用；Plan 过期时必须重新生成并重新审阅。结果页按 `Enter` 返回刷新后的 Overview，按 `q` 退出。
 
 新设备进入 Repository 后先执行 `mcv bind --dry-run` 审阅计划，再执行 `mcv bind --yes`；也可以通过 `mcv bind <path>` 显式指定路径。Bind 只校验 manifest 和 repository ID 并写入本机绑定；不会迁移或修改 Repository。普通命令不会因为当前目录恰好存在另一个 `mcv.yaml` 就越过已有绑定。
 
