@@ -1421,7 +1421,9 @@ function initialDeploySelection(
 ): string[] {
   return plan.changes
     .filter((change) => {
-      if (change.group === 'advanced' || change.change === 'delete') return false;
+      if (change.group === 'advanced'
+        || change.change === 'delete'
+        || change.deploymentKind === 'topology-migration') return false;
       if (change.owner === 'canonical-store') return change.defaultSelected;
       if (!lastSelection) return change.defaultSelected;
       const selectionIde = change.ide === 'gemini-cli' || change.ide === 'antigravity'

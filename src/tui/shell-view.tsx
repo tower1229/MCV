@@ -352,6 +352,9 @@ function scrollablePageLines(state: ShellState): ScrollablePageLine[] {
       const managedLinks = skillChanges.filter(
         (change) => change.deploymentKind === 'managed-link-projection',
       );
+      const migrations = skillChanges.filter(
+        (change) => change.deploymentKind === 'topology-migration',
+      );
       const copies = skillChanges.filter(
         (change) => change.deploymentKind === 'copy-projection',
       );
@@ -380,6 +383,7 @@ function scrollablePageLines(state: ShellState): ScrollablePageLine[] {
         `Written: ${result.data?.writtenPaths.length ?? 0} paths`,
         `Deleted: ${result.data?.deletedPaths.length ?? 0} paths`,
         `Managed-link projections: ${managedLinks.length}${listSurfaces(managedLinks)}`,
+        `Topology migrations: ${migrations.length}${listSurfaces(migrations)}`,
         `Copy projections: ${copies.length}${listSurfaces(copies)}`,
         ...(satisfied.length > 0
           ? [`Already satisfied projections: ${satisfied.length}${listSurfaces(satisfied)}`]
@@ -1742,7 +1746,8 @@ function DeploySelection({
             </Text>
           );
         }
-        const destructive = node.change?.change === 'delete';
+        const destructive = node.change?.change === 'delete'
+          || node.change?.deploymentKind === 'topology-migration';
         const style = destructive ? statusToneStyle('error') : undefined;
         return (
           <Text
@@ -1857,6 +1862,7 @@ function deployLayoutLabel(kind: DeployPlan['changes'][number]['deploymentKind']
   switch (kind) {
     case 'physical-materialization': return 'Physical materialization';
     case 'managed-link-projection': return 'Managed-link projection';
+    case 'topology-migration': return 'Topology migration';
     case 'copy-projection': return 'Copy projection';
     default: return 'Ordinary file';
   }

@@ -65,6 +65,9 @@ export function renderDeployResultPlain(result: DeployResult): string[] {
     const managedLinks = skillChanges.filter(
       (change) => change.deploymentKind === 'managed-link-projection',
     );
+    const migrations = skillChanges.filter(
+      (change) => change.deploymentKind === 'topology-migration',
+    );
     const copies = skillChanges.filter(
       (change) => change.deploymentKind === 'copy-projection',
     );
@@ -74,6 +77,7 @@ export function renderDeployResultPlain(result: DeployResult): string[] {
       `Deployed ${result.data?.appliedChangeIds.length ?? 0} selected item(s) from ${result.repositoryPath}.`,
       `Physical materializations: ${materializations.length}`,
       `Managed-link projections: ${managedLinks.length}${formatSurfaceList(managedLinks)}`,
+      `Topology migrations: ${migrations.length}${formatSurfaceList(migrations)}`,
       `Copy projections: ${copies.length}${formatSurfaceList(copies)}`,
       ...(satisfied.length > 0
         ? [`Already satisfied projections: ${satisfied.length}${formatSatisfiedSurfaceList(satisfied)}`]
@@ -96,8 +100,11 @@ function renderChange(change: DeployPlan['changes'][number]): string[] {
   const strategy = change.strategy === 'replace-entire-file'
     ? 'replace entire file'
     : 'managed merge';
+  const destructive = change.change === 'delete' || change.deploymentKind === 'topology-migration'
+    ? ' [destructive]'
+    : '';
   const lines = [
-    `  [${change.change}] ${change.name} (${change.id}) [${deploymentLabel(change.deploymentKind)}] [${strategy}]${change.defaultSelected ? ' [selected]' : ' [not selected]'}`,
+    `  [${change.change}] ${change.name} (${change.id}) [${deploymentLabel(change.deploymentKind)}] [${strategy}]${change.defaultSelected ? ' [selected]' : ' [not selected]'}${destructive}`,
   ];
   if (change.preview.kind === 'link') {
     lines.push(`    ${change.preview.targetPath} -> ${change.preview.linkTarget}`);
@@ -114,6 +121,7 @@ function deploymentLabel(kind: DeployPlan['changes'][number]['deploymentKind']):
   switch (kind) {
     case 'physical-materialization': return 'Physical materialization';
     case 'managed-link-projection': return 'Managed-link projection';
+    case 'topology-migration': return 'Topology migration';
     case 'copy-projection': return 'Copy projection';
     default: return 'Ordinary file';
   }

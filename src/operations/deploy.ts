@@ -70,7 +70,8 @@ export type DeployDeploymentKind =
   | 'ordinary-file'
   | 'physical-materialization'
   | 'managed-link-projection'
-  | 'copy-projection';
+  | 'copy-projection'
+  | 'topology-migration';
 
 export type DeployIde = CanonicalSkillIde;
 
@@ -145,6 +146,8 @@ interface DeployBackupEntry {
   backupPath?: string;
   beforeHash?: string;
   afterHash?: string;
+  nodeKind?: 'file' | 'directory' | 'symlink';
+  linkText?: string;
 }
 
 interface DeployBackupManifest {
@@ -158,7 +161,7 @@ interface DeployBackupManifest {
 
 interface PreparedDeployWrite {
   targetPath: string;
-  change: 'write' | 'delete' | 'link';
+  change: 'write' | 'delete' | 'link' | 'migrate-link';
   content?: Buffer;
   linkTarget?: string;
 }
@@ -470,6 +473,44 @@ function planCanonicalSkillLayout(
     });
     mutations.set(id, { linkTarget: projection.physicalTargetPath });
   }
+  for (const migration of managedLayout.topologyMigrations) {
+    const id = selectionId(migration.ide, 'skills', migration.targetPath);
+    projectionChanges.push({
+      id,
+      owner: 'ide',
+      ide: migration.ide,
+      capability: 'skills',
+      name: migration.packageName,
+      targetPath: migration.targetPath,
+      change: 'modify',
+      defaultSelected: false,
+      group: 'standard',
+      strategy: 'replace-entire-file',
+      deploymentKind: 'topology-migration',
+      dependsOnChangeIds: migration.materializationPaths.map((targetPath) =>
+        selectionId('canonical-store', 'skills', targetPath)),
+      preview: {
+        targetPath: migration.targetPath,
+        kind: 'link',
+        linkTarget: migration.physicalTargetPath,
+      },
+    });
+    mutations.set(id, { linkTarget: migration.physicalTargetPath });
+    issues.push({
+      severity: 'warning',
+      code: 'deploy.skillsTopology.migrationCandidate',
+      message: `Topology migration available: replace matching physical Skill copy ${migration.packageName} with a managed link.`,
+      details: `${migration.targetPath} currently matches Canonical package content and can be replaced with a link to ${migration.physicalTargetPath}. Migration is destructive, never selected by default, and requires explicit interactive confirmation.`,
+    });
+  }
+  for (const divergent of managedLayout.divergentPhysicalCopies) {
+    issues.push({
+      severity: 'warning',
+      code: 'deploy.skillsTopology.divergentPhysicalCopy',
+      message: `Divergent physical Skill copy preserved: ${divergent.packageName}.`,
+      details: `${divergent.targetPath} differs from the Canonical package. Capture or otherwise resolve the package before replacing it with a managed link.`,
+    });
+  }
   const materialized = managedLayout.materializations.map(({ source, targetPath }) => {
     const { ide: _ide, ...withoutIde } = source;
     return {
@@ -659,7 +700,8 @@ export async function applyDeployPlan(
         appliedChangeIds: selectedIds,
         writtenPaths: prepared.filter((item) => item.change === 'write').map((item) => item.targetPath),
         deletedPaths: prepared.filter((item) => item.change === 'delete').map((item) => item.targetPath),
-        projectionPaths: prepared.filter((item) => item.change === 'link').map((item) => item.targetPath),
+        projectionPaths: prepared.filter((item) =>
+          item.change === 'link' || item.change === 'migrate-link').map((item) => item.targetPath),
         backupPath,
       },
       linkOutcomes: plan.linkOutcomes,
@@ -694,11 +736,12 @@ function deployBlockingIssues(
 ): Issue[] {
   if (options.nonInteractive) {
     const unsafe = plan.issues.some((issue) => issue.severity !== 'notice')
-      || plan.changes.some((change) => change.change === 'delete');
+      || plan.changes.some((change) =>
+        change.change === 'delete' || change.deploymentKind === 'topology-migration');
     return unsafe ? [{
       severity: 'decisionRequired',
       code: 'deploy.nonInteractiveBlocked',
-      message: 'Non-interactive Deploy cannot apply warnings, decisions, errors, or deletions.',
+      message: 'Non-interactive Deploy cannot apply warnings, decisions, errors, deletions, or topology migrations.',
     }] : [];
   }
   const confirmed = new Set(selection.confirmedIssueCodes ?? []);
@@ -744,6 +787,16 @@ function prepareDeployWrites(
       return { targetPath, change: 'delete' as const };
     }
     const mutation = mutations.get(targetChanges[0].id);
+    if (targetChanges.some((change) => change.deploymentKind === 'topology-migration')) {
+      if (!mutation?.linkTarget) {
+        throw new Error(`Missing active Deploy link mutation for ${targetChanges[0].id}.`);
+      }
+      return {
+        targetPath,
+        change: 'migrate-link' as const,
+        linkTarget: mutation.linkTarget,
+      };
+    }
     if (targetChanges.some((change) => change.deploymentKind === 'managed-link-projection')) {
       if (!mutation?.linkTarget) {
         throw new Error(`Missing active Deploy link mutation for ${targetChanges[0].id}.`);
@@ -761,7 +814,7 @@ function prepareDeployWrites(
       content: composeSelectedContent(targetPath, targetChanges, mutation.content),
     };
   }).sort((left, right) => {
-    const order = { write: 0, delete: 1, link: 2 } as const;
+    const order = { write: 0, delete: 1, link: 2, 'migrate-link': 2 } as const;
     return order[left.change] - order[right.change];
   });
 }
@@ -826,10 +879,16 @@ function createDeployBackup(
       }
       const relativeBackupPath = path.join('files', `${index}-${path.basename(change.targetPath)}`);
       const copiedPath = path.join(backupPath, relativeBackupPath);
-      copyFile(change.targetPath, copiedPath);
-      const beforeHash = hashFile(change.targetPath);
-      if (hashFile(copiedPath) !== beforeHash
+      const node = backupDeployNode(change.targetPath, copiedPath, copyFile);
+      if (node.beforeHash === undefined
         || hashDeviceTopologyNode(change.targetPath) !== expected) {
+        throw new StaleDeployPlanError('A selected target changed while its backup was being verified.');
+      }
+      if (node.nodeKind === 'file' && hashFile(copiedPath) !== node.beforeHash) {
+        throw new StaleDeployPlanError('A selected target changed while its backup was being verified.');
+      }
+      if (node.nodeKind === 'directory'
+        && hashDirectoryTree(copiedPath) !== hashDirectoryTree(change.targetPath)) {
         throw new StaleDeployPlanError('A selected target changed while its backup was being verified.');
       }
       return {
@@ -837,7 +896,9 @@ function createDeployBackup(
         action: change.change,
         originalPath: change.targetPath,
         backupPath: relativeBackupPath,
-        beforeHash,
+        beforeHash: node.beforeHash,
+        nodeKind: node.nodeKind,
+        ...(node.linkText !== undefined ? { linkText: node.linkText } : {}),
       };
     });
     const manifest: DeployBackupManifest = {
@@ -895,6 +956,13 @@ function applyPreparedDeployWrites(
         attemptedPaths.add(write.targetPath);
         removeFile(write.targetPath);
       }
+      else if (write.change === 'migrate-link') {
+        attemptedPaths.add(write.targetPath);
+        removeFile(write.targetPath);
+        fs.mkdirSync(path.dirname(write.targetPath), { recursive: true });
+        createSymbolicLink(write.linkTarget as string, write.targetPath);
+        verifyManagedProjection(write.targetPath, write.linkTarget as string);
+      }
       else if (write.change === 'link') {
         fs.mkdirSync(path.dirname(write.targetPath), { recursive: true });
         createSymbolicLink(write.linkTarget as string, write.targetPath);
@@ -945,7 +1013,18 @@ function rollbackDeployWrites(
   for (const entry of [...entriesByPath.values()].reverse()) {
     try {
       if (!entry.backupPath) removeFile(entry.originalPath);
-      else restoreFile(entry.originalPath, fs.readFileSync(path.join(backupPath, entry.backupPath)));
+      else {
+        const sourcePath = path.join(backupPath, entry.backupPath);
+        if (entry.nodeKind === 'directory') {
+          removeFile(entry.originalPath);
+          fs.cpSync(sourcePath, entry.originalPath, { recursive: true, verbatimSymlinks: true });
+        } else if (entry.nodeKind === 'symlink') {
+          removeFile(entry.originalPath);
+          fs.symlinkSync(entry.linkText as string, entry.originalPath, 'dir');
+        } else {
+          restoreFile(entry.originalPath, fs.readFileSync(sourcePath));
+        }
+      }
     } catch (error) {
       errors.push(`${entry.originalPath}: ${errorMessage(error)}`);
     }
@@ -989,6 +1068,58 @@ function finalizeDeployBackup(backupPath: string): void {
     path.join(backupPath, 'manifest.json'),
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
+}
+
+function backupDeployNode(
+  targetPath: string,
+  copiedPath: string,
+  copyFile: typeof fs.copyFileSync,
+): { beforeHash: string; nodeKind: NonNullable<DeployBackupEntry['nodeKind']>; linkText?: string } {
+  const stat = fs.lstatSync(targetPath);
+  if (stat.isSymbolicLink()) {
+    const linkText = fs.readlinkSync(targetPath);
+    fs.symlinkSync(linkText, copiedPath, 'dir');
+    return {
+      beforeHash: hashDeviceTopologyNode(targetPath),
+      nodeKind: 'symlink',
+      linkText,
+    };
+  }
+  if (stat.isDirectory()) {
+    fs.cpSync(targetPath, copiedPath, { recursive: true, verbatimSymlinks: true });
+    return {
+      beforeHash: hashDirectoryTree(targetPath),
+      nodeKind: 'directory',
+    };
+  }
+  copyFile(targetPath, copiedPath);
+  return {
+    beforeHash: hashFile(targetPath),
+    nodeKind: 'file',
+  };
+}
+
+function hashDirectoryTree(root: string): string {
+  const hash = crypto.createHash('sha256');
+  const visit = (directory: string): void => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      const current = path.join(directory, entry.name);
+      hash.update(`${path.relative(root, current)}\0`);
+      if (entry.isSymbolicLink()) {
+        hash.update(`symlink\0${fs.readlinkSync(current)}\0`);
+        continue;
+      }
+      if (entry.isDirectory()) {
+        hash.update('directory\0');
+        visit(current);
+        continue;
+      }
+      hash.update(fs.readFileSync(current));
+    }
+  };
+  visit(root);
+  return hash.digest('hex');
 }
 
 function markDeployBackupFailed(backupPath: string, error: unknown): void {

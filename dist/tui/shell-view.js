@@ -182,6 +182,7 @@ function scrollablePageLines(state) {
         if (result.status === 'succeeded') {
             const skillChanges = result.changes.filter((change) => change.capability === 'skills');
             const managedLinks = skillChanges.filter((change) => change.deploymentKind === 'managed-link-projection');
+            const migrations = skillChanges.filter((change) => change.deploymentKind === 'topology-migration');
             const copies = skillChanges.filter((change) => change.deploymentKind === 'copy-projection');
             const satisfied = result.linkOutcomes?.filter((outcome) => outcome.status === 'satisfied-via-link' && outcome.ownership === 'managed') ?? [];
             const surfaceLabel = (target) => {
@@ -207,6 +208,7 @@ function scrollablePageLines(state) {
                 `Written: ${result.data?.writtenPaths.length ?? 0} paths`,
                 `Deleted: ${result.data?.deletedPaths.length ?? 0} paths`,
                 `Managed-link projections: ${managedLinks.length}${listSurfaces(managedLinks)}`,
+                `Topology migrations: ${migrations.length}${listSurfaces(migrations)}`,
                 `Copy projections: ${copies.length}${listSurfaces(copies)}`,
                 ...(satisfied.length > 0
                     ? [`Already satisfied projections: ${satisfied.length}${listSurfaces(satisfied)}`]
@@ -818,7 +820,8 @@ function DeploySelection({ workflow, terminalRows, }) {
                     const style = statusToneStyle('error');
                     return (_jsxs(Text, { color: style.color, dimColor: style.dimColor, wrap: "truncate-middle", children: [visibleIndex === workflow.cursor ? '>' : ' ', ' ', deployNodeSelectionMarker(node.changeIds, workflow.selectedIds), ' ', disclosure, " ", style.symbol, " Destructive \u00B7 Advanced Cleanup \u00B7 ", advanced.length, ' ', advanced.length === 1 ? 'deletion' : 'deletions', " \u00B7", ' ', advanced.filter((change) => workflow.selectedIds.includes(change.id)).length || 'none', " selected"] }, node.id));
                 }
-                const destructive = node.change?.change === 'delete';
+                const destructive = node.change?.change === 'delete'
+                    || node.change?.deploymentKind === 'topology-migration';
                 const style = destructive ? statusToneStyle('error') : undefined;
                 return (_jsxs(Text, { color: style?.color, dimColor: style?.dimColor, wrap: "truncate-middle", children: ['  '.repeat(depth), visibleIndex === workflow.cursor ? '>' : ' ', ' ', deployNodeSelectionMarker(node.changeIds, workflow.selectedIds), ' ', disclosure, " ", style && _jsxs(_Fragment, { children: [style.symbol, " Destructive \u00B7 "] }), node.label, node.kind !== 'file' && (_jsxs(_Fragment, { children: [" \u00B7 ", node.changeIds.length, ' ', node.changeIds.length === 1 ? 'file' : 'files'] }))] }, node.id));
             }), !viewport.combinedIndicator && viewport.hiddenAfter > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenAfter, " more"] })), viewport.combinedIndicator && (_jsxs(Text, { dimColor: true, children: ['  ', "\u2026 ", viewport.hiddenBefore, " earlier \u00B7 ", viewport.hiddenAfter, " more"] })), workflow.plan.issues.some((issue) => issue.severity === 'decisionRequired' || issue.severity === 'error') && (_jsx(Text, { color: "red", children: "Apply disabled: regenerate after resolving every required decision and error." }))] }));
@@ -869,6 +872,7 @@ function deployLayoutLabel(kind) {
     switch (kind) {
         case 'physical-materialization': return 'Physical materialization';
         case 'managed-link-projection': return 'Managed-link projection';
+        case 'topology-migration': return 'Topology migration';
         case 'copy-projection': return 'Copy projection';
         default: return 'Ordinary file';
     }

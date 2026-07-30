@@ -191,6 +191,56 @@ describe('mcv deploy', () => {
     expect(resultText).toContain('Managed-link projections: 1');
   });
 
+  it('distinguishes topology migration in Plan, JSON, and refuses --yes', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8')
+        .replace('useSymlinks: false', 'useSymlinks: true')
+        .replace('    windows: "${HOME}\\\\Tools"', '    windows: "${HOME}\\\\Tools"\n    macos: "${HOME}/Tools"'),
+    );
+    const sourceSkill = path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md');
+    fs.mkdirSync(path.dirname(sourceSkill), { recursive: true });
+    fs.writeFileSync(sourceSkill, '# Review\n');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(projectionPath, { recursive: true });
+    fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
+
+    await createProgram(deviceContext()).parseAsync(['node', 'mcv', 'deploy', '--dry-run']);
+    const planText = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
+    expect(planText).toContain('Topology migration');
+    expect(planText).toContain('[not selected]');
+    expect(planText).toContain('[destructive]');
+    expect(planText).toContain('Topology migration available');
+
+    vi.mocked(console.log).mockClear();
+    await createProgram(deviceContext()).parseAsync(['node', 'mcv', 'deploy', '--dry-run', '--json']);
+    const planJson = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0])) as {
+      changes: Array<{ deploymentKind?: string; defaultSelected: boolean; targetPath: string }>;
+      issues: Array<{ code: string }>;
+    };
+    expect(planJson.changes).toContainEqual(expect.objectContaining({
+      targetPath: projectionPath,
+      deploymentKind: 'topology-migration',
+      defaultSelected: false,
+    }));
+    expect(planJson.issues).toContainEqual(expect.objectContaining({
+      code: 'deploy.skillsTopology.migrationCandidate',
+    }));
+
+    vi.mocked(console.log).mockClear();
+    await createProgram(deviceContext()).parseAsync(['node', 'mcv', 'deploy', '--yes', '--json']);
+    const resultJson = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0])) as {
+      status: string;
+      issues: Array<{ code: string }>;
+    };
+    expect(resultJson.status).toBe('blocked');
+    expect(resultJson.issues).toContainEqual(expect.objectContaining({
+      code: 'deploy.nonInteractiveBlocked',
+    }));
+    expect(fs.lstatSync(projectionPath).isSymbolicLink()).toBe(false);
+  });
+
   it('detects a symbolic-link ancestor before planning writes beneath it', () => {
     const target = path.join(testRoot, 'link-target');
     const link = path.join(testRoot, 'link');

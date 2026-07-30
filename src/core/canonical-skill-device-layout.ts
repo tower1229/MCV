@@ -30,6 +30,17 @@ export interface CanonicalSkillProjection {
   materializationPaths: string[];
 }
 
+export interface CanonicalSkillTopologyMigration extends CanonicalSkillProjection {
+  kind: 'topology-migration';
+}
+
+export interface CanonicalSkillDivergentPhysicalCopy {
+  owner: 'ide';
+  ide: CanonicalSkillIde;
+  packageName: string;
+  targetPath: string;
+}
+
 export interface CanonicalSkillProjectionSurface {
   ide: CanonicalSkillIde;
   root: string;
@@ -41,6 +52,8 @@ export interface CanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFile> 
   materializations: CanonicalSkillMaterialization<T>[];
   filesForLinkClassification: CanonicalSkillLayoutFile[];
   missingProjections: CanonicalSkillProjection[];
+  topologyMigrations: CanonicalSkillTopologyMigration[];
+  divergentPhysicalCopies: CanonicalSkillDivergentPhysicalCopy[];
   conflicts: string[];
 }
 
@@ -127,6 +140,8 @@ export function planCanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFil
       materializations: [],
       filesForLinkClassification: files,
       missingProjections: [],
+      topologyMigrations: [],
+      divergentPhysicalCopies: [],
       conflicts: [],
     };
   }
@@ -159,24 +174,52 @@ export function planCanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFil
   const materializations = [...materializationsByPath.values()];
   const packageNames = [...new Set(materializations
     .map(({ targetPath }) => canonicalSkillPackageName(targetPath)))].sort();
-  const missingProjections = linkCapableSurfaces.flatMap((surface) => {
-    if (path.resolve(surface.root) === path.resolve(storeRoot)) return [];
-    return packageNames.flatMap((packageName): CanonicalSkillProjection[] => {
+  const missingProjections: CanonicalSkillProjection[] = [];
+  const topologyMigrations: CanonicalSkillTopologyMigration[] = [];
+  const divergentPhysicalCopies: CanonicalSkillDivergentPhysicalCopy[] = [];
+  for (const surface of linkCapableSurfaces) {
+    if (path.resolve(surface.root) === path.resolve(storeRoot)) continue;
+    for (const packageName of packageNames) {
       const targetPath = path.join(surface.root, packageName);
-      if (fs.existsSync(targetPath) || findSymbolicLinkAncestor(targetPath)) return [];
-      return [{
+      const physicalTargetPath = path.join(storeRoot, packageName);
+      const materializationPaths = materializations
+        .map(({ targetPath: materializationPath }) => materializationPath)
+        .filter((materializationPath) =>
+          canonicalSkillPackageName(materializationPath) === packageName);
+      const projection = {
+        owner: 'ide' as const,
+        ide: surface.ide,
+        packageName,
+        targetPath,
+        physicalTargetPath,
+        materializationPaths,
+      };
+      if (findSymbolicLinkAncestor(targetPath)) continue;
+      const existingKind = physicalSkillPackageKind(targetPath);
+      if (existingKind === 'missing') {
+        missingProjections.push(projection);
+        continue;
+      }
+      if (existingKind === 'symlink') continue;
+      const packageMatch = physicalSkillPackageMatchesCanonical(
+        targetPath,
+        materializations.filter((entry) =>
+          canonicalSkillPackageName(entry.targetPath) === packageName),
+        storeRoot,
+        packageName,
+      );
+      if (packageMatch === 'match') {
+        topologyMigrations.push({ ...projection, kind: 'topology-migration' });
+        continue;
+      }
+      divergentPhysicalCopies.push({
         owner: 'ide',
         ide: surface.ide,
         packageName,
         targetPath,
-        physicalTargetPath: path.join(storeRoot, packageName),
-        materializationPaths: materializations
-          .map(({ targetPath: materializationPath }) => materializationPath)
-          .filter((materializationPath) =>
-            canonicalSkillPackageName(materializationPath) === packageName),
-      }];
-    });
-  });
+      });
+    }
+  }
   const physicalFiles = materializations.map(({ source, targetPath }) =>
     canonicalStoreFile(source, targetPath));
   const linkClassificationIdeFiles = files.filter((file) =>
@@ -192,8 +235,96 @@ export function planCanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFil
       ...linkClassificationIdeFiles,
     ],
     missingProjections,
+    topologyMigrations,
+    divergentPhysicalCopies,
     conflicts,
   };
+}
+
+function physicalSkillPackageKind(
+  targetPath: string,
+): 'missing' | 'symlink' | 'physical' {
+  if (!deployPathExists(targetPath)) return 'missing';
+  return fs.lstatSync(targetPath).isSymbolicLink() ? 'symlink' : 'physical';
+}
+
+function physicalSkillPackageMatchesCanonical<T extends CanonicalSkillLayoutFile>(
+  packagePath: string,
+  packageMaterializations: CanonicalSkillMaterialization<T>[],
+  storeRoot: string,
+  packageName: string,
+): 'match' | 'divergent' {
+  let stats: fs.Stats;
+  try {
+    stats = fs.lstatSync(packagePath);
+  } catch {
+    return 'divergent';
+  }
+  if (!stats.isDirectory() || stats.isSymbolicLink()) return 'divergent';
+
+  const desiredByRelative = new Map<string, Buffer>();
+  for (const { source, targetPath } of packageMaterializations) {
+    const relative = path.relative(path.join(storeRoot, packageName), targetPath);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) continue;
+    desiredByRelative.set(relative, toBuffer(source.content));
+  }
+  if (desiredByRelative.size === 0) return 'divergent';
+
+  const onDisk = new Map<string, Buffer>();
+  const onDiskDirectories = new Set<string>();
+  try {
+    for (const entry of listPhysicalPackageEntries(packagePath)) {
+      if (entry.kind === 'symlink') return 'divergent';
+      if (entry.kind === 'directory') {
+        if (entry.relative !== '') onDiskDirectories.add(entry.relative);
+        continue;
+      }
+      onDisk.set(entry.relative, fs.readFileSync(entry.path));
+    }
+  } catch {
+    return 'divergent';
+  }
+  const desiredDirectories = new Set<string>();
+  for (const relative of desiredByRelative.keys()) {
+    let current = path.dirname(relative);
+    while (current !== '.' && current !== '') {
+      desiredDirectories.add(current);
+      current = path.dirname(current);
+    }
+  }
+  if (onDisk.size !== desiredByRelative.size) return 'divergent';
+  if (onDiskDirectories.size !== desiredDirectories.size) return 'divergent';
+  for (const relative of desiredDirectories) {
+    if (!onDiskDirectories.has(relative)) return 'divergent';
+  }
+  for (const [relative, content] of desiredByRelative) {
+    const diskContent = onDisk.get(relative);
+    if (!diskContent || !diskContent.equals(content)) return 'divergent';
+  }
+  return 'match';
+}
+
+function listPhysicalPackageEntries(
+  directory: string,
+  relative = '',
+): Array<{ kind: 'file' | 'directory' | 'symlink'; path: string; relative: string }> {
+  const entries = fs.readdirSync(directory, { withFileTypes: true });
+  return entries.flatMap((entry) => {
+    const target = path.join(directory, entry.name);
+    const entryRelative = relative ? path.join(relative, entry.name) : entry.name;
+    if (entry.isSymbolicLink()) {
+      return [{ kind: 'symlink' as const, path: target, relative: entryRelative }];
+    }
+    if (entry.isDirectory()) {
+      return [
+        { kind: 'directory' as const, path: target, relative: entryRelative },
+        ...listPhysicalPackageEntries(target, entryRelative),
+      ];
+    }
+    return entry.isFile()
+      ? [{ kind: 'file' as const, path: target, relative: entryRelative }]
+      : [];
+  });
 }
 
 function isStoreSkillPath(targetPath: string, storeRoot: string): boolean {

@@ -905,7 +905,9 @@ function wrapIndex(index, length) {
 function initialDeploySelection(plan, lastSelection) {
     return plan.changes
         .filter((change) => {
-        if (change.group === 'advanced' || change.change === 'delete')
+        if (change.group === 'advanced'
+            || change.change === 'delete'
+            || change.deploymentKind === 'topology-migration')
             return false;
         if (change.owner === 'canonical-store')
             return change.defaultSelected;

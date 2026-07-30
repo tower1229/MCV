@@ -7,6 +7,7 @@ import { atomicWriteFile, hashFile } from '../utils/files.js';
 import { isRecord } from '../utils/objects.js';
 import { readManifest } from '../utils/repository.js';
 import { getStateFilePath, readState, writeState, type McvState } from '../utils/state.js';
+import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
 import {
   OPERATION_SCHEMA_VERSION,
   type Issue,
@@ -23,6 +24,8 @@ export interface DeployBackupFile {
   backupPath?: string;
   beforeHash?: string;
   afterHash?: string;
+  nodeKind?: 'file' | 'directory' | 'symlink';
+  linkText?: string;
 }
 
 interface DeployBackupManifest {
@@ -214,7 +217,8 @@ export function applyRestorePlan(
   const attemptedPaths = new Set<string>();
   let stateCommitAttempted = false;
   const writeFile = options.writeFile ?? ((targetPath: string, content: Buffer) => atomicWriteFile(targetPath, content));
-  const removeFile = options.removeFile ?? ((targetPath: string) => fs.rmSync(targetPath, { force: true }));
+  const removeFile = options.removeFile ?? ((targetPath: string) =>
+    fs.rmSync(targetPath, { recursive: true, force: true }));
   try {
     for (const change of plan.changes) {
       attemptedPaths.add(change.targetPath);
@@ -224,6 +228,27 @@ export function applyRestorePlan(
       }
       const source = transactionBackup.manifest.files.find((file) => file.originalPath === change.targetPath);
       if (!source?.backupPath) throw new Error(`Backup path is missing for ${change.targetPath}.`);
+      if (source.nodeKind === 'directory') {
+        const sourcePath = resolveVerifiedBackupDirectory(transactionBackup.directory, source.backupPath);
+        if (!sourcePath) throw new Error(`Backup directory is no longer valid for ${change.targetPath}.`);
+        removeFile(change.targetPath);
+        fs.cpSync(sourcePath, change.targetPath, { recursive: true, verbatimSymlinks: true });
+        continue;
+      }
+      if (source.nodeKind === 'symlink') {
+        if (typeof source.linkText !== 'string') {
+          throw new Error(`Backup symlink metadata is missing for ${change.targetPath}.`);
+        }
+        const sourcePath = resolveVerifiedBackupSymlink(
+          transactionBackup.directory,
+          source.backupPath,
+          source.linkText,
+        );
+        if (!sourcePath) throw new Error(`Backup symlink is no longer valid for ${change.targetPath}.`);
+        removeFile(change.targetPath);
+        fs.symlinkSync(source.linkText, change.targetPath, 'dir');
+        continue;
+      }
       const sourcePath = resolveVerifiedBackupFile(transactionBackup.directory, source.backupPath);
       if (!sourcePath) throw new Error(`Backup file is no longer valid for ${change.targetPath}.`);
       writeFile(change.targetPath, fs.readFileSync(sourcePath));
@@ -535,6 +560,35 @@ function verifyDeployBackupFile(
     || (action === 'modify'
       ? typeof value.afterHash !== 'string' || !SHA256_PATTERN.test(value.afterHash)
       : value.afterHash !== undefined)) return undefined;
+  const nodeKind = value.nodeKind === 'directory' || value.nodeKind === 'symlink'
+    ? value.nodeKind
+    : 'file';
+  if (nodeKind === 'directory') {
+    const sourcePath = resolveVerifiedBackupDirectory(directory, value.backupPath);
+    if (!sourcePath || hashDirectoryTree(sourcePath) !== value.beforeHash) return undefined;
+    return {
+      action,
+      originalPath: value.originalPath,
+      backupPath: value.backupPath,
+      beforeHash: value.beforeHash,
+      nodeKind,
+      ...(action === 'modify' ? { afterHash: value.afterHash as string } : {}),
+    };
+  }
+  if (nodeKind === 'symlink') {
+    if (typeof value.linkText !== 'string') return undefined;
+    const sourcePath = resolveVerifiedBackupSymlink(directory, value.backupPath, value.linkText);
+    if (!sourcePath) return undefined;
+    return {
+      action,
+      originalPath: value.originalPath,
+      backupPath: value.backupPath,
+      beforeHash: value.beforeHash,
+      nodeKind,
+      linkText: value.linkText,
+      ...(action === 'modify' ? { afterHash: value.afterHash as string } : {}),
+    };
+  }
   const sourcePath = resolveVerifiedBackupFile(directory, value.backupPath);
   if (!sourcePath || hashFile(sourcePath) !== value.beforeHash) return undefined;
   return {
@@ -544,6 +598,60 @@ function verifyDeployBackupFile(
     beforeHash: value.beforeHash,
     ...(action === 'modify' ? { afterHash: value.afterHash as string } : {}),
   };
+}
+
+function resolveVerifiedBackupDirectory(
+  directory: string,
+  backupPath: string,
+): string | undefined {
+  const sourcePath = path.resolve(directory, backupPath);
+  if (!isContainedPath(directory, sourcePath)) return undefined;
+  try {
+    const stats = fs.lstatSync(sourcePath);
+    if (!stats.isDirectory() || stats.isSymbolicLink()) return undefined;
+  } catch {
+    return undefined;
+  }
+  return sourcePath;
+}
+
+function resolveVerifiedBackupSymlink(
+  directory: string,
+  backupPath: string,
+  linkText: string,
+): string | undefined {
+  const sourcePath = path.resolve(directory, backupPath);
+  if (!isContainedPath(directory, sourcePath)) return undefined;
+  try {
+    const stats = fs.lstatSync(sourcePath);
+    if (!stats.isSymbolicLink() || fs.readlinkSync(sourcePath) !== linkText) return undefined;
+  } catch {
+    return undefined;
+  }
+  return sourcePath;
+}
+
+function hashDirectoryTree(root: string): string {
+  const hash = crypto.createHash('sha256');
+  const visit = (directory: string): void => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      const current = path.join(directory, entry.name);
+      hash.update(`${path.relative(root, current)}\0`);
+      if (entry.isSymbolicLink()) {
+        hash.update(`symlink\0${fs.readlinkSync(current)}\0`);
+        continue;
+      }
+      if (entry.isDirectory()) {
+        hash.update('directory\0');
+        visit(current);
+        continue;
+      }
+      hash.update(fs.readFileSync(current));
+    }
+  };
+  visit(root);
+  return hash.digest('hex');
 }
 
 function resolveVerifiedBackupFile(directory: string, backupPath: string): string | undefined {
@@ -569,7 +677,10 @@ function currentFileHash(targetPath: string): string {
     if (isMissingPathError(error)) return MISSING_HASH;
     throw error;
   }
-  if (!stats.isFile() || stats.isSymbolicLink()) {
+  if (stats.isSymbolicLink() || stats.isDirectory()) {
+    return hashDeviceTopologyNode(targetPath);
+  }
+  if (!stats.isFile()) {
     return hashText(`<unsupported:${stats.mode}>`);
   }
   return hashFile(targetPath);

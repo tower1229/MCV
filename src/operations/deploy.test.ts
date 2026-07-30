@@ -685,6 +685,405 @@ describe('Deploy operations', () => {
     ]);
   });
 
+  it('offers a matching physical Skill copy as an unselected topology-migration candidate', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const storeFile = path.join(homeDir, '.agents', 'skills', 'review', 'SKILL.md');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    const storePackage = path.dirname(storeFile);
+    fs.mkdirSync(projectionPath, { recursive: true });
+    fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.readyToApply).toBe(true);
+    expect(plan.changes.filter((change) => change.capability === 'skills')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          owner: 'canonical-store',
+          targetPath: storeFile,
+          deploymentKind: 'physical-materialization',
+          defaultSelected: true,
+        }),
+        expect.objectContaining({
+          ide: 'claude-code',
+          targetPath: projectionPath,
+          deploymentKind: 'topology-migration',
+          defaultSelected: false,
+          change: 'modify',
+          preview: expect.objectContaining({
+            kind: 'link',
+            linkTarget: storePackage,
+          }),
+        }),
+      ]),
+    );
+    expect(plan.changes.some((change) =>
+      change.deploymentKind === 'managed-link-projection'
+      && change.targetPath === projectionPath)).toBe(false);
+    expect(plan.issues).toContainEqual(expect.objectContaining({
+      severity: 'warning',
+      code: 'deploy.skillsTopology.migrationCandidate',
+      message: expect.stringMatching(/topology migration|managed link/i),
+    }));
+    expect(plan.changes.filter((change) => change.defaultSelected).some((change) =>
+      change.deploymentKind === 'topology-migration')).toBe(false);
+  });
+
+  it('preserves a divergent physical Skill copy and directs the user to Capture', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(projectionPath, { recursive: true });
+    fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Local review edits\n');
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.changes.some((change) =>
+      change.targetPath === projectionPath
+      && (change.deploymentKind === 'topology-migration'
+        || change.deploymentKind === 'managed-link-projection'))).toBe(false);
+    expect(plan.issues).toContainEqual(expect.objectContaining({
+      severity: 'warning',
+      code: 'deploy.skillsTopology.divergentPhysicalCopy',
+      message: expect.stringMatching(/divergent physical Skill copy/i),
+      details: expect.stringMatching(/Capture/i),
+    }));
+    expect(fs.readFileSync(path.join(projectionPath, 'SKILL.md'), 'utf8')).toBe('# Local review edits\n');
+  });
+
+  it('never adopts an existing external Skill link as a topology migration', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    const externalPackage = path.join(homeDir, 'external-skills', 'review');
+    fs.mkdirSync(externalPackage, { recursive: true });
+    fs.writeFileSync(path.join(externalPackage, 'SKILL.md'), '# Review\n');
+    fs.symlinkSync(externalPackage, projectionPath, 'dir');
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.changes.some((change) =>
+      change.targetPath === projectionPath
+      && change.deploymentKind === 'topology-migration')).toBe(false);
+    expect(plan.linkOutcomes).toContainEqual(expect.objectContaining({
+      status: 'satisfied-via-link',
+      ownership: 'external',
+      linkPath: projectionPath,
+      resolvedPath: externalPackage,
+    }));
+    expect(fs.lstatSync(projectionPath).isSymbolicLink()).toBe(true);
+    expect(fs.readlinkSync(projectionPath)).toBe(externalPackage);
+  });
+
+  it('refuses topology migration in non-interactive Deploy even after dry-run planning', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(projectionPath, { recursive: true });
+    fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
+
+    const dryRun = await createDeployPlan(context);
+    expect(dryRun.changes.some((change) =>
+      change.deploymentKind === 'topology-migration')).toBe(true);
+
+    const result = await applyDeployPlan(
+      context,
+      dryRun,
+      {
+        changeIds: dryRun.changes
+          .filter((change) => change.defaultSelected || change.deploymentKind === 'topology-migration')
+          .map((change) => change.id),
+        confirmedIssueCodes: dryRun.issues
+          .filter((issue) => issue.severity === 'warning')
+          .map((issue) => issue.code),
+      },
+      { nonInteractive: true },
+    );
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      issues: [expect.objectContaining({ code: 'deploy.nonInteractiveBlocked' })],
+    });
+    expect(fs.lstatSync(projectionPath).isDirectory()).toBe(true);
+    expect(fs.lstatSync(projectionPath).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(path.join(projectionPath, 'SKILL.md'), 'utf8')).toBe('# Review\n');
+  });
+
+  it('migrates a matching physical Skill copy to a managed link with recoverable backup', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const storeFile = path.join(homeDir, '.agents', 'skills', 'review', 'SKILL.md');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    const storePackage = path.dirname(storeFile);
+    fs.mkdirSync(projectionPath, { recursive: true });
+    fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
+    const plan = await createDeployPlan(context);
+    const migration = plan.changes.find((change) =>
+      change.deploymentKind === 'topology-migration');
+    if (!migration) throw new Error('expected topology migration');
+    const selected = plan.changes.filter((change) =>
+      change.defaultSelected || change.deploymentKind === 'topology-migration');
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      {
+        changeIds: selected.map((change) => change.id),
+        confirmedIssueCodes: plan.issues
+          .filter((issue) => issue.severity === 'warning')
+          .map((issue) => issue.code),
+      },
+    );
+
+    expect(result).toMatchObject({ status: 'succeeded' });
+    expect(fs.readFileSync(storeFile, 'utf8')).toBe('# Review\n');
+    expect(fs.lstatSync(projectionPath).isSymbolicLink()).toBe(true);
+    expect(fs.realpathSync(projectionPath)).toBe(fs.realpathSync(storePackage));
+    expect(result.status === 'succeeded' && result.data?.backupPath).toEqual(expect.any(String));
+    expect(result.status === 'succeeded' && result.data?.projectionPaths).toEqual([projectionPath]);
+    if (result.status !== 'succeeded' || !result.data?.backupPath) {
+      throw new Error('expected successful migration backup');
+    }
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(result.data.backupPath, 'manifest.json'), 'utf8'),
+    ) as {
+      status: string;
+      files: Array<{
+        changeId: string;
+        originalPath: string;
+        backupPath?: string;
+        nodeKind?: string;
+      }>;
+    };
+    expect(manifest.status).toBe('complete');
+    const migrationBackup = manifest.files.find((entry) => entry.changeId === migration.id);
+    expect(migrationBackup).toMatchObject({
+      originalPath: projectionPath,
+      nodeKind: 'directory',
+      backupPath: expect.any(String),
+    });
+    expect(fs.readFileSync(
+      path.join(result.data.backupPath, migrationBackup?.backupPath as string, 'SKILL.md'),
+      'utf8',
+    )).toBe('# Review\n');
+
+    const nextPlan = await createDeployPlan(context);
+    expect(nextPlan.linkOutcomes).toContainEqual(expect.objectContaining({
+      status: 'satisfied-via-link',
+      ownership: 'managed',
+      linkPath: projectionPath,
+    }));
+    expect(nextPlan.changes.some((change) =>
+      change.targetPath === projectionPath)).toBe(false);
+  });
+
+  it('rejects a topology migration when the physical copy changes after Plan review', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(projectionPath, { recursive: true });
+    fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
+    const plan = await createDeployPlan(context);
+    fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Changed after review\n');
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      {
+        changeIds: plan.changes
+          .filter((change) => change.defaultSelected || change.deploymentKind === 'topology-migration')
+          .map((change) => change.id),
+        confirmedIssueCodes: plan.issues
+          .filter((issue) => issue.severity === 'warning')
+          .map((issue) => issue.code),
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'operation.stalePlan' },
+    });
+    expect(fs.lstatSync(projectionPath).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(path.join(projectionPath, 'SKILL.md'), 'utf8')).toBe('# Changed after review\n');
+  });
+
+  it('rolls back an exact physical directory after managed-link creation fails during migration', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(projectionPath, { recursive: true });
+    fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
+    const plan = await createDeployPlan(context);
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      {
+        changeIds: plan.changes
+          .filter((change) => change.defaultSelected || change.deploymentKind === 'topology-migration')
+          .map((change) => change.id),
+        confirmedIssueCodes: plan.issues
+          .filter((issue) => issue.severity === 'warning')
+          .map((issue) => issue.code),
+      },
+      {
+        createSymbolicLink: () => {
+          throw new Error('simulated migration link failure');
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'deploy.transactionFailed' },
+    });
+    expect(fs.lstatSync(projectionPath).isSymbolicLink()).toBe(false);
+    expect(fs.lstatSync(projectionPath).isDirectory()).toBe(true);
+    expect(fs.readFileSync(path.join(projectionPath, 'SKILL.md'), 'utf8')).toBe('# Review\n');
+  });
+
+  it('retains a verified recovery backup when topology migration rollback is incomplete', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(projectionPath, { recursive: true });
+    fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
+    const plan = await createDeployPlan(context);
+    let removals = 0;
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      {
+        changeIds: plan.changes
+          .filter((change) => change.defaultSelected || change.deploymentKind === 'topology-migration')
+          .map((change) => change.id),
+        confirmedIssueCodes: plan.issues
+          .filter((issue) => issue.severity === 'warning')
+          .map((issue) => issue.code),
+      },
+      {
+        createSymbolicLink: () => {
+          throw new Error('simulated migration link failure');
+        },
+        removeFile: (targetPath) => {
+          removals += 1;
+          if (removals === 1) {
+            fs.rmSync(targetPath, { recursive: true, force: true });
+            return;
+          }
+          throw new Error('simulated topology restore failure');
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'deploy.rollbackFailed',
+        nextActions: [expect.stringMatching(/backups/)],
+      },
+    });
+    expect(result.error?.nextActions?.[0]).toMatch(/Restore the affected files from /);
+  });
+
+  it('requires explicit confirmation before applying a selected topology migration', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(projectionPath, { recursive: true });
+    fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
+    const plan = await createDeployPlan(context);
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      {
+        changeIds: plan.changes
+          .filter((change) => change.defaultSelected || change.deploymentKind === 'topology-migration')
+          .map((change) => change.id),
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      issues: [expect.objectContaining({
+        severity: 'warning',
+        code: 'deploy.skillsTopology.migrationCandidate',
+      })],
+    });
+    expect(fs.lstatSync(projectionPath).isSymbolicLink()).toBe(false);
+  });
+
+  it('rolls back after a managed link is created when migration verification fails', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    fs.mkdirSync(projectionPath, { recursive: true });
+    fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
+    const plan = await createDeployPlan(context);
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      {
+        changeIds: plan.changes
+          .filter((change) => change.defaultSelected || change.deploymentKind === 'topology-migration')
+          .map((change) => change.id),
+        confirmedIssueCodes: plan.issues
+          .filter((issue) => issue.severity === 'warning')
+          .map((issue) => issue.code),
+      },
+      {
+        createSymbolicLink: (_target, linkPath) => {
+          fs.symlinkSync(path.dirname(storePackage), linkPath, 'dir');
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'deploy.transactionFailed',
+        technicalDetails: expect.stringContaining('Deploy link verification failed'),
+      },
+    });
+    expect(fs.lstatSync(projectionPath).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(path.join(projectionPath, 'SKILL.md'), 'utf8')).toBe('# Review\n');
+  });
+
   it('materializes one Canonical Skill package before creating a Claude managed projection', async () => {
     const manifestPath = path.join(repositoryPath, 'mcv.yaml');
     fs.writeFileSync(

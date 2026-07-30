@@ -901,6 +901,111 @@ describe('TUI Shell view', () => {
       .toContain('Layout: Physical materialization');
   });
 
+  it('labels topology migration as destructive without relying on color and keeps it unselected', () => {
+    const migrationChange = {
+      id: 'deploy-topology-migration',
+      owner: 'ide' as const,
+      ide: 'claude-code' as const,
+      capability: 'skills' as const,
+      name: 'review',
+      targetPath: '/Users/张涛/.claude/skills/review',
+      change: 'modify' as const,
+      defaultSelected: false,
+      group: 'standard' as const,
+      strategy: 'replace-entire-file' as const,
+      deploymentKind: 'topology-migration' as const,
+      preview: {
+        targetPath: '/Users/张涛/.claude/skills/review',
+        kind: 'link' as const,
+        linkTarget: '/Users/张涛/.agents/skills/review',
+      },
+    };
+    const plan = {
+      ...deployPlan(),
+      changes: [migrationChange],
+      issues: [{
+        severity: 'warning' as const,
+        code: 'deploy.skillsTopology.migrationCandidate',
+        message: 'Topology migration available: replace matching physical Skill copy review with a managed link.',
+      }],
+    };
+    const loaded = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan,
+    });
+    expect(loaded.page.route === 'deploy'
+      && loaded.page.status === 'ready'
+      && loaded.page.workflow.status === 'selection'
+      && loaded.page.workflow.selectedIds.includes('deploy-topology-migration')).toBe(false);
+
+    let state = shellReducer(loaded, { type: 'deploy.open' });
+    state = shellReducer(state, { type: 'deploy.move', delta: 1 });
+    state = shellReducer(state, { type: 'deploy.open' });
+    state = shellReducer(state, { type: 'deploy.move', delta: 1 });
+    const previousNoColor = process.env.NO_COLOR;
+    process.env.NO_COLOR = '1';
+    const noColor = renderToString(<ShellView state={state} />, { columns: 100 });
+    if (previousNoColor === undefined) delete process.env.NO_COLOR;
+    else process.env.NO_COLOR = previousNoColor;
+
+    expect(noColor).not.toContain('\u001b[31m');
+    expect(noColor).toContain('× Destructive');
+    expect(noColor).toContain('review');
+
+    const diff = shellReducer(state, { type: 'deploy.openDiff' });
+    expect(renderToString(<ShellView state={diff} />, { columns: 80 }))
+      .toContain('Layout: Topology migration');
+  });
+
+  it('reports topology migrations separately in the Deploy success summary', () => {
+    const loaded = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan: deployPlan(),
+    });
+    const confirmation = shellReducer(loaded, { type: 'deploy.continue' });
+    const confirmed = shellReducer(confirmation, { type: 'deploy.toggleWarning' });
+    const applying = shellReducer(confirmed, { type: 'deploy.apply' });
+    const result = shellReducer(applying, {
+      type: 'deploy.applied',
+      result: {
+        schemaVersion: 1,
+        operation: 'deploy',
+        status: 'succeeded',
+        repositoryPath: '/Users/张涛/Configuration Repository',
+        changes: [{
+          id: 'deploy-topology-migration',
+          owner: 'ide',
+          ide: 'claude-code',
+          capability: 'skills',
+          name: 'review',
+          targetPath: '/Users/张涛/.claude/skills/review',
+          change: 'modify',
+          defaultSelected: false,
+          group: 'standard',
+          strategy: 'replace-entire-file',
+          deploymentKind: 'topology-migration',
+          preview: {
+            targetPath: '/Users/张涛/.claude/skills/review',
+            kind: 'link',
+            linkTarget: '/Users/张涛/.agents/skills/review',
+          },
+        }],
+        issues: [],
+        nextActions: [],
+        data: {
+          appliedChangeIds: ['deploy-topology-migration'],
+          writtenPaths: [],
+          deletedPaths: [],
+          projectionPaths: ['/Users/张涛/.claude/skills/review'],
+        },
+        linkOutcomes: [],
+      },
+    });
+
+    expect(renderToString(<ShellView state={result} />, { columns: 100 }))
+      .toContain('Topology migrations: 1 (Claude Code)');
+  });
+
   it('bounds many linked-Skill outcomes in Deploy and Overview viewports', () => {
     const outcomes = Array.from({ length: 20 }, (_, index): DeployPlan['linkOutcomes'][number] => ({
       status: index < 18 ? 'satisfied-via-link' : 'blocked',
