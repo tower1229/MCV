@@ -20,8 +20,22 @@ export function renderStatusPlain(report: StatusReport): string[] {
     `Pending deployment: ${pending.total} ${plural(pending.total, 'change')} (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete)`,
   );
   for (const outcome of report.linkOutcomes) {
+    const surface = outcome.owner === 'canonical-store'
+      ? 'Canonical Device Skill Store'
+      : outcome.ide === 'claude-code'
+        ? 'Claude Code'
+        : outcome.ide === 'gemini-cli'
+          ? 'Gemini CLI'
+          : outcome.ide === 'antigravity'
+            ? 'Antigravity'
+            : outcome.ide.charAt(0).toUpperCase() + outcome.ide.slice(1);
+    const state = outcome.status === 'satisfied-via-link'
+      ? outcome.ownership === 'managed'
+        ? 'Already satisfied projection'
+        : 'Satisfied via link'
+      : 'Blocked';
     lines.push(
-      `Linked Skills: ${outcome.status === 'satisfied-via-link' ? 'Satisfied via link' : 'Blocked'} · ${outcome.ownership} · ${outcome.packageNames.length} ${plural(outcome.packageNames.length, 'package')} · ${outcome.affectedFileCount} affected ${plural(outcome.affectedFileCount, 'file')}`,
+      `Linked Skills: ${surface} · ${state} · ${outcome.ownership} · ${outcome.packageNames.length} ${plural(outcome.packageNames.length, 'package')} · ${outcome.affectedFileCount} affected ${plural(outcome.affectedFileCount, 'file')}`,
     );
   }
   const local = report.postDeployLocalState;

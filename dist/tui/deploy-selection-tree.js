@@ -1,4 +1,11 @@
-const targetOrder = ['canonical-store', 'codex', 'claude-code', 'gemini'];
+const targetOrder = [
+    'canonical-store',
+    'codex',
+    'claude-code',
+    'gemini',
+    'gemini-cli',
+    'antigravity',
+];
 const capabilityOrder = [
     'rules',
     'skills',
@@ -112,6 +119,10 @@ function displayTarget(target) {
         return 'Canonical Device Skill Store';
     if (target === 'claude-code')
         return 'Claude Code';
+    if (target === 'gemini-cli')
+        return 'Gemini CLI';
+    if (target === 'antigravity')
+        return 'Antigravity';
     return target.charAt(0).toUpperCase() + target.slice(1);
 }
 function displayCapability(capability) {

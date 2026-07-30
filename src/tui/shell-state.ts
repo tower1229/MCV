@@ -1424,7 +1424,10 @@ function initialDeploySelection(
       if (change.group === 'advanced' || change.change === 'delete') return false;
       if (change.owner === 'canonical-store') return change.defaultSelected;
       if (!lastSelection) return change.defaultSelected;
-      return lastSelection[change.ide]?.includes(change.capability) === true;
+      const selectionIde = change.ide === 'gemini-cli' || change.ide === 'antigravity'
+        ? 'gemini'
+        : change.ide;
+      return lastSelection[selectionIde]?.includes(change.capability) === true;
     })
     .map((change) => change.id);
 }

@@ -17,10 +17,19 @@ import type {
 } from './types.js';
 
 export class GeminiAdapter implements IdeAdapter {
-  readonly skillSurface = {
-    destinationRoot: (context: DeviceContext) => path.join(context.homeDir, '.gemini', 'skills'),
-    supportsManagedDirectoryLinks: (_platform: NodeJS.Platform) => false,
-  };
+  readonly skillSurfaces = [
+    {
+      id: 'gemini-cli',
+      destinationRoot: (context: DeviceContext) => path.join(context.homeDir, '.gemini', 'skills'),
+      supportsManagedDirectoryLinks: (platform: NodeJS.Platform) => platform === 'darwin',
+    },
+    {
+      id: 'antigravity',
+      destinationRoot: (context: DeviceContext) =>
+        path.join(context.homeDir, '.gemini', 'config', 'skills'),
+      supportsManagedDirectoryLinks: (_platform: NodeJS.Platform) => false,
+    },
+  ] as const;
 
   constructor(
     private readonly nativeFileHandler: NativeFileHandler = new GeminiNativeFileHandler(),

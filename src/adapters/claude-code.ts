@@ -20,13 +20,14 @@ import type {
 import { CLAUDE_CODE_MANAGED_PATHS } from './overlay-policies.js';
 
 export class ClaudeCodeAdapter implements IdeAdapter {
-  readonly skillSurface = {
+  readonly skillSurfaces = [{
+    id: 'claude-code',
     destinationRoot: (context: DeviceContext) => path.join(
       context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'),
       'skills',
     ),
     supportsManagedDirectoryLinks: (platform: NodeJS.Platform) => platform === 'darwin',
-  };
+  }] as const;
 
   constructor(
     private readonly nativeFileHandler: NativeFileHandler = new ClaudeCodeNativeFileHandler(),

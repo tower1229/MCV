@@ -57,7 +57,7 @@ export interface CanonicalDeploySource {
 }
 
 export interface IdeAdapter {
-  readonly skillSurface: SkillDeploymentSurface;
+  readonly skillSurfaces: readonly SkillDeploymentSurface[];
   detect(context: DeviceContext): Promise<DetectedIde>;
   discoverFiles(context: DeviceContext): Promise<DetectedConfigFile[]>;
   capture(
@@ -68,6 +68,7 @@ export interface IdeAdapter {
 }
 
 export interface SkillDeploymentSurface {
+  id: string;
   destinationRoot(context: DeviceContext): string;
   supportsManagedDirectoryLinks(platform: NodeJS.Platform): boolean;
 }

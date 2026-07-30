@@ -1009,6 +1009,125 @@ describe('Deploy operations', () => {
       change.deploymentKind === 'managed-link-projection')).toBe(false);
   });
 
+  it('links Claude and Gemini CLI while Antigravity falls back to copy independently', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      [
+        'schemaVersion: 2',
+        'repositoryId: deploy-operation-test',
+        'initializedAt: 2026-07-22T00:00:00.000Z',
+        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+        'capture: { preserveUnknownNativeFields: true }',
+        'deploy: { backupBeforeWrite: true, useSymlinks: true }',
+        'targets:',
+        '  claudeCode:',
+        '    enabled: true',
+        '  gemini:',
+        '    enabled: true',
+        'variables: {}',
+        '',
+      ].join('\n'),
+    );
+    const storeFile = path.join(homeDir, '.agents', 'skills', 'review', 'SKILL.md');
+    const claudeProjection = path.join(homeDir, '.claude', 'skills', 'review');
+    const geminiCliProjection = path.join(homeDir, '.gemini', 'skills', 'review');
+    const antigravityCopy = path.join(homeDir, '.gemini', 'config', 'skills', 'review', 'SKILL.md');
+    const plan = await createDeployPlan(context);
+
+    expect(plan.readyToApply).toBe(true);
+    expect(plan.changes.filter((change) => change.capability === 'skills')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          owner: 'canonical-store',
+          targetPath: storeFile,
+          deploymentKind: 'physical-materialization',
+        }),
+        expect.objectContaining({
+          ide: 'claude-code',
+          targetPath: claudeProjection,
+          deploymentKind: 'managed-link-projection',
+        }),
+        expect.objectContaining({
+          ide: 'gemini-cli',
+          targetPath: geminiCliProjection,
+          deploymentKind: 'managed-link-projection',
+        }),
+        expect.objectContaining({
+          ide: 'antigravity',
+          targetPath: antigravityCopy,
+          deploymentKind: 'copy-projection',
+        }),
+      ]),
+    );
+
+    const selected = plan.changes.filter((change) => change.defaultSelected);
+    const result = await applyDeployPlan(context, plan, {
+      changeIds: selected.map((change) => change.id),
+    });
+
+    expect(result).toMatchObject({ status: 'succeeded' });
+    expect(fs.readFileSync(storeFile, 'utf8')).toBe('# Review\n');
+    expect(fs.lstatSync(claudeProjection).isSymbolicLink()).toBe(true);
+    expect(fs.lstatSync(geminiCliProjection).isSymbolicLink()).toBe(true);
+    expect(fs.realpathSync(claudeProjection)).toBe(fs.realpathSync(path.dirname(storeFile)));
+    expect(fs.realpathSync(geminiCliProjection)).toBe(fs.realpathSync(path.dirname(storeFile)));
+    expect(fs.lstatSync(path.dirname(antigravityCopy)).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(antigravityCopy, 'utf8')).toBe('# Review\n');
+  });
+
+  it('keeps Windows Gemini Surfaces on copy when useSymlinks is enabled', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      [
+        'schemaVersion: 2',
+        'repositoryId: deploy-operation-test',
+        'initializedAt: 2026-07-22T00:00:00.000Z',
+        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+        'capture: { preserveUnknownNativeFields: true }',
+        'deploy: { backupBeforeWrite: true, useSymlinks: true }',
+        'targets:',
+        '  claudeCode:',
+        '    enabled: true',
+        '  gemini:',
+        '    enabled: true',
+        'variables: {}',
+        '',
+      ].join('\n'),
+    );
+    context.platform = 'win32';
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'deploy-operation-test',
+      repositoryPath,
+    });
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.readyToApply).toBe(true);
+    expect(plan.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        ide: 'claude-code',
+        targetPath: path.join(homeDir, '.claude', 'skills', 'review', 'SKILL.md'),
+        deploymentKind: 'copy-projection',
+      }),
+      expect.objectContaining({
+        ide: 'gemini-cli',
+        targetPath: path.join(homeDir, '.gemini', 'skills', 'review', 'SKILL.md'),
+        deploymentKind: 'copy-projection',
+      }),
+      expect.objectContaining({
+        ide: 'antigravity',
+        targetPath: path.join(homeDir, '.gemini', 'config', 'skills', 'review', 'SKILL.md'),
+        deploymentKind: 'copy-projection',
+      }),
+    ]));
+    expect(plan.changes.some((change) =>
+      change.deploymentKind === 'managed-link-projection'
+      || change.deploymentKind === 'physical-materialization')).toBe(false);
+  });
+
   it('applies only selected capabilities and updates only their device state scope', async () => {
     const targetPath = path.join(homeDir, '.claude.json');
     const plan = await createDeployPlan(context);

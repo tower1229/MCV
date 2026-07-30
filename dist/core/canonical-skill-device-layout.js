@@ -49,7 +49,7 @@ export function hashDeviceTopologyNode(targetPath) {
     hash.update(relevantAncestorTopology(resolved));
     return hash.digest('hex');
 }
-export function planCanonicalSkillDeviceLayout({ files, context, useManagedLinks, claudeSkillRoot, }) {
+export function planCanonicalSkillDeviceLayout({ files, context, useManagedLinks, projectionSurfaces = [], }) {
     if (!useManagedLinks) {
         return {
             filesOutsideLayout: files,
@@ -60,11 +60,16 @@ export function planCanonicalSkillDeviceLayout({ files, context, useManagedLinks
         };
     }
     const storeRoot = canonicalDeviceSkillStoreRoot(context);
-    const filesOutsideLayout = files.filter((file) => file.capability !== 'skills' || (file.owner === 'ide' && file.ide === 'gemini'));
+    const linkCapableSurfaces = projectionSurfaces.filter((surface) => surface.supportsManagedLinks);
+    const linkCapableIde = new Set(linkCapableSurfaces.map((surface) => surface.ide));
+    const copyOnlySkillFile = (file) => file.capability === 'skills'
+        && file.owner === 'ide'
+        && !linkCapableIde.has(file.ide)
+        && !isStoreSkillPath(file.targetPath, storeRoot);
+    const filesOutsideLayout = files.filter((file) => file.capability !== 'skills' || copyOnlySkillFile(file));
     const materializationsByPath = new Map();
     const conflicts = [];
-    for (const file of files.filter((candidate) => candidate.capability === 'skills'
-        && !(candidate.owner === 'ide' && candidate.ide === 'gemini'))) {
+    for (const file of files.filter((candidate) => candidate.capability === 'skills' && !copyOnlySkillFile(candidate))) {
         const relative = relativeSkillPath(file.targetPath);
         if (!relative)
             continue;
@@ -79,15 +84,16 @@ export function planCanonicalSkillDeviceLayout({ files, context, useManagedLinks
     const materializations = [...materializationsByPath.values()];
     const packageNames = [...new Set(materializations
             .map(({ targetPath }) => canonicalSkillPackageName(targetPath)))].sort();
-    const activeClaudeSkillRoot = claudeSkillRoot;
-    const missingProjections = activeClaudeSkillRoot
-        ? packageNames.flatMap((packageName) => {
-            const targetPath = path.join(activeClaudeSkillRoot, packageName);
+    const missingProjections = linkCapableSurfaces.flatMap((surface) => {
+        if (path.resolve(surface.root) === path.resolve(storeRoot))
+            return [];
+        return packageNames.flatMap((packageName) => {
+            const targetPath = path.join(surface.root, packageName);
             if (fs.existsSync(targetPath) || findSymbolicLinkAncestor(targetPath))
                 return [];
             return [{
                     owner: 'ide',
-                    ide: 'claude-code',
+                    ide: surface.ide,
                     packageName,
                     targetPath,
                     physicalTargetPath: path.join(storeRoot, packageName),
@@ -95,20 +101,30 @@ export function planCanonicalSkillDeviceLayout({ files, context, useManagedLinks
                         .map(({ targetPath: materializationPath }) => materializationPath)
                         .filter((materializationPath) => canonicalSkillPackageName(materializationPath) === packageName),
                 }];
-        })
-        : [];
+        });
+    });
     const physicalFiles = materializations.map(({ source, targetPath }) => canonicalStoreFile(source, targetPath));
+    const linkClassificationIdeFiles = files.filter((file) => file.capability === 'skills'
+        && file.owner === 'ide'
+        && linkCapableIde.has(file.ide));
     return {
         filesOutsideLayout,
         materializations,
         filesForLinkClassification: [
             ...filesOutsideLayout,
             ...physicalFiles,
-            ...files.filter((file) => file.capability === 'skills' && file.owner === 'ide' && file.ide === 'claude-code'),
+            ...linkClassificationIdeFiles,
         ],
         missingProjections,
         conflicts,
     };
+}
+function isStoreSkillPath(targetPath, storeRoot) {
+    const relative = path.relative(path.resolve(storeRoot), path.resolve(targetPath));
+    return relative === ''
+        || (relative !== '..'
+            && !relative.startsWith(`..${path.sep}`)
+            && !path.isAbsolute(relative));
 }
 export function classifyCanonicalSkillLinks(desired, isManagedLink) {
     const linkedGroups = new Map();

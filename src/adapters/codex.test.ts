@@ -8,13 +8,14 @@ import { CodexAdapter } from './codex.js';
 describe('CodexAdapter', () => {
   it('declares the conventional Agent Skills surface as macOS-link capable', () => {
     const adapter = new CodexAdapter();
-    expect(adapter.skillSurface.destinationRoot({
+    expect(adapter.skillSurfaces).toEqual([expect.objectContaining({ id: 'codex' })]);
+    expect(adapter.skillSurfaces[0].destinationRoot({
       homeDir: '/Users/test',
       platform: 'darwin',
       env: {},
     })).toBe(path.join('/Users/test', '.agents', 'skills'));
-    expect(adapter.skillSurface.supportsManagedDirectoryLinks('darwin')).toBe(true);
-    expect(adapter.skillSurface.supportsManagedDirectoryLinks('win32')).toBe(false);
+    expect(adapter.skillSurfaces[0].supportsManagedDirectoryLinks('darwin')).toBe(true);
+    expect(adapter.skillSurfaces[0].supportsManagedDirectoryLinks('win32')).toBe(false);
   });
 
   let homeDir: string;

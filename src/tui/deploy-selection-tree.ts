@@ -19,7 +19,14 @@ export interface VisibleDeploySelectionNode {
   parentId?: string;
 }
 
-const targetOrder = ['canonical-store', 'codex', 'claude-code', 'gemini'] as const;
+const targetOrder = [
+  'canonical-store',
+  'codex',
+  'claude-code',
+  'gemini',
+  'gemini-cli',
+  'antigravity',
+] as const;
 const capabilityOrder: DeployChange['capability'][] = [
   'rules',
   'skills',
@@ -172,6 +179,8 @@ function targetKey(change: DeployChange): 'canonical-store' | CanonicalSkillIde 
 function displayTarget(target: 'canonical-store' | CanonicalSkillIde): string {
   if (target === 'canonical-store') return 'Canonical Device Skill Store';
   if (target === 'claude-code') return 'Claude Code';
+  if (target === 'gemini-cli') return 'Gemini CLI';
+  if (target === 'antigravity') return 'Antigravity';
   return target.charAt(0).toUpperCase() + target.slice(1);
 }
 

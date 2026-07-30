@@ -15,6 +15,23 @@ describe('GeminiAdapter', () => {
     fs.rmSync(homeDir, { recursive: true, force: true });
   });
 
+  it('declares independent Gemini CLI and Antigravity Skill Surfaces', () => {
+    const adapter = new GeminiAdapter();
+    const context = { homeDir: '/Users/test', platform: 'darwin' as const, env: {} };
+    expect(adapter.skillSurfaces).toEqual([
+      expect.objectContaining({ id: 'gemini-cli' }),
+      expect.objectContaining({ id: 'antigravity' }),
+    ]);
+    expect(adapter.skillSurfaces[0].destinationRoot(context))
+      .toBe(path.join('/Users/test', '.gemini', 'skills'));
+    expect(adapter.skillSurfaces[1].destinationRoot(context))
+      .toBe(path.join('/Users/test', '.gemini', 'config', 'skills'));
+    expect(adapter.skillSurfaces[0].supportsManagedDirectoryLinks('darwin')).toBe(true);
+    expect(adapter.skillSurfaces[0].supportsManagedDirectoryLinks('win32')).toBe(false);
+    expect(adapter.skillSurfaces[1].supportsManagedDirectoryLinks('darwin')).toBe(false);
+    expect(adapter.skillSurfaces[1].supportsManagedDirectoryLinks('win32')).toBe(false);
+  });
+
   it('discovers Gemini and separates MCP servers from native settings', async () => {
     const geminiRoot = path.join(homeDir, '.gemini');
     fs.mkdirSync(geminiRoot);

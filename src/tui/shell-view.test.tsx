@@ -935,8 +935,9 @@ describe('TUI Shell view', () => {
     const normalized = `${deployRendered}\n${overviewRendered}`.replace(/\s+/g, ' ');
 
     expect(deployRendered.split('\n').length).toBeLessThanOrEqual(24);
-    expect(normalized).toContain('18 external satisfied via link outcomes');
-    expect(normalized).toContain('2 external blocked outcomes');
+    expect(normalized).toContain('Claude Code · 18 external');
+    expect(normalized).toContain('Claude Code · 2 external blocked');
+    expect(normalized).toContain('180 affected files');
     expect(normalized).not.toContain('/Volumes/config/skills/skill-19');
   });
 

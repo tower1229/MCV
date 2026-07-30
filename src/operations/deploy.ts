@@ -425,18 +425,18 @@ function planCanonicalSkillLayout(
   desiredForLinkClassification: CanonicalSkillLayoutFile[];
   projectionChanges: DeployChange[];
 } {
-  const claudeSurface = definitions.find(({ targetId }) => targetId === 'claudeCode')
-    ?.adapter.skillSurface;
-  const codexSurface = definitions.find(({ targetId }) => targetId === 'codex')
-    ?.adapter.skillSurface;
+  const projectionSurfaces = definitions.flatMap(({ adapter }) =>
+    adapter.skillSurfaces.map((surface) => ({
+      ide: skillSurfaceIde(surface.id),
+      root: surface.destinationRoot(context),
+      supportsManagedLinks: surface.supportsManagedDirectoryLinks(context.platform),
+    })));
   const managedLayout = planCanonicalSkillDeviceLayout({
-    files: desired,
+    files: desired.map((file) => annotateSkillSurface(file, projectionSurfaces)),
     context,
     useManagedLinks: useSymlinks
-      && [codexSurface, claudeSurface].some(
-        (surface) => surface?.supportsManagedDirectoryLinks(context.platform) === true,
-      ),
-    claudeSkillRoot: claudeSurface?.destinationRoot(context),
+      && projectionSurfaces.some((surface) => surface.supportsManagedLinks),
+    projectionSurfaces,
   });
   for (const relative of managedLayout.conflicts) {
     issues.push({
@@ -484,6 +484,33 @@ function planCanonicalSkillLayout(
     desiredForLinkClassification: managedLayout.filesForLinkClassification,
     projectionChanges,
   };
+}
+
+function skillSurfaceIde(surfaceId: string): CanonicalSkillIde {
+  if (surfaceId === 'claude-code'
+    || surfaceId === 'codex'
+    || surfaceId === 'gemini-cli'
+    || surfaceId === 'antigravity') {
+    return surfaceId;
+  }
+  throw new Error(`Unsupported Skill Surface id: ${surfaceId}`);
+}
+
+function annotateSkillSurface(
+  file: SourcedDeployFile,
+  surfaces: Array<{ ide: CanonicalSkillIde; root: string }>,
+): SourcedDeployFile {
+  if (file.capability !== 'skills' || file.owner !== 'ide') return file;
+  const match = surfaces.find((surface) => isPathWithinRoot(surface.root, file.targetPath));
+  return match ? { ...file, ide: match.ide } : file;
+}
+
+function isPathWithinRoot(root: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === ''
+    || (relative !== '..'
+      && !relative.startsWith(`..${path.sep}`)
+      && !path.isAbsolute(relative));
 }
 
  function registerDeployPlan(
@@ -1002,9 +1029,10 @@ function updateDeployState(
   const lastDeploySelection: NonNullable<typeof state.lastDeploySelection> = {};
   for (const change of changes) {
     if (change.owner === 'canonical-store') continue;
-    const capabilities = lastDeploySelection[change.ide] ?? [];
+    const selectionIde = deploySelectionIde(change.ide);
+    const capabilities = lastDeploySelection[selectionIde] ?? [];
     if (!capabilities.includes(change.capability)) capabilities.push(change.capability);
-    lastDeploySelection[change.ide] = capabilities;
+    lastDeploySelection[selectionIde] = capabilities;
   }
   state.baselineSnapshot = { recordedAt: new Date().toISOString(), files: baselineFiles };
   state.managedInventory = managedInventory;
@@ -1351,7 +1379,17 @@ function ideName(targetId: TargetId): DeployIde {
 function targetIdForIde(
   ide: DeployIde,
 ): TargetId {
-  return ide === 'claude-code' ? 'claudeCode' : ide;
+  if (ide === 'claude-code') return 'claudeCode';
+  if (ide === 'gemini-cli' || ide === 'antigravity' || ide === 'gemini') return 'gemini';
+  return ide;
+}
+
+function deploySelectionIde(
+  ide: DeployIde,
+): 'codex' | 'claude-code' | 'gemini' {
+  if (ide === 'claude-code') return 'claude-code';
+  if (ide === 'gemini' || ide === 'gemini-cli' || ide === 'antigravity') return 'gemini';
+  return 'codex';
 }
 
 function inferDeployTarget(
@@ -1364,6 +1402,8 @@ function inferDeployTarget(
     [{ owner: 'canonical-store' }, path.resolve(context.homeDir, '.agents', 'skills')],
     [{ owner: 'ide', ide: 'claude-code' }, path.resolve(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'))],
     [{ owner: 'ide', ide: 'claude-code' }, path.resolve(context.homeDir, '.claude.json')],
+    [{ owner: 'ide', ide: 'gemini-cli' }, path.resolve(context.homeDir, '.gemini', 'skills')],
+    [{ owner: 'ide', ide: 'antigravity' }, path.resolve(context.homeDir, '.gemini', 'config', 'skills')],
     [{ owner: 'ide', ide: 'gemini' }, path.resolve(context.homeDir, '.gemini')],
   ];
   return roots.find(([, root]) => resolved === root || resolved.startsWith(`${root}${path.sep}`))?.[0];

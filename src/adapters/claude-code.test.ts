@@ -7,13 +7,14 @@ import { parse as parseYaml } from 'yaml';
 describe('ClaudeCodeAdapter', () => {
   it('declares its per-Skill projection surface as macOS-link capable', () => {
     const adapter = new ClaudeCodeAdapter();
-    expect(adapter.skillSurface.destinationRoot({
+    expect(adapter.skillSurfaces).toEqual([expect.objectContaining({ id: 'claude-code' })]);
+    expect(adapter.skillSurfaces[0].destinationRoot({
       homeDir: '/Users/test',
       platform: 'darwin',
       env: {},
     })).toBe(path.join('/Users/test', '.claude', 'skills'));
-    expect(adapter.skillSurface.supportsManagedDirectoryLinks('darwin')).toBe(true);
-    expect(adapter.skillSurface.supportsManagedDirectoryLinks('win32')).toBe(false);
+    expect(adapter.skillSurfaces[0].supportsManagedDirectoryLinks('darwin')).toBe(true);
+    expect(adapter.skillSurfaces[0].supportsManagedDirectoryLinks('win32')).toBe(false);
   });
 
   let homeDir: string;

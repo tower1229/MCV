@@ -348,15 +348,41 @@ function scrollablePageLines(state: ShellState): ScrollablePageLine[] {
   if (page.route === 'deploy') {
     const result = page.workflow.result;
     if (result.status === 'succeeded') {
-      const satisfiedProjections = result.linkOutcomes?.filter((outcome) =>
-        outcome.status === 'satisfied-via-link' && outcome.ownership === 'managed').length ?? 0;
+      const skillChanges = result.changes.filter((change) => change.capability === 'skills');
+      const managedLinks = skillChanges.filter(
+        (change) => change.deploymentKind === 'managed-link-projection',
+      );
+      const copies = skillChanges.filter(
+        (change) => change.deploymentKind === 'copy-projection',
+      );
+      const satisfied = result.linkOutcomes?.filter((outcome) =>
+        outcome.status === 'satisfied-via-link' && outcome.ownership === 'managed') ?? [];
+      const surfaceLabel = (
+        target: { owner: 'canonical-store' | 'ide'; ide?: string },
+      ): string => {
+        if (target.owner === 'canonical-store') return 'Canonical Device Skill Store';
+        if (target.ide === 'claude-code') return 'Claude Code';
+        if (target.ide === 'gemini-cli') return 'Gemini CLI';
+        if (target.ide === 'antigravity') return 'Antigravity';
+        return target.ide
+          ? target.ide.charAt(0).toUpperCase() + target.ide.slice(1)
+          : 'Unknown';
+      };
+      const listSurfaces = (
+        items: Array<{ owner: 'canonical-store' | 'ide'; ide?: string }>,
+      ): string => {
+        const names = [...new Set(items.map(surfaceLabel))].sort();
+        return names.length === 0 ? '' : ` (${names.join(', ')})`;
+      };
       return pageLines('deploy-success', [
         'Deploy succeeded.',
         `Applied: ${result.data?.appliedChangeIds.length ?? 0} changes`,
         `Written: ${result.data?.writtenPaths.length ?? 0} paths`,
         `Deleted: ${result.data?.deletedPaths.length ?? 0} paths`,
-        ...(satisfiedProjections > 0
-          ? [`Already satisfied projections: ${satisfiedProjections}`]
+        `Managed-link projections: ${managedLinks.length}${listSurfaces(managedLinks)}`,
+        `Copy projections: ${copies.length}${listSurfaces(copies)}`,
+        ...(satisfied.length > 0
+          ? [`Already satisfied projections: ${satisfied.length}${listSurfaces(satisfied)}`]
           : []),
       ], (index) => index === 0 ? 'green' : undefined);
     }
@@ -1112,7 +1138,7 @@ function createOverviewStatusViewModel(
       state: summary.outcomeCount === 1
         ? summary.state
         : `${summary.outcomeCount} ${summary.state.toLowerCase()} outcomes`,
-      details: `${summary.ownership === 'managed' ? 'Managed' : 'External'} · ${summary.packageCount} ${summary.packageCount === 1 ? 'package' : 'packages'} · ${summary.affectedFileCount} affected ${summary.affectedFileCount === 1 ? 'file' : 'files'}`,
+      details: `${displaySkillSurface(summary.surface)} · ${summary.ownership === 'managed' ? 'Managed' : 'External'} · ${summary.packageCount} ${summary.packageCount === 1 ? 'package' : 'packages'} · ${summary.affectedFileCount} affected ${summary.affectedFileCount === 1 ? 'file' : 'files'}`,
     })),
     drift: {
       key: 'drift',
@@ -1175,6 +1201,7 @@ interface LinkOutcomeSummary {
   key: string;
   status: DeployLinkOutcome['status'];
   ownership: DeployLinkOutcome['ownership'];
+  surface: string;
   state: 'Satisfied via link' | 'Already satisfied projection' | 'Blocked';
   outcomeCount: number;
   packageCount: number;
@@ -1184,31 +1211,49 @@ interface LinkOutcomeSummary {
 function summarizeLinkOutcomes(
   outcomes: DeployLinkOutcome[],
 ): LinkOutcomeSummary[] {
-  return (['external', 'managed'] as const).flatMap((ownership) =>
-    (['satisfied-via-link', 'blocked'] as const).flatMap((status) => {
-      const matching = outcomes.filter((outcome) =>
-        outcome.status === status && outcome.ownership === ownership);
-      if (matching.length === 0) return [];
-      return [{
-        key: `${ownership}:${status}`,
-        status,
-        ownership,
-        state: status === 'blocked'
-          ? 'Blocked'
-          : ownership === 'managed'
-            ? 'Already satisfied projection'
-            : 'Satisfied via link',
-        outcomeCount: matching.length,
-        packageCount: matching.reduce(
-          (total, outcome) => total + outcome.packageNames.length,
-          0,
-        ),
-        affectedFileCount: matching.reduce(
-          (total, outcome) => total + outcome.affectedFileCount,
-          0,
-        ),
-      }];
-    }));
+  const groups = new Map<string, DeployLinkOutcome[]>();
+  for (const outcome of outcomes) {
+    const surface = outcome.owner === 'canonical-store' ? 'canonical-store' : outcome.ide;
+    const key = `${outcome.ownership}:${outcome.status}:${surface}`;
+    const matching = groups.get(key) ?? [];
+    matching.push(outcome);
+    groups.set(key, matching);
+  }
+  return [...groups.entries()].map(([key, matching]) => {
+    const [ownership, status, surface] = key.split(':') as [
+      DeployLinkOutcome['ownership'],
+      DeployLinkOutcome['status'],
+      string,
+    ];
+    return {
+      key,
+      status,
+      ownership,
+      surface,
+      state: status === 'blocked'
+        ? 'Blocked' as const
+        : ownership === 'managed'
+          ? 'Already satisfied projection' as const
+          : 'Satisfied via link' as const,
+      outcomeCount: matching.length,
+      packageCount: matching.reduce(
+        (total, outcome) => total + outcome.packageNames.length,
+        0,
+      ),
+      affectedFileCount: matching.reduce(
+        (total, outcome) => total + outcome.affectedFileCount,
+        0,
+      ),
+    };
+  });
+}
+
+function displaySkillSurface(surface: string): string {
+  if (surface === 'canonical-store') return 'Canonical Device Skill Store';
+  if (surface === 'claude-code') return 'Claude Code';
+  if (surface === 'gemini-cli') return 'Gemini CLI';
+  if (surface === 'antigravity') return 'Antigravity';
+  return surface.charAt(0).toUpperCase() + surface.slice(1);
 }
 
 function statusItemText(
@@ -1663,7 +1708,8 @@ function DeploySelection({
       ))}
       {workflow.plan.linkOutcomes.length > 1 && linkOutcomeSummaries.map((summary) => (
         <Text key={summary.key} wrap="truncate-middle">
-          {summary.outcomeCount} {summary.ownership} {summary.state.toLowerCase()} outcomes ·{' '}
+          {displaySkillSurface(summary.surface)} · {summary.outcomeCount} {summary.ownership}{' '}
+          {summary.state.toLowerCase()} outcomes ·{' '}
           {summary.packageCount} Skill {summary.packageCount === 1 ? 'package' : 'packages'} ·{' '}
           {summary.affectedFileCount} affected{' '}
           {summary.affectedFileCount === 1 ? 'file' : 'files'}

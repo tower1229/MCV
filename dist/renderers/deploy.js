@@ -51,16 +51,19 @@ function linkedOutcomeReason(reason) {
 }
 export function renderDeployResultPlain(result) {
     if (result.status === 'succeeded') {
-        const materializations = result.changes.filter((change) => change.deploymentKind === 'physical-materialization').length;
-        const managedLinks = result.changes.filter((change) => change.deploymentKind === 'managed-link-projection').length;
-        const copies = result.changes.filter((change) => change.deploymentKind === 'copy-projection').length;
-        const satisfied = result.linkOutcomes?.filter((outcome) => outcome.status === 'satisfied-via-link' && outcome.ownership === 'managed').length ?? 0;
+        const skillChanges = result.changes.filter((change) => change.capability === 'skills');
+        const materializations = skillChanges.filter((change) => change.deploymentKind === 'physical-materialization');
+        const managedLinks = skillChanges.filter((change) => change.deploymentKind === 'managed-link-projection');
+        const copies = skillChanges.filter((change) => change.deploymentKind === 'copy-projection');
+        const satisfied = result.linkOutcomes?.filter((outcome) => outcome.status === 'satisfied-via-link' && outcome.ownership === 'managed') ?? [];
         return [
             `Deployed ${result.data?.appliedChangeIds.length ?? 0} selected item(s) from ${result.repositoryPath}.`,
-            `Physical materializations: ${materializations}`,
-            `Managed-link projections: ${managedLinks}`,
-            `Copy projections: ${copies}`,
-            ...(satisfied > 0 ? [`Already satisfied projections: ${satisfied}`] : []),
+            `Physical materializations: ${materializations.length}`,
+            `Managed-link projections: ${managedLinks.length}${formatSurfaceList(managedLinks)}`,
+            `Copy projections: ${copies.length}${formatSurfaceList(copies)}`,
+            ...(satisfied.length > 0
+                ? [`Already satisfied projections: ${satisfied.length}${formatSatisfiedSurfaceList(satisfied)}`]
+                : []),
         ];
     }
     const lines = [`Deploy ${result.status}.`];
@@ -107,12 +110,24 @@ function deploymentLabel(kind) {
 function displayIde(ide) {
     if (ide === 'claude-code')
         return 'Claude Code';
+    if (ide === 'gemini-cli')
+        return 'Gemini CLI';
+    if (ide === 'antigravity')
+        return 'Antigravity';
     return ide.charAt(0).toUpperCase() + ide.slice(1);
 }
 function displayDeployTarget(target) {
     return target.owner === 'canonical-store'
         ? 'Canonical Device Skill Store'
         : displayIde(target.ide);
+}
+function formatSurfaceList(changes) {
+    const surfaces = [...new Set(changes.map((change) => displayDeployTarget(change)))].sort();
+    return surfaces.length === 0 ? '' : ` (${surfaces.join(', ')})`;
+}
+function formatSatisfiedSurfaceList(outcomes) {
+    const surfaces = [...new Set(outcomes.map((outcome) => displayDeployTarget(outcome)))].sort();
+    return surfaces.length === 0 ? '' : ` (${surfaces.join(', ')})`;
 }
 function displayCapability(capability) {
     if (capability === 'rules')

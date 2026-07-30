@@ -180,14 +180,36 @@ function scrollablePageLines(state) {
     if (page.route === 'deploy') {
         const result = page.workflow.result;
         if (result.status === 'succeeded') {
-            const satisfiedProjections = result.linkOutcomes?.filter((outcome) => outcome.status === 'satisfied-via-link' && outcome.ownership === 'managed').length ?? 0;
+            const skillChanges = result.changes.filter((change) => change.capability === 'skills');
+            const managedLinks = skillChanges.filter((change) => change.deploymentKind === 'managed-link-projection');
+            const copies = skillChanges.filter((change) => change.deploymentKind === 'copy-projection');
+            const satisfied = result.linkOutcomes?.filter((outcome) => outcome.status === 'satisfied-via-link' && outcome.ownership === 'managed') ?? [];
+            const surfaceLabel = (target) => {
+                if (target.owner === 'canonical-store')
+                    return 'Canonical Device Skill Store';
+                if (target.ide === 'claude-code')
+                    return 'Claude Code';
+                if (target.ide === 'gemini-cli')
+                    return 'Gemini CLI';
+                if (target.ide === 'antigravity')
+                    return 'Antigravity';
+                return target.ide
+                    ? target.ide.charAt(0).toUpperCase() + target.ide.slice(1)
+                    : 'Unknown';
+            };
+            const listSurfaces = (items) => {
+                const names = [...new Set(items.map(surfaceLabel))].sort();
+                return names.length === 0 ? '' : ` (${names.join(', ')})`;
+            };
             return pageLines('deploy-success', [
                 'Deploy succeeded.',
                 `Applied: ${result.data?.appliedChangeIds.length ?? 0} changes`,
                 `Written: ${result.data?.writtenPaths.length ?? 0} paths`,
                 `Deleted: ${result.data?.deletedPaths.length ?? 0} paths`,
-                ...(satisfiedProjections > 0
-                    ? [`Already satisfied projections: ${satisfiedProjections}`]
+                `Managed-link projections: ${managedLinks.length}${listSurfaces(managedLinks)}`,
+                `Copy projections: ${copies.length}${listSurfaces(copies)}`,
+                ...(satisfied.length > 0
+                    ? [`Already satisfied projections: ${satisfied.length}${listSurfaces(satisfied)}`]
                     : []),
             ], (index) => index === 0 ? 'green' : undefined);
         }
@@ -563,7 +585,7 @@ function createOverviewStatusViewModel(report) {
             state: summary.outcomeCount === 1
                 ? summary.state
                 : `${summary.outcomeCount} ${summary.state.toLowerCase()} outcomes`,
-            details: `${summary.ownership === 'managed' ? 'Managed' : 'External'} · ${summary.packageCount} ${summary.packageCount === 1 ? 'package' : 'packages'} · ${summary.affectedFileCount} affected ${summary.affectedFileCount === 1 ? 'file' : 'files'}`,
+            details: `${displaySkillSurface(summary.surface)} · ${summary.ownership === 'managed' ? 'Managed' : 'External'} · ${summary.packageCount} ${summary.packageCount === 1 ? 'package' : 'packages'} · ${summary.affectedFileCount} affected ${summary.affectedFileCount === 1 ? 'file' : 'files'}`,
         })),
         drift: {
             key: 'drift',
@@ -622,24 +644,42 @@ function createOverviewStatusViewModel(report) {
     };
 }
 function summarizeLinkOutcomes(outcomes) {
-    return ['external', 'managed'].flatMap((ownership) => ['satisfied-via-link', 'blocked'].flatMap((status) => {
-        const matching = outcomes.filter((outcome) => outcome.status === status && outcome.ownership === ownership);
-        if (matching.length === 0)
-            return [];
-        return [{
-                key: `${ownership}:${status}`,
-                status,
-                ownership,
-                state: status === 'blocked'
-                    ? 'Blocked'
-                    : ownership === 'managed'
-                        ? 'Already satisfied projection'
-                        : 'Satisfied via link',
-                outcomeCount: matching.length,
-                packageCount: matching.reduce((total, outcome) => total + outcome.packageNames.length, 0),
-                affectedFileCount: matching.reduce((total, outcome) => total + outcome.affectedFileCount, 0),
-            }];
-    }));
+    const groups = new Map();
+    for (const outcome of outcomes) {
+        const surface = outcome.owner === 'canonical-store' ? 'canonical-store' : outcome.ide;
+        const key = `${outcome.ownership}:${outcome.status}:${surface}`;
+        const matching = groups.get(key) ?? [];
+        matching.push(outcome);
+        groups.set(key, matching);
+    }
+    return [...groups.entries()].map(([key, matching]) => {
+        const [ownership, status, surface] = key.split(':');
+        return {
+            key,
+            status,
+            ownership,
+            surface,
+            state: status === 'blocked'
+                ? 'Blocked'
+                : ownership === 'managed'
+                    ? 'Already satisfied projection'
+                    : 'Satisfied via link',
+            outcomeCount: matching.length,
+            packageCount: matching.reduce((total, outcome) => total + outcome.packageNames.length, 0),
+            affectedFileCount: matching.reduce((total, outcome) => total + outcome.affectedFileCount, 0),
+        };
+    });
+}
+function displaySkillSurface(surface) {
+    if (surface === 'canonical-store')
+        return 'Canonical Device Skill Store';
+    if (surface === 'claude-code')
+        return 'Claude Code';
+    if (surface === 'gemini-cli')
+        return 'Gemini CLI';
+    if (surface === 'antigravity')
+        return 'Antigravity';
+    return surface.charAt(0).toUpperCase() + surface.slice(1);
 }
 function statusItemText(item, includeDetails = true) {
     return includeDetails && item.details
@@ -768,7 +808,7 @@ function DeploySelection({ workflow, terminalRows, }) {
                                 ? outcome.ownership === 'managed'
                                     ? 'Already satisfied projection'
                                     : 'Satisfied via link'
-                                : `Blocked · ${outcome.reason?.replaceAll('-', ' ') ?? 'unclassified'}`, ' ', "\u00B7 ", outcome.ownership === 'managed' ? 'Managed' : 'External', " \u00B7 ", outcome.packageNames.length, " Skill", ' ', outcome.packageNames.length === 1 ? 'package' : 'packages', " \u00B7", ' ', outcome.affectedFileCount, " affected", ' ', outcome.affectedFileCount === 1 ? 'file' : 'files', " \u00B7", ' ', outcome.linkPaths.length, " ", outcome.linkPaths.length === 1 ? 'link' : 'links'] }), _jsxs(Text, { wrap: "truncate-middle", children: ['  ', outcome.linkPath, outcome.resolvedPath ? ` → ${outcome.resolvedPath}` : ''] })] }, `${outcome.owner}:${outcome.owner === 'ide' ? outcome.ide : 'store'}:${outcome.linkPath}`))), workflow.plan.linkOutcomes.length > 1 && linkOutcomeSummaries.map((summary) => (_jsxs(Text, { wrap: "truncate-middle", children: [summary.outcomeCount, " ", summary.ownership, " ", summary.state.toLowerCase(), " outcomes \u00B7", ' ', summary.packageCount, " Skill ", summary.packageCount === 1 ? 'package' : 'packages', " \u00B7", ' ', summary.affectedFileCount, " affected", ' ', summary.affectedFileCount === 1 ? 'file' : 'files'] }, summary.key))), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: { node, depth } }, index) => {
+                                : `Blocked · ${outcome.reason?.replaceAll('-', ' ') ?? 'unclassified'}`, ' ', "\u00B7 ", outcome.ownership === 'managed' ? 'Managed' : 'External', " \u00B7 ", outcome.packageNames.length, " Skill", ' ', outcome.packageNames.length === 1 ? 'package' : 'packages', " \u00B7", ' ', outcome.affectedFileCount, " affected", ' ', outcome.affectedFileCount === 1 ? 'file' : 'files', " \u00B7", ' ', outcome.linkPaths.length, " ", outcome.linkPaths.length === 1 ? 'link' : 'links'] }), _jsxs(Text, { wrap: "truncate-middle", children: ['  ', outcome.linkPath, outcome.resolvedPath ? ` → ${outcome.resolvedPath}` : ''] })] }, `${outcome.owner}:${outcome.owner === 'ide' ? outcome.ide : 'store'}:${outcome.linkPath}`))), workflow.plan.linkOutcomes.length > 1 && linkOutcomeSummaries.map((summary) => (_jsxs(Text, { wrap: "truncate-middle", children: [displaySkillSurface(summary.surface), " \u00B7 ", summary.outcomeCount, " ", summary.ownership, ' ', summary.state.toLowerCase(), " outcomes \u00B7", ' ', summary.packageCount, " Skill ", summary.packageCount === 1 ? 'package' : 'packages', " \u00B7", ' ', summary.affectedFileCount, " affected", ' ', summary.affectedFileCount === 1 ? 'file' : 'files'] }, summary.key))), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: { node, depth } }, index) => {
                 const visibleIndex = viewport.start + index;
                 const expanded = workflow.expandedNodeIds.includes(node.id);
                 const disclosure = node.children.length === 0

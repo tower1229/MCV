@@ -61,6 +61,10 @@ export class GeminiCanonicalTransformer implements CanonicalTransformer {
         targetPath: path.join(context.homeDir, '.gemini', 'skills', skill.relativePath),
         content: skill.content,
       });
+      files.push({
+        targetPath: path.join(context.homeDir, '.gemini', 'config', 'skills', skill.relativePath),
+        content: skill.content,
+      });
     }
     if (source.mcp !== undefined) {
       if (!isRecord(source.mcp) || !isRecord(source.mcp.servers)) {

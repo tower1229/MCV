@@ -5,7 +5,7 @@ import type { DeviceContext } from '../adapters/types.js';
 import { findSymbolicLinkAncestor, hashFile } from '../utils/files.js';
 import { isRecord } from '../utils/objects.js';
 
-export type CanonicalSkillIde = 'codex' | 'claude-code' | 'gemini';
+export type CanonicalSkillIde = 'codex' | 'claude-code' | 'gemini' | 'gemini-cli' | 'antigravity';
 export type CanonicalSkillTarget =
   | { owner: 'canonical-store'; ide?: never }
   | { owner: 'ide'; ide: CanonicalSkillIde };
@@ -23,11 +23,17 @@ export interface CanonicalSkillMaterialization<T extends CanonicalSkillLayoutFil
 
 export interface CanonicalSkillProjection {
   owner: 'ide';
-  ide: 'claude-code';
+  ide: CanonicalSkillIde;
   packageName: string;
   targetPath: string;
   physicalTargetPath: string;
   materializationPaths: string[];
+}
+
+export interface CanonicalSkillProjectionSurface {
+  ide: CanonicalSkillIde;
+  root: string;
+  supportsManagedLinks: boolean;
 }
 
 export interface CanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFile> {
@@ -108,12 +114,12 @@ export function planCanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFil
   files,
   context,
   useManagedLinks,
-  claudeSkillRoot,
+  projectionSurfaces = [],
 }: {
   files: T[];
   context: DeviceContext;
   useManagedLinks: boolean;
-  claudeSkillRoot?: string;
+  projectionSurfaces?: CanonicalSkillProjectionSurface[];
 }): CanonicalSkillDeviceLayout<T> {
   if (!useManagedLinks) {
     return {
@@ -126,13 +132,19 @@ export function planCanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFil
   }
 
   const storeRoot = canonicalDeviceSkillStoreRoot(context);
+  const linkCapableSurfaces = projectionSurfaces.filter((surface) => surface.supportsManagedLinks);
+  const linkCapableIde = new Set(linkCapableSurfaces.map((surface) => surface.ide));
+  const copyOnlySkillFile = (file: T): boolean =>
+    file.capability === 'skills'
+    && file.owner === 'ide'
+    && !linkCapableIde.has(file.ide)
+    && !isStoreSkillPath(file.targetPath, storeRoot);
   const filesOutsideLayout = files.filter((file) =>
-    file.capability !== 'skills' || (file.owner === 'ide' && file.ide === 'gemini'));
+    file.capability !== 'skills' || copyOnlySkillFile(file));
   const materializationsByPath = new Map<string, CanonicalSkillMaterialization<T>>();
   const conflicts: string[] = [];
   for (const file of files.filter((candidate) =>
-    candidate.capability === 'skills'
-      && !(candidate.owner === 'ide' && candidate.ide === 'gemini'))) {
+    candidate.capability === 'skills' && !copyOnlySkillFile(candidate))) {
     const relative = relativeSkillPath(file.targetPath);
     if (!relative) continue;
     const targetPath = path.join(storeRoot, relative);
@@ -147,38 +159,49 @@ export function planCanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFil
   const materializations = [...materializationsByPath.values()];
   const packageNames = [...new Set(materializations
     .map(({ targetPath }) => canonicalSkillPackageName(targetPath)))].sort();
-  const activeClaudeSkillRoot = claudeSkillRoot;
-  const missingProjections = activeClaudeSkillRoot
-    ? packageNames.flatMap((packageName): CanonicalSkillProjection[] => {
-      const targetPath = path.join(activeClaudeSkillRoot, packageName);
+  const missingProjections = linkCapableSurfaces.flatMap((surface) => {
+    if (path.resolve(surface.root) === path.resolve(storeRoot)) return [];
+    return packageNames.flatMap((packageName): CanonicalSkillProjection[] => {
+      const targetPath = path.join(surface.root, packageName);
       if (fs.existsSync(targetPath) || findSymbolicLinkAncestor(targetPath)) return [];
       return [{
         owner: 'ide',
-        ide: 'claude-code',
+        ide: surface.ide,
         packageName,
         targetPath,
-      physicalTargetPath: path.join(storeRoot, packageName),
-      materializationPaths: materializations
-        .map(({ targetPath: materializationPath }) => materializationPath)
-        .filter((materializationPath) =>
-          canonicalSkillPackageName(materializationPath) === packageName),
+        physicalTargetPath: path.join(storeRoot, packageName),
+        materializationPaths: materializations
+          .map(({ targetPath: materializationPath }) => materializationPath)
+          .filter((materializationPath) =>
+            canonicalSkillPackageName(materializationPath) === packageName),
       }];
-    })
-    : [];
+    });
+  });
   const physicalFiles = materializations.map(({ source, targetPath }) =>
     canonicalStoreFile(source, targetPath));
+  const linkClassificationIdeFiles = files.filter((file) =>
+    file.capability === 'skills'
+    && file.owner === 'ide'
+    && linkCapableIde.has(file.ide));
   return {
     filesOutsideLayout,
     materializations,
     filesForLinkClassification: [
       ...filesOutsideLayout,
       ...physicalFiles,
-      ...files.filter((file) =>
-        file.capability === 'skills' && file.owner === 'ide' && file.ide === 'claude-code'),
+      ...linkClassificationIdeFiles,
     ],
     missingProjections,
     conflicts,
   };
+}
+
+function isStoreSkillPath(targetPath: string, storeRoot: string): boolean {
+  const relative = path.relative(path.resolve(storeRoot), path.resolve(targetPath));
+  return relative === ''
+    || (relative !== '..'
+      && !relative.startsWith(`..${path.sep}`)
+      && !path.isAbsolute(relative));
 }
 
 export function classifyCanonicalSkillLinks<T extends CanonicalSkillLayoutFile>(
