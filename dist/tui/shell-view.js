@@ -180,11 +180,15 @@ function scrollablePageLines(state) {
     if (page.route === 'deploy') {
         const result = page.workflow.result;
         if (result.status === 'succeeded') {
+            const satisfiedProjections = result.linkOutcomes?.filter((outcome) => outcome.status === 'satisfied-via-link' && outcome.ownership === 'managed').length ?? 0;
             return pageLines('deploy-success', [
                 'Deploy succeeded.',
                 `Applied: ${result.data?.appliedChangeIds.length ?? 0} changes`,
                 `Written: ${result.data?.writtenPaths.length ?? 0} paths`,
                 `Deleted: ${result.data?.deletedPaths.length ?? 0} paths`,
+                ...(satisfiedProjections > 0
+                    ? [`Already satisfied projections: ${satisfiedProjections}`]
+                    : []),
             ], (index) => index === 0 ? 'green' : undefined);
         }
         if (result.status === 'blocked') {
@@ -559,7 +563,7 @@ function createOverviewStatusViewModel(report) {
             state: summary.outcomeCount === 1
                 ? summary.state
                 : `${summary.outcomeCount} ${summary.state.toLowerCase()} outcomes`,
-            details: `External · ${summary.packageCount} ${summary.packageCount === 1 ? 'package' : 'packages'} · ${summary.affectedFileCount} affected ${summary.affectedFileCount === 1 ? 'file' : 'files'}`,
+            details: `${summary.ownership === 'managed' ? 'Managed' : 'External'} · ${summary.packageCount} ${summary.packageCount === 1 ? 'package' : 'packages'} · ${summary.affectedFileCount} affected ${summary.affectedFileCount === 1 ? 'file' : 'files'}`,
         })),
         drift: {
             key: 'drift',
@@ -618,19 +622,24 @@ function createOverviewStatusViewModel(report) {
     };
 }
 function summarizeLinkOutcomes(outcomes) {
-    return ['satisfied-via-link', 'blocked'].flatMap((status) => {
-        const matching = outcomes.filter((outcome) => outcome.status === status);
+    return ['external', 'managed'].flatMap((ownership) => ['satisfied-via-link', 'blocked'].flatMap((status) => {
+        const matching = outcomes.filter((outcome) => outcome.status === status && outcome.ownership === ownership);
         if (matching.length === 0)
             return [];
         return [{
-                key: status,
+                key: `${ownership}:${status}`,
                 status,
-                state: status === 'satisfied-via-link' ? 'Satisfied via link' : 'Blocked',
+                ownership,
+                state: status === 'blocked'
+                    ? 'Blocked'
+                    : ownership === 'managed'
+                        ? 'Already satisfied projection'
+                        : 'Satisfied via link',
                 outcomeCount: matching.length,
                 packageCount: matching.reduce((total, outcome) => total + outcome.packageNames.length, 0),
                 affectedFileCount: matching.reduce((total, outcome) => total + outcome.affectedFileCount, 0),
             }];
-    });
+    }));
 }
 function statusItemText(item, includeDetails = true) {
     return includeDetails && item.details
@@ -756,8 +765,10 @@ function DeploySelection({ workflow, terminalRows, }) {
         : linkOutcomeSummaries.length;
     const viewport = listViewport(visible, workflow.cursor, Math.max(1, terminalRows - (terminalRows <= 12 ? 9 : 10) - linkOutcomeRows));
     return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: ["Repository: ", workflow.plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: [workflow.plan.changes.length, " changes \u00B7 ", workflow.selectedIds.length, " selected"] }), workflow.plan.linkOutcomes.length === 1 && workflow.plan.linkOutcomes.map((outcome) => (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: [outcome.status === 'satisfied-via-link'
-                                ? 'Satisfied via link'
-                                : `Blocked · ${outcome.reason?.replaceAll('-', ' ') ?? 'unclassified'}`, ' ', "\u00B7 External \u00B7 ", outcome.packageNames.length, " Skill", ' ', outcome.packageNames.length === 1 ? 'package' : 'packages', " \u00B7", ' ', outcome.affectedFileCount, " affected", ' ', outcome.affectedFileCount === 1 ? 'file' : 'files', " \u00B7", ' ', outcome.linkPaths.length, " ", outcome.linkPaths.length === 1 ? 'link' : 'links'] }), _jsxs(Text, { wrap: "truncate-middle", children: ['  ', outcome.linkPath, outcome.resolvedPath ? ` → ${outcome.resolvedPath}` : ''] })] }, `${outcome.ide}:${outcome.linkPath}`))), workflow.plan.linkOutcomes.length > 1 && linkOutcomeSummaries.map((summary) => (_jsxs(Text, { wrap: "truncate-middle", children: [summary.outcomeCount, " external ", summary.state.toLowerCase(), " outcomes \u00B7", ' ', summary.packageCount, " Skill ", summary.packageCount === 1 ? 'package' : 'packages', " \u00B7", ' ', summary.affectedFileCount, " affected", ' ', summary.affectedFileCount === 1 ? 'file' : 'files'] }, summary.key))), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: { node, depth } }, index) => {
+                                ? outcome.ownership === 'managed'
+                                    ? 'Already satisfied projection'
+                                    : 'Satisfied via link'
+                                : `Blocked · ${outcome.reason?.replaceAll('-', ' ') ?? 'unclassified'}`, ' ', "\u00B7 ", outcome.ownership === 'managed' ? 'Managed' : 'External', " \u00B7 ", outcome.packageNames.length, " Skill", ' ', outcome.packageNames.length === 1 ? 'package' : 'packages', " \u00B7", ' ', outcome.affectedFileCount, " affected", ' ', outcome.affectedFileCount === 1 ? 'file' : 'files', " \u00B7", ' ', outcome.linkPaths.length, " ", outcome.linkPaths.length === 1 ? 'link' : 'links'] }), _jsxs(Text, { wrap: "truncate-middle", children: ['  ', outcome.linkPath, outcome.resolvedPath ? ` → ${outcome.resolvedPath}` : ''] })] }, `${outcome.owner}:${outcome.owner === 'ide' ? outcome.ide : 'store'}:${outcome.linkPath}`))), workflow.plan.linkOutcomes.length > 1 && linkOutcomeSummaries.map((summary) => (_jsxs(Text, { wrap: "truncate-middle", children: [summary.outcomeCount, " ", summary.ownership, " ", summary.state.toLowerCase(), " outcomes \u00B7", ' ', summary.packageCount, " Skill ", summary.packageCount === 1 ? 'package' : 'packages', " \u00B7", ' ', summary.affectedFileCount, " affected", ' ', summary.affectedFileCount === 1 ? 'file' : 'files'] }, summary.key))), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: { node, depth } }, index) => {
                 const visibleIndex = viewport.start + index;
                 const expanded = workflow.expandedNodeIds.includes(node.id);
                 const disclosure = node.children.length === 0
@@ -810,11 +821,22 @@ function DeployDiff({ workflow, }) {
     const change = workflow.plan.changes.find((item) => item.id === workflow.changeId);
     if (!change)
         return _jsx(Text, { children: "Selected Deploy change is no longer available." });
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: [change.name, " \u00B7 ", change.change] }), _jsxs(Text, { children: ["Apply semantics: ", change.strategy === 'managed-merge'
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: [change.name, " \u00B7 ", change.change] }), _jsxs(Text, { children: ["Layout: ", deployLayoutLabel(change.deploymentKind)] }), _jsxs(Text, { children: ["Apply semantics: ", change.strategy === 'managed-merge'
                         ? 'Managed merge — preserve unowned Native and Local fields.'
                         : 'Whole-file replacement — replace the complete target file.'] }), _jsx(DeployPreviewView, { preview: change.preview })] }));
 }
+function deployLayoutLabel(kind) {
+    switch (kind) {
+        case 'physical-materialization': return 'Physical materialization';
+        case 'managed-link-projection': return 'Managed-link projection';
+        case 'copy-projection': return 'Copy projection';
+        default: return 'Ordinary file';
+    }
+}
 function DeployPreviewView({ preview, }) {
+    if (preview.kind === 'link') {
+        return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "Managed Skill link" }), _jsx(Text, { wrap: "truncate-middle", children: preview.targetPath }), _jsxs(Text, { wrap: "truncate-middle", children: ["\u2192 ", preview.linkTarget] })] }));
+    }
     if (preview.kind === 'binary') {
         return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: preview.targetPath }), _jsxs(Text, { children: ['  ', "binary \u00B7 ", preview.bytes, " bytes \u00B7 sha256 ", preview.sha256] })] }));
     }

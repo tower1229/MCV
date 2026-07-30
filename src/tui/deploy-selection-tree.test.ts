@@ -59,6 +59,7 @@ function skillPlan(): DeployPlan {
     kind: 'add' | 'modify',
   ) => ({
     id,
+    owner: 'ide' as const,
     ide: 'codex' as const,
     capability: 'skills' as const,
     name: 'hatch-pet',

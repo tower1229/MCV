@@ -1,5 +1,4 @@
-import * as fs from 'fs';
-import { hashFile } from '../utils/files.js';
+import { deployPathExists, hashDeviceTopologyNode, } from '../core/canonical-skill-device-layout.js';
 import { readManifest, resolveBoundRepository, } from '../utils/repository.js';
 import { readState } from '../utils/state.js';
 import { createDeployPlan, } from './deploy.js';
@@ -52,11 +51,11 @@ function summarizePendingDeployment(changes) {
 }
 function summarizePostDeployLocalState(baselineFiles) {
     const files = Object.entries(baselineFiles).map(([filePath, expectedHash]) => {
-        if (!fs.existsSync(filePath))
+        if (!deployPathExists(filePath))
             return { path: filePath, state: 'missing' };
         return {
             path: filePath,
-            state: hashFile(filePath) === expectedHash ? 'unchanged' : 'drift',
+            state: hashDeviceTopologyNode(filePath) === expectedHash ? 'unchanged' : 'drift',
         };
     });
     return {

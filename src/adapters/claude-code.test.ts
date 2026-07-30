@@ -5,6 +5,17 @@ import { ClaudeCodeAdapter } from './claude-code.js';
 import { parse as parseYaml } from 'yaml';
 
 describe('ClaudeCodeAdapter', () => {
+  it('declares its per-Skill projection surface as macOS-link capable', () => {
+    const adapter = new ClaudeCodeAdapter();
+    expect(adapter.skillSurface.destinationRoot({
+      homeDir: '/Users/test',
+      platform: 'darwin',
+      env: {},
+    })).toBe(path.join('/Users/test', '.claude', 'skills'));
+    expect(adapter.skillSurface.supportsManagedDirectoryLinks('darwin')).toBe(true);
+    expect(adapter.skillSurface.supportsManagedDirectoryLinks('win32')).toBe(false);
+  });
+
   let homeDir: string;
 
   beforeEach(() => {

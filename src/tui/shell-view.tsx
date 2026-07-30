@@ -11,6 +11,7 @@ import type { StatusReport } from '../operations/status.js';
 import type { RepositoryReport } from '../operations/repository.js';
 import type {
   DeployLinkOutcome,
+  DeployPlan,
   DeployPreview,
   DeployResult,
 } from '../operations/deploy.js';
@@ -347,11 +348,16 @@ function scrollablePageLines(state: ShellState): ScrollablePageLine[] {
   if (page.route === 'deploy') {
     const result = page.workflow.result;
     if (result.status === 'succeeded') {
+      const satisfiedProjections = result.linkOutcomes?.filter((outcome) =>
+        outcome.status === 'satisfied-via-link' && outcome.ownership === 'managed').length ?? 0;
       return pageLines('deploy-success', [
         'Deploy succeeded.',
         `Applied: ${result.data?.appliedChangeIds.length ?? 0} changes`,
         `Written: ${result.data?.writtenPaths.length ?? 0} paths`,
         `Deleted: ${result.data?.deletedPaths.length ?? 0} paths`,
+        ...(satisfiedProjections > 0
+          ? [`Already satisfied projections: ${satisfiedProjections}`]
+          : []),
       ], (index) => index === 0 ? 'green' : undefined);
     }
     if (result.status === 'blocked') {
@@ -1106,7 +1112,7 @@ function createOverviewStatusViewModel(
       state: summary.outcomeCount === 1
         ? summary.state
         : `${summary.outcomeCount} ${summary.state.toLowerCase()} outcomes`,
-      details: `External · ${summary.packageCount} ${summary.packageCount === 1 ? 'package' : 'packages'} · ${summary.affectedFileCount} affected ${summary.affectedFileCount === 1 ? 'file' : 'files'}`,
+      details: `${summary.ownership === 'managed' ? 'Managed' : 'External'} · ${summary.packageCount} ${summary.packageCount === 1 ? 'package' : 'packages'} · ${summary.affectedFileCount} affected ${summary.affectedFileCount === 1 ? 'file' : 'files'}`,
     })),
     drift: {
       key: 'drift',
@@ -1168,7 +1174,8 @@ function createOverviewStatusViewModel(
 interface LinkOutcomeSummary {
   key: string;
   status: DeployLinkOutcome['status'];
-  state: 'Satisfied via link' | 'Blocked';
+  ownership: DeployLinkOutcome['ownership'];
+  state: 'Satisfied via link' | 'Already satisfied projection' | 'Blocked';
   outcomeCount: number;
   packageCount: number;
   affectedFileCount: number;
@@ -1177,24 +1184,31 @@ interface LinkOutcomeSummary {
 function summarizeLinkOutcomes(
   outcomes: DeployLinkOutcome[],
 ): LinkOutcomeSummary[] {
-  return (['satisfied-via-link', 'blocked'] as const).flatMap((status) => {
-    const matching = outcomes.filter((outcome) => outcome.status === status);
-    if (matching.length === 0) return [];
-    return [{
-      key: status,
-      status,
-      state: status === 'satisfied-via-link' ? 'Satisfied via link' : 'Blocked',
-      outcomeCount: matching.length,
-      packageCount: matching.reduce(
-        (total, outcome) => total + outcome.packageNames.length,
-        0,
-      ),
-      affectedFileCount: matching.reduce(
-        (total, outcome) => total + outcome.affectedFileCount,
-        0,
-      ),
-    }];
-  });
+  return (['external', 'managed'] as const).flatMap((ownership) =>
+    (['satisfied-via-link', 'blocked'] as const).flatMap((status) => {
+      const matching = outcomes.filter((outcome) =>
+        outcome.status === status && outcome.ownership === ownership);
+      if (matching.length === 0) return [];
+      return [{
+        key: `${ownership}:${status}`,
+        status,
+        ownership,
+        state: status === 'blocked'
+          ? 'Blocked'
+          : ownership === 'managed'
+            ? 'Already satisfied projection'
+            : 'Satisfied via link',
+        outcomeCount: matching.length,
+        packageCount: matching.reduce(
+          (total, outcome) => total + outcome.packageNames.length,
+          0,
+        ),
+        affectedFileCount: matching.reduce(
+          (total, outcome) => total + outcome.affectedFileCount,
+          0,
+        ),
+      }];
+    }));
 }
 
 function statusItemText(
@@ -1628,12 +1642,14 @@ function DeploySelection({
         {workflow.plan.changes.length} changes · {workflow.selectedIds.length} selected
       </Text>
       {workflow.plan.linkOutcomes.length === 1 && workflow.plan.linkOutcomes.map((outcome) => (
-        <Box key={`${outcome.ide}:${outcome.linkPath}`} flexDirection="column">
+        <Box key={`${outcome.owner}:${outcome.owner === 'ide' ? outcome.ide : 'store'}:${outcome.linkPath}`} flexDirection="column">
           <Text wrap="truncate-middle">
             {outcome.status === 'satisfied-via-link'
-              ? 'Satisfied via link'
+              ? outcome.ownership === 'managed'
+                ? 'Already satisfied projection'
+                : 'Satisfied via link'
               : `Blocked · ${outcome.reason?.replaceAll('-', ' ') ?? 'unclassified'}`}
-            {' '}· External · {outcome.packageNames.length} Skill{' '}
+            {' '}· {outcome.ownership === 'managed' ? 'Managed' : 'External'} · {outcome.packageNames.length} Skill{' '}
             {outcome.packageNames.length === 1 ? 'package' : 'packages'} ·{' '}
             {outcome.affectedFileCount} affected{' '}
             {outcome.affectedFileCount === 1 ? 'file' : 'files'} ·{' '}
@@ -1647,7 +1663,7 @@ function DeploySelection({
       ))}
       {workflow.plan.linkOutcomes.length > 1 && linkOutcomeSummaries.map((summary) => (
         <Text key={summary.key} wrap="truncate-middle">
-          {summary.outcomeCount} external {summary.state.toLowerCase()} outcomes ·{' '}
+          {summary.outcomeCount} {summary.ownership} {summary.state.toLowerCase()} outcomes ·{' '}
           {summary.packageCount} Skill {summary.packageCount === 1 ? 'package' : 'packages'} ·{' '}
           {summary.affectedFileCount} affected{' '}
           {summary.affectedFileCount === 1 ? 'file' : 'files'}
@@ -1780,6 +1796,7 @@ function DeployDiff({
   return (
     <Box flexDirection="column">
       <Text>{change.name} · {change.change}</Text>
+      <Text>Layout: {deployLayoutLabel(change.deploymentKind)}</Text>
       <Text>
         Apply semantics: {change.strategy === 'managed-merge'
           ? 'Managed merge — preserve unowned Native and Local fields.'
@@ -1790,11 +1807,29 @@ function DeployDiff({
   );
 }
 
+function deployLayoutLabel(kind: DeployPlan['changes'][number]['deploymentKind']): string {
+  switch (kind) {
+    case 'physical-materialization': return 'Physical materialization';
+    case 'managed-link-projection': return 'Managed-link projection';
+    case 'copy-projection': return 'Copy projection';
+    default: return 'Ordinary file';
+  }
+}
+
 function DeployPreviewView({
   preview,
 }: {
   preview: DeployPreview;
 }): ReactNode {
+  if (preview.kind === 'link') {
+    return (
+      <Box flexDirection="column">
+        <Text>Managed Skill link</Text>
+        <Text wrap="truncate-middle">{preview.targetPath}</Text>
+        <Text wrap="truncate-middle">→ {preview.linkTarget}</Text>
+      </Box>
+    );
+  }
   if (preview.kind === 'binary') {
     return (
       <Box flexDirection="column">

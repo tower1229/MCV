@@ -618,6 +618,94 @@ describe('packaged mcv CLI', () => {
     }
   });
 
+  it.skipIf(process.platform !== 'darwin')(
+    'materializes and projects one Skill through the packaged CLI',
+    () => {
+      const isolatedRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-managed-skill-')));
+      const repositoryPath = path.join(isolatedRoot, 'repository');
+      const sourceSkill = path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md');
+      const storeSkill = path.join(isolatedRoot, '.agents', 'skills', 'review', 'SKILL.md');
+      const projection = path.join(isolatedRoot, '.claude', 'skills', 'review');
+      fs.mkdirSync(path.dirname(sourceSkill), { recursive: true });
+      fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+        'schemaVersion: 2',
+        'repositoryId: process-managed-skill-id',
+        'initializedAt: 2026-07-30T00:00:00.000Z',
+        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+        'capture: { preserveUnknownNativeFields: true }',
+        'deploy: { backupBeforeWrite: true, useSymlinks: true }',
+        'targets:',
+        '  codex:',
+        '    enabled: true',
+        '  claudeCode:',
+        '    enabled: true',
+        'variables: {}',
+        '',
+      ].join('\n'));
+      fs.writeFileSync(sourceSkill, '# Review\n');
+      try {
+        const planResult = spawnSync(
+          process.execPath,
+          [cliPath, 'deploy', '--dry-run', '--json'],
+          {
+            cwd: repositoryPath,
+            encoding: 'utf8',
+            env: isolatedEnvironment(isolatedRoot),
+          },
+        );
+        expect(planResult.status).toBe(0);
+        expect(JSON.parse(planResult.stdout).changes).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            targetPath: storeSkill,
+            deploymentKind: 'physical-materialization',
+          }),
+          expect.objectContaining({
+            targetPath: projection,
+            deploymentKind: 'managed-link-projection',
+          }),
+        ]));
+
+        const applyResult = spawnSync(
+          process.execPath,
+          [cliPath, 'deploy', '--yes', '--json'],
+          {
+            cwd: repositoryPath,
+            encoding: 'utf8',
+            env: isolatedEnvironment(isolatedRoot),
+          },
+        );
+        expect(applyResult.status).toBe(0);
+        expect(JSON.parse(applyResult.stdout)).toMatchObject({
+          status: 'succeeded',
+          data: { projectionPaths: [projection] },
+        });
+        expect(fs.readFileSync(storeSkill, 'utf8')).toBe('# Review\n');
+        expect(fs.lstatSync(projection).isSymbolicLink()).toBe(true);
+
+        const satisfiedResult = spawnSync(
+          process.execPath,
+          [cliPath, 'deploy', '--yes', '--json'],
+          {
+            cwd: repositoryPath,
+            encoding: 'utf8',
+            env: isolatedEnvironment(isolatedRoot),
+          },
+        );
+        expect(satisfiedResult.status).toBe(0);
+        expect(JSON.parse(satisfiedResult.stdout)).toMatchObject({
+          status: 'succeeded',
+          linkOutcomes: [expect.objectContaining({
+            status: 'satisfied-via-link',
+            ownership: 'managed',
+            linkPath: projection,
+          })],
+        });
+      } finally {
+        fs.rmSync(isolatedRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('prints exactly one read-only Restore Plan JSON document', () => {
     const isolatedRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-restore-')));
     const targetPath = path.join(isolatedRoot, 'target', 'settings.json');

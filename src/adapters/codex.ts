@@ -17,6 +17,11 @@ import type {
 } from './types.js';
 
 export class CodexAdapter implements IdeAdapter {
+  readonly skillSurface = {
+    destinationRoot: (context: DeviceContext) => path.join(context.homeDir, '.agents', 'skills'),
+    supportsManagedDirectoryLinks: (platform: NodeJS.Platform) => platform === 'darwin',
+  };
+
   constructor(
     private readonly nativeFileHandler: NativeFileHandler = new CodexNativeFileHandler(),
     private readonly canonicalTransformer: CanonicalTransformer = new CodexCanonicalTransformer(),

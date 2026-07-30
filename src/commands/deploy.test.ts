@@ -162,6 +162,35 @@ describe('mcv deploy', () => {
     })]);
   });
 
+  it('distinguishes physical materialization and managed-link projection in Plan and Result', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8')
+        .replace('useSymlinks: false', 'useSymlinks: true')
+        .replace('    windows: "${HOME}\\\\Tools"', '    windows: "${HOME}\\\\Tools"\n    macos: "${HOME}/Tools"'),
+    );
+    const sourceSkill = path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md');
+    fs.mkdirSync(path.dirname(sourceSkill), { recursive: true });
+    fs.writeFileSync(sourceSkill, '# Review\n');
+
+    await createProgram(deviceContext()).parseAsync(['node', 'mcv', 'deploy', '--dry-run']);
+    const planText = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
+    expect(planText).toContain('Physical materialization');
+    expect(planText).toContain('Managed-link projection');
+    expect(planText).toContain(`${path.join(homeDir, '.claude', 'skills', 'review')} -> ${path.join(homeDir, '.agents', 'skills', 'review')}`);
+
+    vi.mocked(console.log).mockClear();
+    await createProgram(
+      deviceContext(),
+      {},
+      { confirmDeploy: async () => true },
+    ).parseAsync(['node', 'mcv', 'deploy']);
+    const resultText = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
+    expect(resultText).toContain('Physical materializations: 1');
+    expect(resultText).toContain('Managed-link projections: 1');
+  });
+
   it('detects a symbolic-link ancestor before planning writes beneath it', () => {
     const target = path.join(testRoot, 'link-target');
     const link = path.join(testRoot, 'link');

@@ -23,6 +23,16 @@ import {
 import { resolveVariableDefinitions } from '../utils/variables.js';
 import { findLegacyCodexSkillDuplicates } from '../utils/deploy-skills.js';
 import {
+  classifyCanonicalSkillLinks,
+  deployPathExists,
+  hashDeviceTopologyNode,
+  planCanonicalSkillDeviceLayout,
+  type CanonicalSkillIde,
+  type CanonicalSkillLayoutFile,
+  type CanonicalSkillLinkOutcome,
+  type CanonicalSkillTarget,
+} from '../core/canonical-skill-device-layout.js';
+import {
   OPERATION_SCHEMA_VERSION,
   type Issue,
   type McvError,
@@ -48,11 +58,24 @@ export interface DeployBinaryPreview {
   sha256: string;
 }
 
-export type DeployPreview = DeployTextPreview | DeployBinaryPreview;
+export interface DeployLinkPreview {
+  targetPath: string;
+  kind: 'link';
+  linkTarget: string;
+}
 
-export interface DeployChange {
+export type DeployPreview = DeployTextPreview | DeployBinaryPreview | DeployLinkPreview;
+
+export type DeployDeploymentKind =
+  | 'ordinary-file'
+  | 'physical-materialization'
+  | 'managed-link-projection'
+  | 'copy-projection';
+
+export type DeployIde = CanonicalSkillIde;
+
+export type DeployChange = {
   id: string;
-  ide: 'codex' | 'claude-code' | 'gemini';
   capability: ConfigurationCapability;
   name: string;
   targetPath: string;
@@ -60,22 +83,12 @@ export interface DeployChange {
   defaultSelected: boolean;
   group: 'standard' | 'advanced';
   strategy: DeployStrategy;
+  deploymentKind?: DeployDeploymentKind;
+  dependsOnChangeIds?: string[];
   preview: DeployPreview;
-}
+} & CanonicalSkillTarget;
 
-export interface DeployLinkOutcome {
-  status: 'satisfied-via-link' | 'blocked';
-  ownership: 'external';
-  scope: 'skill-package' | 'shared-link-root';
-  ide: DeployChange['ide'];
-  linkPath: string;
-  linkPaths: string[];
-  resolvedPath?: string;
-  resolvedPaths?: string[];
-  packageNames: string[];
-  affectedFileCount: number;
-  reason?: 'divergent' | 'dangling' | 'cycle' | 'physical-target-conflict' | 'unclassified';
-}
+export type DeployLinkOutcome = CanonicalSkillLinkOutcome;
 
 export type DeployPlan = Plan<DeployChange> & {
   operation: 'deploy';
@@ -90,6 +103,7 @@ export interface DeploySelection {
 export interface DeployApplyOptions {
   nonInteractive?: boolean;
   copyFile?: typeof fs.copyFileSync;
+  createSymbolicLink?: (target: string, linkPath: string) => void;
   writeFile?: (targetPath: string, content: Buffer) => void;
   removeFile?: (targetPath: string) => void;
   restoreFile?: (targetPath: string, content: Buffer) => void;
@@ -100,20 +114,23 @@ export interface DeployResultData {
   writtenPaths: string[];
   deletedPaths: string[];
   backupPath?: string;
+  projectionPaths?: string[];
 }
 
 export type DeployResult = Result<DeployResultData, DeployChange> & {
   operation: 'deploy';
+  linkOutcomes?: DeployLinkOutcome[];
 };
 
-interface SourcedDeployFile extends DeployFile {
-  ide: DeployChange['ide'];
+type SourcedDeployFile = DeployFile & {
   capability: ConfigurationCapability;
   strategy: DeployStrategy;
-}
+  deploymentKind: DeployDeploymentKind;
+} & CanonicalSkillTarget;
 
 interface DeployMutation {
   content?: Buffer;
+  linkTarget?: string;
 }
 
 interface ActiveDeployPlan {
@@ -141,8 +158,9 @@ interface DeployBackupManifest {
 
 interface PreparedDeployWrite {
   targetPath: string;
-  change: 'write' | 'delete';
+  change: 'write' | 'delete' | 'link';
   content?: Buffer;
+  linkTarget?: string;
 }
 
 const activeDeployPlans = new WeakMap<DeployPlan, ActiveDeployPlan>();
@@ -228,16 +246,26 @@ async function buildDeployPlan(
       );
       return semantics.capabilities.map((capability) => ({
         ...file,
+        owner: 'ide' as const,
         ide: ideName(definition.targetId),
         capability,
         strategy: semantics.strategy,
+        deploymentKind: capability === 'skills' ? 'copy-projection' : 'ordinary-file',
       }));
     });
   }))).flat();
 
   const issues: Issue[] = [];
   const linkOutcomes: DeployLinkOutcome[] = [];
-  const safeDesired = desired.filter((file) => {
+  const layout = planCanonicalSkillLayout(
+    desired,
+    context,
+    manifest.deploy.useSymlinks,
+    mutations,
+    issues,
+    definitions,
+  );
+  const safeDesired = layout.desired.filter((file) => {
     const linkPath = findSymbolicLinkAncestor(file.targetPath);
     if (!linkPath) return true;
     if (file.capability === 'skills') return false;
@@ -249,20 +277,33 @@ async function buildDeployPlan(
     });
     return false;
   });
-  classifyLinkedSkillPackages(desired, linkOutcomes, issues);
+  const inventory = readState(context).managedInventory ?? {};
+  const linkedSkills = classifyCanonicalSkillLinks(
+    layout.desiredForLinkClassification,
+    (linkPath) => inventory[linkPath]?.hash === hashDeviceTopologyNode(linkPath),
+  );
+  linkOutcomes.push(...linkedSkills.outcomes);
+  issues.push(...linkedSkills.issues);
 
   const changes = safeDesired.flatMap((file): DeployChange[] => {
     const previous = fs.existsSync(file.targetPath) ? fs.readFileSync(file.targetPath) : undefined;
     const next = toBuffer(file.content);
     if (previous?.equals(next)) return [];
-    const filePreview = preview(file.targetPath, file.ide, file.capability, next, previous, issues);
+    const filePreview = preview(
+      file.targetPath,
+      canonicalTargetKey(file),
+      file.capability,
+      next,
+      previous,
+      issues,
+    );
     if (filePreview.kind === 'text' && filePreview.diff.length === 0) return [];
     const change = previous === undefined ? 'add' as const : 'modify' as const;
-    const id = selectionId(file.ide, file.capability, file.targetPath);
+    const id = selectionId(canonicalTargetKey(file), file.capability, file.targetPath);
     mutations.set(id, { content: next });
     return [{
       id,
-      ide: file.ide,
+      ...canonicalTarget(file),
       capability: file.capability,
       name: displayName(file.targetPath, file.capability),
       targetPath: file.targetPath,
@@ -270,9 +311,11 @@ async function buildDeployPlan(
       defaultSelected: true,
       group: 'standard',
       strategy: file.strategy,
+      deploymentKind: file.deploymentKind,
       preview: filePreview,
     }];
   });
+  changes.push(...layout.projectionChanges);
 
   const legacyDuplicates = findLegacyCodexSkillDuplicates(
     context,
@@ -288,6 +331,7 @@ async function buildDeployPlan(
     for (const targetPath of legacyDuplicates.files) {
       changes.push({
         id: selectionId('codex', 'skills', targetPath),
+        owner: 'ide',
         ide: 'codex',
         capability: 'skills',
         name: displayName(targetPath, 'skills'),
@@ -296,6 +340,7 @@ async function buildDeployPlan(
         defaultSelected: false,
         group: 'advanced',
         strategy: 'replace-entire-file',
+        deploymentKind: 'copy-projection',
         preview: preview(targetPath, 'codex', 'skills', Buffer.alloc(0), fs.readFileSync(targetPath), issues),
       });
       mutations.set(selectionId('codex', 'skills', targetPath), {});
@@ -308,14 +353,17 @@ async function buildDeployPlan(
   for (const [targetPath, inventoryEntry] of Object.entries(managedInventory)) {
     if (desiredPaths.has(path.resolve(targetPath)) || !fs.existsSync(targetPath)) continue;
     if (findSymbolicLinkAncestor(targetPath)) continue;
-    const ide = inferIde(targetPath, context);
-    if (!ide) continue;
-    const semantics = inferDeploymentSemantics(targetPath, targetIdForIde(ide), repositoryPath, context);
+    const target = inferDeployTarget(targetPath, context);
+    if (!target) continue;
+    const targetKey = canonicalTargetKey(target);
+    const semantics = target.owner === 'canonical-store'
+      ? { capabilities: ['skills'] as ConfigurationCapability[], strategy: 'replace-entire-file' as const }
+      : inferDeploymentSemantics(targetPath, targetIdForIde(target.ide), repositoryPath, context);
     const capability = semantics.capabilities[0];
     if (semantics.strategy !== 'replace-entire-file' || !capability) continue;
     const deletion: DeployChange = {
-      id: selectionId(ide, capability, targetPath),
-      ide,
+      id: selectionId(targetKey, capability, targetPath),
+      ...canonicalTarget(target),
       capability,
       name: displayName(targetPath, capability),
       targetPath,
@@ -323,7 +371,15 @@ async function buildDeployPlan(
       defaultSelected: false,
       group: 'advanced',
       strategy: semantics.strategy,
-      preview: preview(targetPath, ide, capability, Buffer.alloc(0), fs.readFileSync(targetPath), issues),
+      deploymentKind: capability === 'skills' ? 'copy-projection' : 'ordinary-file',
+      preview: preview(
+        targetPath,
+        targetKey,
+        capability,
+        Buffer.alloc(0),
+        fs.readFileSync(targetPath),
+        issues,
+      ),
     };
     changes.push(deletion);
     mutations.set(deletion.id, {});
@@ -335,7 +391,7 @@ async function buildDeployPlan(
   const preconditions = Object.fromEntries(changes.flatMap((change) => {
     return [
       [`source:${change.id}`, sourcePreconditions.get(change.id) ?? repositorySourceHash],
-      [`target:${change.id}`, fs.existsSync(change.targetPath) ? hashFile(change.targetPath) : hashText('<missing>')],
+      [`target:${change.id}`, hashDeviceTopologyNode(change.targetPath)],
     ];
   }));
   const blocked = issues.some((issue) =>
@@ -357,238 +413,80 @@ async function buildDeployPlan(
   };
 }
 
-function classifyLinkedSkillPackages(
+function planCanonicalSkillLayout(
   desired: SourcedDeployFile[],
-  outcomes: DeployLinkOutcome[],
+  context: DeviceContext,
+  useSymlinks: boolean,
+  mutations: Map<string, DeployMutation>,
   issues: Issue[],
-): void {
-  interface LinkedSkillFile {
-    file: SourcedDeployFile;
-    linkPath: string;
-  }
-  const linkedGroups = new Map<string, {
-    scope: DeployLinkOutcome['scope'];
-    files: LinkedSkillFile[];
-  }>();
-  for (const file of desired) {
-    if (file.capability !== 'skills') continue;
-    const linkPath = findSymbolicLinkAncestor(file.targetPath);
-    if (!linkPath) continue;
-    const skillRoot = skillRootPath(file.targetPath);
-    const withinSkillRoot = skillRoot !== undefined
-      && isPathWithin(skillRoot, linkPath);
-    const sharedRoot = withinSkillRoot
-      && path.resolve(linkPath) === path.resolve(skillRoot);
-    const groupingPath = sharedRoot
-      ? linkPath
-      : withinSkillRoot
-        ? skillPackageRoot(file.targetPath)
-        : linkPath;
-    const scope = sharedRoot ? 'shared-link-root' as const : 'skill-package' as const;
-    const key = `${file.ide}\0${path.resolve(groupingPath)}`;
-    const group = linkedGroups.get(key) ?? { scope, files: [] };
-    group.files.push({ file, linkPath });
-    linkedGroups.set(key, group);
-  }
-
-  const desiredByPath = new Map(desired
-    .filter((file) => !findSymbolicLinkAncestor(file.targetPath))
-    .map((file) => [path.resolve(file.targetPath), toBuffer(file.content)]));
-
-  for (const { scope, files } of linkedGroups.values()) {
-    const first = files[0].file;
-    const linkPaths = [...new Set(files.map((entry) => entry.linkPath))].sort();
-    const packageNames = [...new Set(files.map(({ file }) => skillPackageName(file.targetPath)))]
-      .sort();
-    const baseOutcome = {
-      ownership: 'external' as const,
-      scope,
-      ide: first.ide,
-      linkPath: linkPaths[0],
-      linkPaths,
-      packageNames,
-      affectedFileCount: files.length,
-    };
-    if (files.some(({ file, linkPath }) => !isLinkWithinSkillRoot(file.targetPath, linkPath))) {
-      outcomes.push({ ...baseOutcome, status: 'blocked', reason: 'unclassified' });
-      issues.push(linkedSkillIssue(baseOutcome, 'unclassified'));
-      continue;
-    }
-    const resolvedByLink = new Map<string, string>();
-    let resolutionFailure: NonNullable<DeployLinkOutcome['reason']> | undefined;
-    try {
-      for (const linkPath of linkPaths) {
-        resolvedByLink.set(linkPath, fs.realpathSync(linkPath));
-      }
-    } catch (error) {
-      resolutionFailure = symbolicLinkFailureReason(error);
-    }
-    if (resolutionFailure) {
-      outcomes.push({ ...baseOutcome, status: 'blocked', reason: resolutionFailure });
-      issues.push(linkedSkillIssue(baseOutcome, resolutionFailure));
-      continue;
-    }
-    const resolvedPaths = [...new Set(resolvedByLink.values())].sort();
-    const resolution = {
-      ...(resolvedPaths.length === 1 ? { resolvedPath: resolvedPaths[0] } : {}),
-      resolvedPaths,
-    };
-
-    let matches = true;
-    try {
-      matches = files.every(({ file }) =>
-        fs.readFileSync(file.targetPath).equals(toBuffer(file.content)));
-    } catch {
-      matches = false;
-    }
-    const physicalTargetConflict = hasPhysicalTargetConflict(
-      files,
-      resolvedByLink,
-      desiredByPath,
-    );
-    const followsEquivalentPhysicalTarget = linkedFilesMatchPhysicalDesired(
-      files,
-      resolvedByLink,
-      desiredByPath,
-    );
-    if (!physicalTargetConflict && (matches || followsEquivalentPhysicalTarget)) {
-      outcomes.push({ ...baseOutcome, ...resolution, status: 'satisfied-via-link' });
-      issues.push({
-        severity: 'notice',
-        code: `deploy.skillsLinked.satisfied.${first.ide}`,
-        message: `Satisfied via link: ${packageSummary(packageNames)} (${files.length} affected file(s)).`,
-        details: `${linkPaths.length} external link(s) resolve to ${resolvedPaths.join(', ')}; MCV will not take ownership or write through them.`,
-      });
-      continue;
-    }
-
-    const reason = physicalTargetConflict
-      ? 'physical-target-conflict' as const
-      : 'divergent' as const;
-    outcomes.push({ ...baseOutcome, ...resolution, status: 'blocked', reason });
-    issues.push(linkedSkillIssue({ ...baseOutcome, ...resolution }, reason));
-  }
-}
-
-function isLinkWithinSkillRoot(targetPath: string, linkPath: string): boolean {
-  const skillRoot = skillRootPath(targetPath);
-  return skillRoot !== undefined && isPathWithin(skillRoot, linkPath);
-}
-
-function isPathWithin(root: string, candidate: string): boolean {
-  const relative = path.relative(path.resolve(root), path.resolve(candidate));
-  return relative === ''
-    || (relative !== '..'
-      && !relative.startsWith(`..${path.sep}`)
-      && !path.isAbsolute(relative));
-}
-
-function skillRootPath(targetPath: string): string | undefined {
-  const resolvedTarget = path.resolve(targetPath);
-  const marker = `${path.sep}skills${path.sep}`;
-  const markerIndex = resolvedTarget.lastIndexOf(marker);
-  return markerIndex < 0
-    ? undefined
-    : resolvedTarget.slice(0, markerIndex + marker.length - 1);
-}
-
-function skillPackageRoot(targetPath: string): string {
-  const skillRoot = skillRootPath(targetPath);
-  return skillRoot
-    ? path.join(skillRoot, skillPackageName(targetPath))
-    : path.dirname(targetPath);
-}
-
-function skillPackageName(targetPath: string): string {
-  const segments = path.resolve(targetPath).split(path.sep);
-  const skillsIndex = segments.lastIndexOf('skills');
-  return skillsIndex >= 0 && segments[skillsIndex + 1]
-    ? segments[skillsIndex + 1]
-    : path.basename(path.dirname(targetPath));
-}
-
-function symbolicLinkFailureReason(
-  error: unknown,
-): 'dangling' | 'cycle' | 'unclassified' {
-  if (isRecord(error) && error.code === 'ELOOP') return 'cycle';
-  if (isRecord(error) && error.code === 'ENOENT') return 'dangling';
-  return 'unclassified';
-}
-
-function hasPhysicalTargetConflict(
-  linkedFiles: Array<{ file: SourcedDeployFile; linkPath: string }>,
-  resolvedByLink: Map<string, string>,
-  desiredByPath: Map<string, Buffer>,
-): boolean {
-  for (const [linkPath, resolvedPath] of resolvedByLink) {
-    try {
-      if (!fs.statSync(resolvedPath).isDirectory()
-        && linkedFiles.some(({ file, linkPath: fileLinkPath }) =>
-          fileLinkPath === linkPath && path.relative(linkPath, file.targetPath) !== '')) {
-        return true;
-      }
-    } catch {
-      return true;
-    }
-  }
-  return linkedFiles.some(({ file, linkPath }) => {
-    const resolvedPath = resolvedByLink.get(linkPath);
-    if (!resolvedPath) return true;
-    const physicalPath = path.resolve(resolvedPath, path.relative(linkPath, file.targetPath));
-    const directDesired = desiredByPath.get(physicalPath);
-    return directDesired !== undefined && !directDesired.equals(toBuffer(file.content));
+  definitions: ReturnType<typeof createAdapterDefinitions>,
+): {
+  desired: SourcedDeployFile[];
+  desiredForLinkClassification: CanonicalSkillLayoutFile[];
+  projectionChanges: DeployChange[];
+} {
+  const claudeSurface = definitions.find(({ targetId }) => targetId === 'claudeCode')
+    ?.adapter.skillSurface;
+  const codexSurface = definitions.find(({ targetId }) => targetId === 'codex')
+    ?.adapter.skillSurface;
+  const managedLayout = planCanonicalSkillDeviceLayout({
+    files: desired,
+    context,
+    useManagedLinks: useSymlinks
+      && [codexSurface, claudeSurface].some(
+        (surface) => surface?.supportsManagedDirectoryLinks(context.platform) === true,
+      ),
+    claudeSkillRoot: claudeSurface?.destinationRoot(context),
   });
-}
-
-function linkedFilesMatchPhysicalDesired(
-  linkedFiles: Array<{ file: SourcedDeployFile; linkPath: string }>,
-  resolvedByLink: Map<string, string>,
-  desiredByPath: Map<string, Buffer>,
-): boolean {
-  return linkedFiles.every(({ file, linkPath }) => {
-    const resolvedPath = resolvedByLink.get(linkPath);
-    if (!resolvedPath) return false;
-    const physicalPath = path.resolve(resolvedPath, path.relative(linkPath, file.targetPath));
-    return desiredByPath.get(physicalPath)?.equals(toBuffer(file.content)) === true;
+  for (const relative of managedLayout.conflicts) {
+    issues.push({
+      severity: 'error',
+      code: 'deploy.skillsLayout.physicalTargetConflict',
+      message: `Canonical Skill projections disagree about ${relative}.`,
+    });
+  }
+  const projectionChanges: DeployChange[] = [];
+  for (const projection of managedLayout.missingProjections) {
+    const id = selectionId(projection.ide, 'skills', projection.targetPath);
+    projectionChanges.push({
+      id,
+      owner: 'ide',
+      ide: projection.ide,
+      capability: 'skills',
+      name: projection.packageName,
+      targetPath: projection.targetPath,
+      change: 'add',
+      defaultSelected: true,
+      group: 'standard',
+      strategy: 'replace-entire-file',
+      deploymentKind: 'managed-link-projection',
+      dependsOnChangeIds: projection.materializationPaths.map((targetPath) =>
+        selectionId('canonical-store', 'skills', targetPath)),
+      preview: {
+        targetPath: projection.targetPath,
+        kind: 'link',
+        linkTarget: projection.physicalTargetPath,
+      },
+    });
+    mutations.set(id, { linkTarget: projection.physicalTargetPath });
+  }
+  const materialized = managedLayout.materializations.map(({ source, targetPath }) => {
+    const { ide: _ide, ...withoutIde } = source;
+    return {
+      ...withoutIde,
+      owner: 'canonical-store' as const,
+      targetPath,
+      deploymentKind: 'physical-materialization' as const,
+    };
   });
-}
-
-function linkedSkillIssue(
-  outcome: Omit<DeployLinkOutcome, 'status' | 'reason'>,
-  reason: NonNullable<DeployLinkOutcome['reason']>,
-): Issue {
   return {
-    severity: 'error',
-    code: `deploy.skillsLinked.blocked.${outcome.ide}`,
-    message: `Linked external Skills are blocked: ${linkedSkillReason(reason)} (${outcome.affectedFileCount} affected file(s)).`,
-    details: [
-      `Packages: ${packageSummary(outcome.packageNames)}.`,
-      `Links: ${outcome.linkPaths.join(', ')}.`,
-      ...(outcome.resolvedPaths
-        ? [`Resolved targets: ${outcome.resolvedPaths.join(', ')}.`]
-        : []),
-      'MCV will not write through, replace, or manage cleanup beneath this link.',
-    ].join(' '),
+    desired: [...managedLayout.filesOutsideLayout, ...materialized],
+    desiredForLinkClassification: managedLayout.filesForLinkClassification,
+    projectionChanges,
   };
 }
 
-function linkedSkillReason(reason: NonNullable<DeployLinkOutcome['reason']>): string {
-  switch (reason) {
-    case 'divergent': return 'linked content differs from the desired Canonical packages';
-    case 'dangling': return 'the link target is missing';
-    case 'cycle': return 'the link contains a cycle';
-    case 'physical-target-conflict': return 'the link conflicts with a physical Deploy target';
-    case 'unclassified': return 'the link target could not be classified safely';
-  }
-}
-
-function packageSummary(packageNames: string[]): string {
-  return packageNames.length === 1
-    ? `Skill package ${packageNames[0]}`
-    : `${packageNames.length} Skill packages`;
-}
-
-function registerDeployPlan(
+ function registerDeployPlan(
   plan: DeployPlan,
   mutations: Map<string, DeployMutation>,
 ): void {
@@ -619,6 +517,21 @@ export async function applyDeployPlan(
   }
 
   const selected = new Set(selectedIds);
+  const missingDependencies = plan.changes.flatMap((change) =>
+    selected.has(change.id)
+      ? (change.dependsOnChangeIds ?? []).filter(
+        (dependencyId) => knownIds.has(dependencyId) && !selected.has(dependencyId),
+      )
+      : []);
+  if (missingDependencies.length > 0) {
+    return failedDeployResult(plan.repositoryPath, {
+      code: 'deploy.invalidSelection',
+      message: 'A managed Skill projection cannot be selected without its pending Store materialization.',
+      technicalDetails: `Missing selected dependencies: ${[...new Set(missingDependencies)].join(', ')}`,
+      nextActions: ['Select every pending physical materialization required by the managed projection.'],
+    });
+  }
+
   const blocking = deployBlockingIssues(plan, selection, options);
   if (blocking.length > 0) return blockedDeployResult(plan, blocking);
 
@@ -668,6 +581,7 @@ export async function applyDeployPlan(
       issues: [],
       nextActions: [],
       data: { appliedChangeIds: [], writtenPaths: [], deletedPaths: [] },
+      linkOutcomes: plan.linkOutcomes,
     };
   }
   let backupPath: string | undefined;
@@ -697,8 +611,9 @@ export async function applyDeployPlan(
       prepared,
       backupPath,
       options.writeFile ?? ((targetPath, content) => atomicWriteFile(targetPath, content)),
-      options.removeFile ?? ((targetPath) => fs.rmSync(targetPath, { force: true })),
+      options.removeFile ?? ((targetPath) => fs.rmSync(targetPath, { recursive: true, force: true })),
       options.restoreFile ?? ((targetPath, content) => atomicWriteFile(targetPath, content)),
+      options.createSymbolicLink ?? ((target, linkPath) => fs.symlinkSync(target, linkPath, 'dir')),
       () => {
         finalizeDeployBackup(backupPath as string);
         updateDeployState(context, plan.repositoryPath as string, selectedChanges);
@@ -717,8 +632,10 @@ export async function applyDeployPlan(
         appliedChangeIds: selectedIds,
         writtenPaths: prepared.filter((item) => item.change === 'write').map((item) => item.targetPath),
         deletedPaths: prepared.filter((item) => item.change === 'delete').map((item) => item.targetPath),
+        projectionPaths: prepared.filter((item) => item.change === 'link').map((item) => item.targetPath),
         backupPath,
       },
+      linkOutcomes: plan.linkOutcomes,
     };
   } catch (error) {
     activeDeployPlans.delete(plan);
@@ -780,6 +697,8 @@ function deploySnapshotChange(change: DeployChange): unknown {
     id: change.id,
     change: change.change,
     capability: change.capability,
+    deploymentKind: change.deploymentKind,
+    dependsOnChangeIds: change.dependsOnChangeIds,
     targetPath: change.targetPath,
     preview: change.preview,
   };
@@ -798,12 +717,25 @@ function prepareDeployWrites(
       return { targetPath, change: 'delete' as const };
     }
     const mutation = mutations.get(targetChanges[0].id);
+    if (targetChanges.some((change) => change.deploymentKind === 'managed-link-projection')) {
+      if (!mutation?.linkTarget) {
+        throw new Error(`Missing active Deploy link mutation for ${targetChanges[0].id}.`);
+      }
+      return {
+        targetPath,
+        change: 'link' as const,
+        linkTarget: mutation.linkTarget,
+      };
+    }
     if (!mutation?.content) throw new Error(`Missing active Deploy mutation for ${targetChanges[0].id}.`);
     return {
       targetPath,
       change: 'write' as const,
       content: composeSelectedContent(targetPath, targetChanges, mutation.content),
     };
+  }).sort((left, right) => {
+    const order = { write: 0, delete: 1, link: 2 } as const;
+    return order[left.change] - order[right.change];
   });
 }
 
@@ -822,6 +754,9 @@ function composeSelectedContent(
     : {};
   const desired = parseStructuredObject(desiredContent.toString('utf8'), format, targetPath);
   const selectedCapabilities = new Set(changes.map((change) => change.capability));
+  if (changes[0].owner !== 'ide') {
+    throw new Error('Canonical Store content cannot use managed structured merge.');
+  }
   const managedKey = managedTopLevelKey(changes[0].ide);
   const result: Record<string, unknown> = { ...current };
   if (selectedCapabilities.has('mcp')) copyStructuredKey(desired, result, managedKey);
@@ -859,13 +794,15 @@ function createDeployBackup(
     const files = changes.map((change, index): DeployBackupEntry => {
       const expected = plan.preconditions[`target:${change.id}`];
       if (change.change === 'add') {
-        if (fs.existsSync(change.targetPath)) throw new StaleDeployPlanError('A selected add target appeared during backup.');
+        if (deployPathExists(change.targetPath)) throw new StaleDeployPlanError('A selected add target appeared during backup.');
         return { changeId: change.id, action: change.change, originalPath: change.targetPath };
       }
       const relativeBackupPath = path.join('files', `${index}-${path.basename(change.targetPath)}`);
       const copiedPath = path.join(backupPath, relativeBackupPath);
       copyFile(change.targetPath, copiedPath);
-      if (hashFile(copiedPath) !== expected || hashFile(change.targetPath) !== expected) {
+      const beforeHash = hashFile(change.targetPath);
+      if (hashFile(copiedPath) !== beforeHash
+        || hashDeviceTopologyNode(change.targetPath) !== expected) {
         throw new StaleDeployPlanError('A selected target changed while its backup was being verified.');
       }
       return {
@@ -873,7 +810,7 @@ function createDeployBackup(
         action: change.change,
         originalPath: change.targetPath,
         backupPath: relativeBackupPath,
-        beforeHash: expected,
+        beforeHash,
       };
     });
     const manifest: DeployBackupManifest = {
@@ -900,9 +837,7 @@ function assertSelectedPreconditions(
   const repositoryHash = plan.repositoryPath ? hashRepositoryInputs(plan.repositoryPath) : undefined;
   const inventory = readState(context).managedInventory ?? {};
   for (const change of changes) {
-    const targetHash = fs.existsSync(change.targetPath)
-      ? hashFile(change.targetPath)
-      : hashText('<missing>');
+    const targetHash = hashDeviceTopologyNode(change.targetPath);
     const sourceHash = change.change === 'delete' && inventory[change.targetPath] !== undefined
       ? hashText(stableValue(inventory[change.targetPath]))
       : repositoryHash;
@@ -919,20 +854,40 @@ function applyPreparedDeployWrites(
   writeFile: (targetPath: string, content: Buffer) => void,
   removeFile: (targetPath: string) => void,
   restoreFile: (targetPath: string, content: Buffer) => void,
+  createSymbolicLink: (target: string, linkPath: string) => void,
   commit: () => void,
 ): void {
   const attemptedPaths = new Set<string>();
+  const createdDirectories = new Set<string>();
   try {
     for (const write of writes) {
-      attemptedPaths.add(write.targetPath);
-      if (write.change === 'delete') removeFile(write.targetPath);
-      else writeFile(write.targetPath, write.content as Buffer);
+      for (const directory of missingParentDirectories(write.targetPath)) {
+        createdDirectories.add(directory);
+      }
+      if (write.change === 'delete') {
+        attemptedPaths.add(write.targetPath);
+        removeFile(write.targetPath);
+      }
+      else if (write.change === 'link') {
+        fs.mkdirSync(path.dirname(write.targetPath), { recursive: true });
+        createSymbolicLink(write.linkTarget as string, write.targetPath);
+        attemptedPaths.add(write.targetPath);
+        verifyManagedProjection(write.targetPath, write.linkTarget as string);
+      }
+      else {
+        attemptedPaths.add(write.targetPath);
+        writeFile(write.targetPath, write.content as Buffer);
+        if (!fs.readFileSync(write.targetPath).equals(write.content as Buffer)) {
+          throw new Error(`Deploy write verification failed for ${write.targetPath}.`);
+        }
+      }
     }
     commit();
   } catch (error) {
     const rollbackErrors = rollbackDeployWrites(
       backupPath,
       attemptedPaths,
+      createdDirectories,
       removeFile,
       restoreFile,
     );
@@ -948,6 +903,7 @@ function applyPreparedDeployWrites(
 function rollbackDeployWrites(
   backupPath: string,
   attemptedPaths: Set<string>,
+  createdDirectories: Set<string>,
   removeFile: (targetPath: string) => void,
   restoreFile: (targetPath: string, content: Buffer) => void,
 ): string[] {
@@ -967,13 +923,38 @@ function rollbackDeployWrites(
       errors.push(`${entry.originalPath}: ${errorMessage(error)}`);
     }
   }
+  for (const directory of [...createdDirectories].sort(
+    (left, right) => right.length - left.length,
+  )) {
+    try {
+      fs.rmdirSync(directory);
+    } catch (error) {
+      if (!isRecord(error) || !['ENOENT', 'ENOTEMPTY'].includes(String(error.code))) {
+        errors.push(`${directory}: ${errorMessage(error)}`);
+      }
+    }
+  }
   return errors;
+}
+
+function missingParentDirectories(targetPath: string): string[] {
+  const missing: string[] = [];
+  let current = path.dirname(targetPath);
+  while (!deployPathExists(current) && current !== path.dirname(current)) {
+    missing.push(current);
+    current = path.dirname(current);
+  }
+  return missing;
 }
 
 function finalizeDeployBackup(backupPath: string): void {
   const manifest = readDeployBackupManifest(backupPath);
   for (const entry of manifest.files) {
-    if (fs.existsSync(entry.originalPath)) entry.afterHash = hashFile(entry.originalPath);
+    if (!deployPathExists(entry.originalPath)) continue;
+    const stat = fs.lstatSync(entry.originalPath);
+    entry.afterHash = stat.isFile() && !stat.isSymbolicLink()
+      ? hashFile(entry.originalPath)
+      : hashDeviceTopologyNode(entry.originalPath);
   }
   manifest.status = 'complete';
   manifest.completedAt = new Date().toISOString();
@@ -1009,17 +990,18 @@ function updateDeployState(
   const baselineFiles = { ...(state.baselineSnapshot?.files ?? {}) };
   const managedInventory = { ...(state.managedInventory ?? {}) };
   for (const change of changes) {
-    if (change.change === 'delete' || !fs.existsSync(change.targetPath)) {
+    if (change.change === 'delete' || !deployPathExists(change.targetPath)) {
       delete baselineFiles[change.targetPath];
       delete managedInventory[change.targetPath];
     } else {
-      const hash = hashFile(change.targetPath);
+      const hash = hashDeviceTopologyNode(change.targetPath);
       baselineFiles[change.targetPath] = hash;
       managedInventory[change.targetPath] = { source: repositoryPath, hash };
     }
   }
   const lastDeploySelection: NonNullable<typeof state.lastDeploySelection> = {};
   for (const change of changes) {
+    if (change.owner === 'canonical-store') continue;
     const capabilities = lastDeploySelection[change.ide] ?? [];
     if (!capabilities.includes(change.capability)) capabilities.push(change.capability);
     lastDeploySelection[change.ide] = capabilities;
@@ -1080,6 +1062,7 @@ function blockedDeployResult(plan: DeployPlan, issues: Issue[]): DeployResult {
     status: 'blocked',
     repositoryPath: plan.repositoryPath,
     changes: [],
+    linkOutcomes: plan.linkOutcomes,
     issues,
     nextActions: issues.some((issue) => issue.severity === 'warning')
       ? ['Confirm every warning explicitly before applying the Deploy Plan.']
@@ -1113,7 +1096,7 @@ function freezeDeployPlan(plan: DeployPlan): DeployPlan {
 
 function preview(
   targetPath: string,
-  ide: DeployChange['ide'],
+  ide: string,
   capability: ConfigurationCapability,
   next: Buffer,
   previous: Buffer | undefined,
@@ -1149,7 +1132,7 @@ function preview(
 
 function renderSafeDiff(
   targetPath: string,
-  ide: DeployChange['ide'],
+  ide: string,
   capability: ConfigurationCapability,
   previous: string | undefined,
   next: string,
@@ -1185,14 +1168,16 @@ function structuredFormat(targetPath: string): StructuredFormat | undefined {
   return undefined;
 }
 
-const MCP_PATH_BY_IDE: Record<DeployChange['ide'], string> = {
+const MCP_PATH_BY_IDE: Partial<Record<DeployIde, string>> = {
   codex: CODEX_MCP_PATH,
   'claude-code': CLAUDE_CODE_MCP_PATH,
   gemini: GEMINI_MCP_PATH,
 };
 
-function managedTopLevelKey(ide: DeployChange['ide']): string {
-  return MCP_PATH_BY_IDE[ide].slice(2);
+function managedTopLevelKey(ide: string): string {
+  const managedPath = MCP_PATH_BY_IDE[ide as DeployIde];
+  if (!managedPath) throw new Error(`${ide} does not have a managed structured path.`);
+  return managedPath.slice(2);
 }
 
 function stableValue(value: unknown): string {
@@ -1312,6 +1297,30 @@ function selectionId(ide: string, capability: string, targetPath: string): strin
   return `deploy-${hashText(`${ide}\0${capability}\0${path.resolve(targetPath)}`).slice(0, 16)}`;
 }
 
+function canonicalTargetKey(target: CanonicalSkillTarget): string {
+  return target.owner === 'canonical-store' ? 'canonical-store' : target.ide;
+}
+
+function canonicalTarget(target: CanonicalSkillTarget): CanonicalSkillTarget {
+  return target.owner === 'canonical-store'
+    ? { owner: 'canonical-store' }
+    : { owner: 'ide', ide: target.ide };
+}
+
+function verifyManagedProjection(linkPath: string, expectedTarget: string): void {
+  const stat = fs.lstatSync(linkPath);
+  if (!stat.isSymbolicLink()) {
+    throw new Error(`Deploy link verification failed: ${linkPath} is not a symbolic link.`);
+  }
+  const rawTarget = fs.readlinkSync(linkPath);
+  if (rawTarget !== expectedTarget) {
+    throw new Error(`Deploy link verification failed: ${linkPath} targets ${rawTarget}, expected ${expectedTarget}.`);
+  }
+  if (fs.realpathSync(linkPath) !== fs.realpathSync(expectedTarget)) {
+    throw new Error(`Deploy link verification failed: ${linkPath} does not resolve to ${expectedTarget}.`);
+  }
+}
+
 function displayName(targetPath: string, capability: ConfigurationCapability): string {
   if (capability === 'rules') return 'Shared Rules';
   if (capability === 'skills') {
@@ -1329,28 +1338,33 @@ function compareChanges(left: DeployChange, right: DeployChange): number {
     rules: 0, skills: 1, mcp: 2, native: 3,
   };
   return groupOrder[left.group] - groupOrder[right.group]
-    || left.ide.localeCompare(right.ide)
+    || canonicalTargetKey(left).localeCompare(canonicalTargetKey(right))
     || capabilityOrder[left.capability] - capabilityOrder[right.capability]
     || left.targetPath.localeCompare(right.targetPath);
 }
 
-function ideName(targetId: TargetId): DeployChange['ide'] {
+function ideName(targetId: TargetId): DeployIde {
   if (targetId === 'claudeCode') return 'claude-code';
   return targetId;
 }
 
-function targetIdForIde(ide: DeployChange['ide']): TargetId {
+function targetIdForIde(
+  ide: DeployIde,
+): TargetId {
   return ide === 'claude-code' ? 'claudeCode' : ide;
 }
 
-function inferIde(targetPath: string, context: DeviceContext): DeployChange['ide'] | undefined {
+function inferDeployTarget(
+  targetPath: string,
+  context: DeviceContext,
+): CanonicalSkillTarget | undefined {
   const resolved = path.resolve(targetPath);
-  const roots: Array<[DeployChange['ide'], string]> = [
-    ['codex', path.resolve(context.env.CODEX_HOME || path.join(context.homeDir, '.codex'))],
-    ['codex', path.resolve(context.homeDir, '.agents', 'skills')],
-    ['claude-code', path.resolve(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'))],
-    ['claude-code', path.resolve(context.homeDir, '.claude.json')],
-    ['gemini', path.resolve(context.homeDir, '.gemini')],
+  const roots: Array<[CanonicalSkillTarget, string]> = [
+    [{ owner: 'ide', ide: 'codex' }, path.resolve(context.env.CODEX_HOME || path.join(context.homeDir, '.codex'))],
+    [{ owner: 'canonical-store' }, path.resolve(context.homeDir, '.agents', 'skills')],
+    [{ owner: 'ide', ide: 'claude-code' }, path.resolve(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'))],
+    [{ owner: 'ide', ide: 'claude-code' }, path.resolve(context.homeDir, '.claude.json')],
+    [{ owner: 'ide', ide: 'gemini' }, path.resolve(context.homeDir, '.gemini')],
   ];
   return roots.find(([, root]) => resolved === root || resolved.startsWith(`${root}${path.sep}`))?.[0];
 }

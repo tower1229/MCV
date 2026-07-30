@@ -13,6 +13,7 @@ import { getStateFilePath, readState, writeState } from '../utils/state.js';
 import { parseStructuredObject, stringifyStructuredObject, } from '../utils/structured-config.js';
 import { resolveVariableDefinitions } from '../utils/variables.js';
 import { findLegacyCodexSkillDuplicates } from '../utils/deploy-skills.js';
+import { classifyCanonicalSkillLinks, deployPathExists, hashDeviceTopologyNode, planCanonicalSkillDeviceLayout, } from '../core/canonical-skill-device-layout.js';
 import { OPERATION_SCHEMA_VERSION, } from './contracts.js';
 const activeDeployPlans = new WeakMap();
 export async function createDeployPlan(context) {
@@ -83,15 +84,18 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
             const semantics = inferDeploymentSemantics(file.targetPath, definition.targetId, repositoryPath, context);
             return semantics.capabilities.map((capability) => ({
                 ...file,
+                owner: 'ide',
                 ide: ideName(definition.targetId),
                 capability,
                 strategy: semantics.strategy,
+                deploymentKind: capability === 'skills' ? 'copy-projection' : 'ordinary-file',
             }));
         });
     }))).flat();
     const issues = [];
     const linkOutcomes = [];
-    const safeDesired = desired.filter((file) => {
+    const layout = planCanonicalSkillLayout(desired, context, manifest.deploy.useSymlinks, mutations, issues, definitions);
+    const safeDesired = layout.desired.filter((file) => {
         const linkPath = findSymbolicLinkAncestor(file.targetPath);
         if (!linkPath)
             return true;
@@ -105,21 +109,24 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
         });
         return false;
     });
-    classifyLinkedSkillPackages(desired, linkOutcomes, issues);
+    const inventory = readState(context).managedInventory ?? {};
+    const linkedSkills = classifyCanonicalSkillLinks(layout.desiredForLinkClassification, (linkPath) => inventory[linkPath]?.hash === hashDeviceTopologyNode(linkPath));
+    linkOutcomes.push(...linkedSkills.outcomes);
+    issues.push(...linkedSkills.issues);
     const changes = safeDesired.flatMap((file) => {
         const previous = fs.existsSync(file.targetPath) ? fs.readFileSync(file.targetPath) : undefined;
         const next = toBuffer(file.content);
         if (previous?.equals(next))
             return [];
-        const filePreview = preview(file.targetPath, file.ide, file.capability, next, previous, issues);
+        const filePreview = preview(file.targetPath, canonicalTargetKey(file), file.capability, next, previous, issues);
         if (filePreview.kind === 'text' && filePreview.diff.length === 0)
             return [];
         const change = previous === undefined ? 'add' : 'modify';
-        const id = selectionId(file.ide, file.capability, file.targetPath);
+        const id = selectionId(canonicalTargetKey(file), file.capability, file.targetPath);
         mutations.set(id, { content: next });
         return [{
                 id,
-                ide: file.ide,
+                ...canonicalTarget(file),
                 capability: file.capability,
                 name: displayName(file.targetPath, file.capability),
                 targetPath: file.targetPath,
@@ -127,9 +134,11 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
                 defaultSelected: true,
                 group: 'standard',
                 strategy: file.strategy,
+                deploymentKind: file.deploymentKind,
                 preview: filePreview,
             }];
     });
+    changes.push(...layout.projectionChanges);
     const legacyDuplicates = findLegacyCodexSkillDuplicates(context, safeDesired, definitions.some(({ targetId }) => targetId === 'codex'));
     if (legacyDuplicates.names.length > 0) {
         issues.push({
@@ -140,6 +149,7 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
         for (const targetPath of legacyDuplicates.files) {
             changes.push({
                 id: selectionId('codex', 'skills', targetPath),
+                owner: 'ide',
                 ide: 'codex',
                 capability: 'skills',
                 name: displayName(targetPath, 'skills'),
@@ -148,6 +158,7 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
                 defaultSelected: false,
                 group: 'advanced',
                 strategy: 'replace-entire-file',
+                deploymentKind: 'copy-projection',
                 preview: preview(targetPath, 'codex', 'skills', Buffer.alloc(0), fs.readFileSync(targetPath), issues),
             });
             mutations.set(selectionId('codex', 'skills', targetPath), {});
@@ -161,16 +172,19 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
             continue;
         if (findSymbolicLinkAncestor(targetPath))
             continue;
-        const ide = inferIde(targetPath, context);
-        if (!ide)
+        const target = inferDeployTarget(targetPath, context);
+        if (!target)
             continue;
-        const semantics = inferDeploymentSemantics(targetPath, targetIdForIde(ide), repositoryPath, context);
+        const targetKey = canonicalTargetKey(target);
+        const semantics = target.owner === 'canonical-store'
+            ? { capabilities: ['skills'], strategy: 'replace-entire-file' }
+            : inferDeploymentSemantics(targetPath, targetIdForIde(target.ide), repositoryPath, context);
         const capability = semantics.capabilities[0];
         if (semantics.strategy !== 'replace-entire-file' || !capability)
             continue;
         const deletion = {
-            id: selectionId(ide, capability, targetPath),
-            ide,
+            id: selectionId(targetKey, capability, targetPath),
+            ...canonicalTarget(target),
             capability,
             name: displayName(targetPath, capability),
             targetPath,
@@ -178,7 +192,8 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
             defaultSelected: false,
             group: 'advanced',
             strategy: semantics.strategy,
-            preview: preview(targetPath, ide, capability, Buffer.alloc(0), fs.readFileSync(targetPath), issues),
+            deploymentKind: capability === 'skills' ? 'copy-projection' : 'ordinary-file',
+            preview: preview(targetPath, targetKey, capability, Buffer.alloc(0), fs.readFileSync(targetPath), issues),
         };
         changes.push(deletion);
         mutations.set(deletion.id, {});
@@ -189,7 +204,7 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
     const preconditions = Object.fromEntries(changes.flatMap((change) => {
         return [
             [`source:${change.id}`, sourcePreconditions.get(change.id) ?? repositorySourceHash],
-            [`target:${change.id}`, fs.existsSync(change.targetPath) ? hashFile(change.targetPath) : hashText('<missing>')],
+            [`target:${change.id}`, hashDeviceTopologyNode(change.targetPath)],
         ];
     }));
     const blocked = issues.some((issue) => issue.severity === 'decisionRequired' || issue.severity === 'error');
@@ -209,195 +224,63 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
             : [],
     };
 }
-function classifyLinkedSkillPackages(desired, outcomes, issues) {
-    const linkedGroups = new Map();
-    for (const file of desired) {
-        if (file.capability !== 'skills')
-            continue;
-        const linkPath = findSymbolicLinkAncestor(file.targetPath);
-        if (!linkPath)
-            continue;
-        const skillRoot = skillRootPath(file.targetPath);
-        const withinSkillRoot = skillRoot !== undefined
-            && isPathWithin(skillRoot, linkPath);
-        const sharedRoot = withinSkillRoot
-            && path.resolve(linkPath) === path.resolve(skillRoot);
-        const groupingPath = sharedRoot
-            ? linkPath
-            : withinSkillRoot
-                ? skillPackageRoot(file.targetPath)
-                : linkPath;
-        const scope = sharedRoot ? 'shared-link-root' : 'skill-package';
-        const key = `${file.ide}\0${path.resolve(groupingPath)}`;
-        const group = linkedGroups.get(key) ?? { scope, files: [] };
-        group.files.push({ file, linkPath });
-        linkedGroups.set(key, group);
-    }
-    const desiredByPath = new Map(desired
-        .filter((file) => !findSymbolicLinkAncestor(file.targetPath))
-        .map((file) => [path.resolve(file.targetPath), toBuffer(file.content)]));
-    for (const { scope, files } of linkedGroups.values()) {
-        const first = files[0].file;
-        const linkPaths = [...new Set(files.map((entry) => entry.linkPath))].sort();
-        const packageNames = [...new Set(files.map(({ file }) => skillPackageName(file.targetPath)))]
-            .sort();
-        const baseOutcome = {
-            ownership: 'external',
-            scope,
-            ide: first.ide,
-            linkPath: linkPaths[0],
-            linkPaths,
-            packageNames,
-            affectedFileCount: files.length,
-        };
-        if (files.some(({ file, linkPath }) => !isLinkWithinSkillRoot(file.targetPath, linkPath))) {
-            outcomes.push({ ...baseOutcome, status: 'blocked', reason: 'unclassified' });
-            issues.push(linkedSkillIssue(baseOutcome, 'unclassified'));
-            continue;
-        }
-        const resolvedByLink = new Map();
-        let resolutionFailure;
-        try {
-            for (const linkPath of linkPaths) {
-                resolvedByLink.set(linkPath, fs.realpathSync(linkPath));
-            }
-        }
-        catch (error) {
-            resolutionFailure = symbolicLinkFailureReason(error);
-        }
-        if (resolutionFailure) {
-            outcomes.push({ ...baseOutcome, status: 'blocked', reason: resolutionFailure });
-            issues.push(linkedSkillIssue(baseOutcome, resolutionFailure));
-            continue;
-        }
-        const resolvedPaths = [...new Set(resolvedByLink.values())].sort();
-        const resolution = {
-            ...(resolvedPaths.length === 1 ? { resolvedPath: resolvedPaths[0] } : {}),
-            resolvedPaths,
-        };
-        let matches = true;
-        try {
-            matches = files.every(({ file }) => fs.readFileSync(file.targetPath).equals(toBuffer(file.content)));
-        }
-        catch {
-            matches = false;
-        }
-        const physicalTargetConflict = hasPhysicalTargetConflict(files, resolvedByLink, desiredByPath);
-        const followsEquivalentPhysicalTarget = linkedFilesMatchPhysicalDesired(files, resolvedByLink, desiredByPath);
-        if (!physicalTargetConflict && (matches || followsEquivalentPhysicalTarget)) {
-            outcomes.push({ ...baseOutcome, ...resolution, status: 'satisfied-via-link' });
-            issues.push({
-                severity: 'notice',
-                code: `deploy.skillsLinked.satisfied.${first.ide}`,
-                message: `Satisfied via link: ${packageSummary(packageNames)} (${files.length} affected file(s)).`,
-                details: `${linkPaths.length} external link(s) resolve to ${resolvedPaths.join(', ')}; MCV will not take ownership or write through them.`,
-            });
-            continue;
-        }
-        const reason = physicalTargetConflict
-            ? 'physical-target-conflict'
-            : 'divergent';
-        outcomes.push({ ...baseOutcome, ...resolution, status: 'blocked', reason });
-        issues.push(linkedSkillIssue({ ...baseOutcome, ...resolution }, reason));
-    }
-}
-function isLinkWithinSkillRoot(targetPath, linkPath) {
-    const skillRoot = skillRootPath(targetPath);
-    return skillRoot !== undefined && isPathWithin(skillRoot, linkPath);
-}
-function isPathWithin(root, candidate) {
-    const relative = path.relative(path.resolve(root), path.resolve(candidate));
-    return relative === ''
-        || (relative !== '..'
-            && !relative.startsWith(`..${path.sep}`)
-            && !path.isAbsolute(relative));
-}
-function skillRootPath(targetPath) {
-    const resolvedTarget = path.resolve(targetPath);
-    const marker = `${path.sep}skills${path.sep}`;
-    const markerIndex = resolvedTarget.lastIndexOf(marker);
-    return markerIndex < 0
-        ? undefined
-        : resolvedTarget.slice(0, markerIndex + marker.length - 1);
-}
-function skillPackageRoot(targetPath) {
-    const skillRoot = skillRootPath(targetPath);
-    return skillRoot
-        ? path.join(skillRoot, skillPackageName(targetPath))
-        : path.dirname(targetPath);
-}
-function skillPackageName(targetPath) {
-    const segments = path.resolve(targetPath).split(path.sep);
-    const skillsIndex = segments.lastIndexOf('skills');
-    return skillsIndex >= 0 && segments[skillsIndex + 1]
-        ? segments[skillsIndex + 1]
-        : path.basename(path.dirname(targetPath));
-}
-function symbolicLinkFailureReason(error) {
-    if (isRecord(error) && error.code === 'ELOOP')
-        return 'cycle';
-    if (isRecord(error) && error.code === 'ENOENT')
-        return 'dangling';
-    return 'unclassified';
-}
-function hasPhysicalTargetConflict(linkedFiles, resolvedByLink, desiredByPath) {
-    for (const [linkPath, resolvedPath] of resolvedByLink) {
-        try {
-            if (!fs.statSync(resolvedPath).isDirectory()
-                && linkedFiles.some(({ file, linkPath: fileLinkPath }) => fileLinkPath === linkPath && path.relative(linkPath, file.targetPath) !== '')) {
-                return true;
-            }
-        }
-        catch {
-            return true;
-        }
-    }
-    return linkedFiles.some(({ file, linkPath }) => {
-        const resolvedPath = resolvedByLink.get(linkPath);
-        if (!resolvedPath)
-            return true;
-        const physicalPath = path.resolve(resolvedPath, path.relative(linkPath, file.targetPath));
-        const directDesired = desiredByPath.get(physicalPath);
-        return directDesired !== undefined && !directDesired.equals(toBuffer(file.content));
+function planCanonicalSkillLayout(desired, context, useSymlinks, mutations, issues, definitions) {
+    const claudeSurface = definitions.find(({ targetId }) => targetId === 'claudeCode')
+        ?.adapter.skillSurface;
+    const codexSurface = definitions.find(({ targetId }) => targetId === 'codex')
+        ?.adapter.skillSurface;
+    const managedLayout = planCanonicalSkillDeviceLayout({
+        files: desired,
+        context,
+        useManagedLinks: useSymlinks
+            && [codexSurface, claudeSurface].some((surface) => surface?.supportsManagedDirectoryLinks(context.platform) === true),
+        claudeSkillRoot: claudeSurface?.destinationRoot(context),
     });
-}
-function linkedFilesMatchPhysicalDesired(linkedFiles, resolvedByLink, desiredByPath) {
-    return linkedFiles.every(({ file, linkPath }) => {
-        const resolvedPath = resolvedByLink.get(linkPath);
-        if (!resolvedPath)
-            return false;
-        const physicalPath = path.resolve(resolvedPath, path.relative(linkPath, file.targetPath));
-        return desiredByPath.get(physicalPath)?.equals(toBuffer(file.content)) === true;
+    for (const relative of managedLayout.conflicts) {
+        issues.push({
+            severity: 'error',
+            code: 'deploy.skillsLayout.physicalTargetConflict',
+            message: `Canonical Skill projections disagree about ${relative}.`,
+        });
+    }
+    const projectionChanges = [];
+    for (const projection of managedLayout.missingProjections) {
+        const id = selectionId(projection.ide, 'skills', projection.targetPath);
+        projectionChanges.push({
+            id,
+            owner: 'ide',
+            ide: projection.ide,
+            capability: 'skills',
+            name: projection.packageName,
+            targetPath: projection.targetPath,
+            change: 'add',
+            defaultSelected: true,
+            group: 'standard',
+            strategy: 'replace-entire-file',
+            deploymentKind: 'managed-link-projection',
+            dependsOnChangeIds: projection.materializationPaths.map((targetPath) => selectionId('canonical-store', 'skills', targetPath)),
+            preview: {
+                targetPath: projection.targetPath,
+                kind: 'link',
+                linkTarget: projection.physicalTargetPath,
+            },
+        });
+        mutations.set(id, { linkTarget: projection.physicalTargetPath });
+    }
+    const materialized = managedLayout.materializations.map(({ source, targetPath }) => {
+        const { ide: _ide, ...withoutIde } = source;
+        return {
+            ...withoutIde,
+            owner: 'canonical-store',
+            targetPath,
+            deploymentKind: 'physical-materialization',
+        };
     });
-}
-function linkedSkillIssue(outcome, reason) {
     return {
-        severity: 'error',
-        code: `deploy.skillsLinked.blocked.${outcome.ide}`,
-        message: `Linked external Skills are blocked: ${linkedSkillReason(reason)} (${outcome.affectedFileCount} affected file(s)).`,
-        details: [
-            `Packages: ${packageSummary(outcome.packageNames)}.`,
-            `Links: ${outcome.linkPaths.join(', ')}.`,
-            ...(outcome.resolvedPaths
-                ? [`Resolved targets: ${outcome.resolvedPaths.join(', ')}.`]
-                : []),
-            'MCV will not write through, replace, or manage cleanup beneath this link.',
-        ].join(' '),
+        desired: [...managedLayout.filesOutsideLayout, ...materialized],
+        desiredForLinkClassification: managedLayout.filesForLinkClassification,
+        projectionChanges,
     };
-}
-function linkedSkillReason(reason) {
-    switch (reason) {
-        case 'divergent': return 'linked content differs from the desired Canonical packages';
-        case 'dangling': return 'the link target is missing';
-        case 'cycle': return 'the link contains a cycle';
-        case 'physical-target-conflict': return 'the link conflicts with a physical Deploy target';
-        case 'unclassified': return 'the link target could not be classified safely';
-    }
-}
-function packageSummary(packageNames) {
-    return packageNames.length === 1
-        ? `Skill package ${packageNames[0]}`
-        : `${packageNames.length} Skill packages`;
 }
 function registerDeployPlan(plan, mutations) {
     freezeDeployPlan(plan);
@@ -420,6 +303,17 @@ export async function applyDeployPlan(context, plan, selection, options = {}) {
         });
     }
     const selected = new Set(selectedIds);
+    const missingDependencies = plan.changes.flatMap((change) => selected.has(change.id)
+        ? (change.dependsOnChangeIds ?? []).filter((dependencyId) => knownIds.has(dependencyId) && !selected.has(dependencyId))
+        : []);
+    if (missingDependencies.length > 0) {
+        return failedDeployResult(plan.repositoryPath, {
+            code: 'deploy.invalidSelection',
+            message: 'A managed Skill projection cannot be selected without its pending Store materialization.',
+            technicalDetails: `Missing selected dependencies: ${[...new Set(missingDependencies)].join(', ')}`,
+            nextActions: ['Select every pending physical materialization required by the managed projection.'],
+        });
+    }
     const blocking = deployBlockingIssues(plan, selection, options);
     if (blocking.length > 0)
         return blockedDeployResult(plan, blocking);
@@ -464,6 +358,7 @@ export async function applyDeployPlan(context, plan, selection, options = {}) {
             issues: [],
             nextActions: [],
             data: { appliedChangeIds: [], writtenPaths: [], deletedPaths: [] },
+            linkOutcomes: plan.linkOutcomes,
         };
     }
     let backupPath;
@@ -484,7 +379,7 @@ export async function applyDeployPlan(context, plan, selection, options = {}) {
     }
     try {
         assertSelectedPreconditions(context, plan, selectedChanges);
-        applyPreparedDeployWrites(prepared, backupPath, options.writeFile ?? ((targetPath, content) => atomicWriteFile(targetPath, content)), options.removeFile ?? ((targetPath) => fs.rmSync(targetPath, { force: true })), options.restoreFile ?? ((targetPath, content) => atomicWriteFile(targetPath, content)), () => {
+        applyPreparedDeployWrites(prepared, backupPath, options.writeFile ?? ((targetPath, content) => atomicWriteFile(targetPath, content)), options.removeFile ?? ((targetPath) => fs.rmSync(targetPath, { recursive: true, force: true })), options.restoreFile ?? ((targetPath, content) => atomicWriteFile(targetPath, content)), options.createSymbolicLink ?? ((target, linkPath) => fs.symlinkSync(target, linkPath, 'dir')), () => {
             finalizeDeployBackup(backupPath);
             updateDeployState(context, plan.repositoryPath, selectedChanges);
         });
@@ -501,8 +396,10 @@ export async function applyDeployPlan(context, plan, selection, options = {}) {
                 appliedChangeIds: selectedIds,
                 writtenPaths: prepared.filter((item) => item.change === 'write').map((item) => item.targetPath),
                 deletedPaths: prepared.filter((item) => item.change === 'delete').map((item) => item.targetPath),
+                projectionPaths: prepared.filter((item) => item.change === 'link').map((item) => item.targetPath),
                 backupPath,
             },
+            linkOutcomes: plan.linkOutcomes,
         };
     }
     catch (error) {
@@ -557,6 +454,8 @@ function deploySnapshotChange(change) {
         id: change.id,
         change: change.change,
         capability: change.capability,
+        deploymentKind: change.deploymentKind,
+        dependsOnChangeIds: change.dependsOnChangeIds,
         targetPath: change.targetPath,
         preview: change.preview,
     };
@@ -571,6 +470,16 @@ function prepareDeployWrites(changes, mutations) {
             return { targetPath, change: 'delete' };
         }
         const mutation = mutations.get(targetChanges[0].id);
+        if (targetChanges.some((change) => change.deploymentKind === 'managed-link-projection')) {
+            if (!mutation?.linkTarget) {
+                throw new Error(`Missing active Deploy link mutation for ${targetChanges[0].id}.`);
+            }
+            return {
+                targetPath,
+                change: 'link',
+                linkTarget: mutation.linkTarget,
+            };
+        }
         if (!mutation?.content)
             throw new Error(`Missing active Deploy mutation for ${targetChanges[0].id}.`);
         return {
@@ -578,6 +487,9 @@ function prepareDeployWrites(changes, mutations) {
             change: 'write',
             content: composeSelectedContent(targetPath, targetChanges, mutation.content),
         };
+    }).sort((left, right) => {
+        const order = { write: 0, delete: 1, link: 2 };
+        return order[left.change] - order[right.change];
     });
 }
 function composeSelectedContent(targetPath, changes, desiredContent) {
@@ -592,6 +504,9 @@ function composeSelectedContent(targetPath, changes, desiredContent) {
         : {};
     const desired = parseStructuredObject(desiredContent.toString('utf8'), format, targetPath);
     const selectedCapabilities = new Set(changes.map((change) => change.capability));
+    if (changes[0].owner !== 'ide') {
+        throw new Error('Canonical Store content cannot use managed structured merge.');
+    }
     const managedKey = managedTopLevelKey(changes[0].ide);
     const result = { ...current };
     if (selectedCapabilities.has('mcp'))
@@ -622,14 +537,16 @@ function createDeployBackup(context, plan, changes, copyFile) {
         const files = changes.map((change, index) => {
             const expected = plan.preconditions[`target:${change.id}`];
             if (change.change === 'add') {
-                if (fs.existsSync(change.targetPath))
+                if (deployPathExists(change.targetPath))
                     throw new StaleDeployPlanError('A selected add target appeared during backup.');
                 return { changeId: change.id, action: change.change, originalPath: change.targetPath };
             }
             const relativeBackupPath = path.join('files', `${index}-${path.basename(change.targetPath)}`);
             const copiedPath = path.join(backupPath, relativeBackupPath);
             copyFile(change.targetPath, copiedPath);
-            if (hashFile(copiedPath) !== expected || hashFile(change.targetPath) !== expected) {
+            const beforeHash = hashFile(change.targetPath);
+            if (hashFile(copiedPath) !== beforeHash
+                || hashDeviceTopologyNode(change.targetPath) !== expected) {
                 throw new StaleDeployPlanError('A selected target changed while its backup was being verified.');
             }
             return {
@@ -637,7 +554,7 @@ function createDeployBackup(context, plan, changes, copyFile) {
                 action: change.change,
                 originalPath: change.targetPath,
                 backupPath: relativeBackupPath,
-                beforeHash: expected,
+                beforeHash,
             };
         });
         const manifest = {
@@ -657,9 +574,7 @@ function assertSelectedPreconditions(context, plan, changes) {
     const repositoryHash = plan.repositoryPath ? hashRepositoryInputs(plan.repositoryPath) : undefined;
     const inventory = readState(context).managedInventory ?? {};
     for (const change of changes) {
-        const targetHash = fs.existsSync(change.targetPath)
-            ? hashFile(change.targetPath)
-            : hashText('<missing>');
+        const targetHash = hashDeviceTopologyNode(change.targetPath);
         const sourceHash = change.change === 'delete' && inventory[change.targetPath] !== undefined
             ? hashText(stableValue(inventory[change.targetPath]))
             : repositoryHash;
@@ -669,27 +584,43 @@ function assertSelectedPreconditions(context, plan, changes) {
         }
     }
 }
-function applyPreparedDeployWrites(writes, backupPath, writeFile, removeFile, restoreFile, commit) {
+function applyPreparedDeployWrites(writes, backupPath, writeFile, removeFile, restoreFile, createSymbolicLink, commit) {
     const attemptedPaths = new Set();
+    const createdDirectories = new Set();
     try {
         for (const write of writes) {
-            attemptedPaths.add(write.targetPath);
-            if (write.change === 'delete')
+            for (const directory of missingParentDirectories(write.targetPath)) {
+                createdDirectories.add(directory);
+            }
+            if (write.change === 'delete') {
+                attemptedPaths.add(write.targetPath);
                 removeFile(write.targetPath);
-            else
+            }
+            else if (write.change === 'link') {
+                fs.mkdirSync(path.dirname(write.targetPath), { recursive: true });
+                createSymbolicLink(write.linkTarget, write.targetPath);
+                attemptedPaths.add(write.targetPath);
+                verifyManagedProjection(write.targetPath, write.linkTarget);
+            }
+            else {
+                attemptedPaths.add(write.targetPath);
                 writeFile(write.targetPath, write.content);
+                if (!fs.readFileSync(write.targetPath).equals(write.content)) {
+                    throw new Error(`Deploy write verification failed for ${write.targetPath}.`);
+                }
+            }
         }
         commit();
     }
     catch (error) {
-        const rollbackErrors = rollbackDeployWrites(backupPath, attemptedPaths, removeFile, restoreFile);
+        const rollbackErrors = rollbackDeployWrites(backupPath, attemptedPaths, createdDirectories, removeFile, restoreFile);
         if (rollbackErrors.length > 0) {
             throw new DeployRollbackError(`${errorMessage(error)} Rollback was incomplete: ${rollbackErrors.join('; ')}`);
         }
         throw error;
     }
 }
-function rollbackDeployWrites(backupPath, attemptedPaths, removeFile, restoreFile) {
+function rollbackDeployWrites(backupPath, attemptedPaths, createdDirectories, removeFile, restoreFile) {
     const manifest = readDeployBackupManifest(backupPath);
     const entriesByPath = new Map();
     for (const entry of manifest.files) {
@@ -709,13 +640,36 @@ function rollbackDeployWrites(backupPath, attemptedPaths, removeFile, restoreFil
             errors.push(`${entry.originalPath}: ${errorMessage(error)}`);
         }
     }
+    for (const directory of [...createdDirectories].sort((left, right) => right.length - left.length)) {
+        try {
+            fs.rmdirSync(directory);
+        }
+        catch (error) {
+            if (!isRecord(error) || !['ENOENT', 'ENOTEMPTY'].includes(String(error.code))) {
+                errors.push(`${directory}: ${errorMessage(error)}`);
+            }
+        }
+    }
     return errors;
+}
+function missingParentDirectories(targetPath) {
+    const missing = [];
+    let current = path.dirname(targetPath);
+    while (!deployPathExists(current) && current !== path.dirname(current)) {
+        missing.push(current);
+        current = path.dirname(current);
+    }
+    return missing;
 }
 function finalizeDeployBackup(backupPath) {
     const manifest = readDeployBackupManifest(backupPath);
     for (const entry of manifest.files) {
-        if (fs.existsSync(entry.originalPath))
-            entry.afterHash = hashFile(entry.originalPath);
+        if (!deployPathExists(entry.originalPath))
+            continue;
+        const stat = fs.lstatSync(entry.originalPath);
+        entry.afterHash = stat.isFile() && !stat.isSymbolicLink()
+            ? hashFile(entry.originalPath)
+            : hashDeviceTopologyNode(entry.originalPath);
     }
     manifest.status = 'complete';
     manifest.completedAt = new Date().toISOString();
@@ -739,18 +693,20 @@ function updateDeployState(context, repositoryPath, changes) {
     const baselineFiles = { ...(state.baselineSnapshot?.files ?? {}) };
     const managedInventory = { ...(state.managedInventory ?? {}) };
     for (const change of changes) {
-        if (change.change === 'delete' || !fs.existsSync(change.targetPath)) {
+        if (change.change === 'delete' || !deployPathExists(change.targetPath)) {
             delete baselineFiles[change.targetPath];
             delete managedInventory[change.targetPath];
         }
         else {
-            const hash = hashFile(change.targetPath);
+            const hash = hashDeviceTopologyNode(change.targetPath);
             baselineFiles[change.targetPath] = hash;
             managedInventory[change.targetPath] = { source: repositoryPath, hash };
         }
     }
     const lastDeploySelection = {};
     for (const change of changes) {
+        if (change.owner === 'canonical-store')
+            continue;
         const capabilities = lastDeploySelection[change.ide] ?? [];
         if (!capabilities.includes(change.capability))
             capabilities.push(change.capability);
@@ -803,6 +759,7 @@ function blockedDeployResult(plan, issues) {
         status: 'blocked',
         repositoryPath: plan.repositoryPath,
         changes: [],
+        linkOutcomes: plan.linkOutcomes,
         issues,
         nextActions: issues.some((issue) => issue.severity === 'warning')
             ? ['Confirm every warning explicitly before applying the Deploy Plan.']
@@ -899,7 +856,10 @@ const MCP_PATH_BY_IDE = {
     gemini: GEMINI_MCP_PATH,
 };
 function managedTopLevelKey(ide) {
-    return MCP_PATH_BY_IDE[ide].slice(2);
+    const managedPath = MCP_PATH_BY_IDE[ide];
+    if (!managedPath)
+        throw new Error(`${ide} does not have a managed structured path.`);
+    return managedPath.slice(2);
 }
 function stableValue(value) {
     if (Array.isArray(value))
@@ -1012,6 +972,27 @@ function isMcpTarget(targetPath, targetId, context) {
 function selectionId(ide, capability, targetPath) {
     return `deploy-${hashText(`${ide}\0${capability}\0${path.resolve(targetPath)}`).slice(0, 16)}`;
 }
+function canonicalTargetKey(target) {
+    return target.owner === 'canonical-store' ? 'canonical-store' : target.ide;
+}
+function canonicalTarget(target) {
+    return target.owner === 'canonical-store'
+        ? { owner: 'canonical-store' }
+        : { owner: 'ide', ide: target.ide };
+}
+function verifyManagedProjection(linkPath, expectedTarget) {
+    const stat = fs.lstatSync(linkPath);
+    if (!stat.isSymbolicLink()) {
+        throw new Error(`Deploy link verification failed: ${linkPath} is not a symbolic link.`);
+    }
+    const rawTarget = fs.readlinkSync(linkPath);
+    if (rawTarget !== expectedTarget) {
+        throw new Error(`Deploy link verification failed: ${linkPath} targets ${rawTarget}, expected ${expectedTarget}.`);
+    }
+    if (fs.realpathSync(linkPath) !== fs.realpathSync(expectedTarget)) {
+        throw new Error(`Deploy link verification failed: ${linkPath} does not resolve to ${expectedTarget}.`);
+    }
+}
 function displayName(targetPath, capability) {
     if (capability === 'rules')
         return 'Shared Rules';
@@ -1030,7 +1011,7 @@ function compareChanges(left, right) {
         rules: 0, skills: 1, mcp: 2, native: 3,
     };
     return groupOrder[left.group] - groupOrder[right.group]
-        || left.ide.localeCompare(right.ide)
+        || canonicalTargetKey(left).localeCompare(canonicalTargetKey(right))
         || capabilityOrder[left.capability] - capabilityOrder[right.capability]
         || left.targetPath.localeCompare(right.targetPath);
 }
@@ -1042,14 +1023,14 @@ function ideName(targetId) {
 function targetIdForIde(ide) {
     return ide === 'claude-code' ? 'claudeCode' : ide;
 }
-function inferIde(targetPath, context) {
+function inferDeployTarget(targetPath, context) {
     const resolved = path.resolve(targetPath);
     const roots = [
-        ['codex', path.resolve(context.env.CODEX_HOME || path.join(context.homeDir, '.codex'))],
-        ['codex', path.resolve(context.homeDir, '.agents', 'skills')],
-        ['claude-code', path.resolve(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'))],
-        ['claude-code', path.resolve(context.homeDir, '.claude.json')],
-        ['gemini', path.resolve(context.homeDir, '.gemini')],
+        [{ owner: 'ide', ide: 'codex' }, path.resolve(context.env.CODEX_HOME || path.join(context.homeDir, '.codex'))],
+        [{ owner: 'canonical-store' }, path.resolve(context.homeDir, '.agents', 'skills')],
+        [{ owner: 'ide', ide: 'claude-code' }, path.resolve(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'))],
+        [{ owner: 'ide', ide: 'claude-code' }, path.resolve(context.homeDir, '.claude.json')],
+        [{ owner: 'ide', ide: 'gemini' }, path.resolve(context.homeDir, '.gemini')],
     ];
     return roots.find(([, root]) => resolved === root || resolved.startsWith(`${root}${path.sep}`))?.[0];
 }

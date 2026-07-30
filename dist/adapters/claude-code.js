@@ -7,6 +7,10 @@ import { CLAUDE_CODE_MANAGED_PATHS } from './overlay-policies.js';
 export class ClaudeCodeAdapter {
     nativeFileHandler;
     canonicalTransformer;
+    skillSurface = {
+        destinationRoot: (context) => path.join(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'skills'),
+        supportsManagedDirectoryLinks: (platform) => platform === 'darwin',
+    };
     constructor(nativeFileHandler = new ClaudeCodeNativeFileHandler(), canonicalTransformer = new ClaudeCodeCanonicalTransformer()) {
         this.nativeFileHandler = nativeFileHandler;
         this.canonicalTransformer = canonicalTransformer;

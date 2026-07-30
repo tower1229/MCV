@@ -52,7 +52,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["backupBeforeWrite", "useSymlinks"],
-      "properties": { "backupBeforeWrite": { "const": true }, "useSymlinks": { "const": false } }
+      "properties": { "backupBeforeWrite": { "const": true }, "useSymlinks": { "type": "boolean" } }
     }
   },
   "$defs": {

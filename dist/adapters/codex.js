@@ -7,6 +7,10 @@ import { CODEX_MANAGED_PATHS } from './overlay-policies.js';
 export class CodexAdapter {
     nativeFileHandler;
     canonicalTransformer;
+    skillSurface = {
+        destinationRoot: (context) => path.join(context.homeDir, '.agents', 'skills'),
+        supportsManagedDirectoryLinks: (platform) => platform === 'darwin',
+    };
     constructor(nativeFileHandler = new CodexNativeFileHandler(), canonicalTransformer = new CodexCanonicalTransformer()) {
         this.nativeFileHandler = nativeFileHandler;
         this.canonicalTransformer = canonicalTransformer;

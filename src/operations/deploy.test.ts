@@ -7,6 +7,7 @@ import type { DeviceContext } from '../adapters/types.js';
 import { atomicWriteFile } from '../utils/files.js';
 import { readState, writeState } from '../utils/state.js';
 import { applyDeployPlan, createDeployPlan } from './deploy.js';
+import { inspectStatus } from './status.js';
 
 describe('Deploy operations', () => {
   let testRoot: string;
@@ -439,6 +440,7 @@ describe('Deploy operations', () => {
       status: 'satisfied-via-link',
       ownership: 'external',
       scope: 'shared-link-root',
+      owner: 'ide',
       ide: 'claude-code',
       linkPath: skillsRoot,
       linkPaths: [skillsRoot],
@@ -465,7 +467,7 @@ describe('Deploy operations', () => {
       { nonInteractive: true },
     );
 
-    expect(result.status).toBe('succeeded');
+    expect(result).toMatchObject({ status: 'succeeded' });
     expect(fs.readFileSync(externalSkill, 'utf8')).toBe('# Review\n');
     expect(readState(context).managedInventory).not.toHaveProperty(externalSkill);
   });
@@ -681,6 +683,330 @@ describe('Deploy operations', () => {
         change: 'modify',
       }),
     ]);
+  });
+
+  it('materializes one Canonical Skill package before creating a Claude managed projection', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const storeFile = path.join(homeDir, '.agents', 'skills', 'review', 'SKILL.md');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    const storePackage = path.dirname(storeFile);
+    const plan = await createDeployPlan(context);
+
+    expect(plan.readyToApply).toBe(true);
+    expect(plan.changes.filter((change) => change.capability === 'skills')).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        owner: 'canonical-store',
+        targetPath: storeFile,
+        deploymentKind: 'physical-materialization',
+      }),
+      expect.objectContaining({
+        ide: 'claude-code',
+        targetPath: projectionPath,
+        deploymentKind: 'managed-link-projection',
+        preview: expect.objectContaining({
+          kind: 'link',
+          linkTarget: storePackage,
+        }),
+      }),
+      expect.objectContaining({
+        ide: 'claude-code',
+        change: 'delete',
+        deploymentKind: 'copy-projection',
+      }),
+    ]));
+    const materialization = plan.changes.find((change) =>
+      change.deploymentKind === 'physical-materialization');
+    expect(materialization).not.toHaveProperty('ide');
+
+    let linkCreatedAfterMaterialization = false;
+    const selected = plan.changes.filter((change) => change.defaultSelected);
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      { changeIds: selected.map((change) => change.id) },
+      {
+        createSymbolicLink: (target, linkPath) => {
+          linkCreatedAfterMaterialization = fs.readFileSync(storeFile, 'utf8') === '# Review\n';
+          fs.symlinkSync(target, linkPath, 'dir');
+        },
+      },
+    );
+
+    expect(result).toMatchObject({ status: 'succeeded' });
+    expect(linkCreatedAfterMaterialization).toBe(true);
+    expect(fs.readFileSync(storeFile, 'utf8')).toBe('# Review\n');
+    expect(fs.lstatSync(projectionPath).isSymbolicLink()).toBe(true);
+    expect(fs.realpathSync(projectionPath)).toBe(fs.realpathSync(storePackage));
+    expect(result.status === 'succeeded' && result.data?.projectionPaths).toEqual([projectionPath]);
+    expect(readState(context).lastDeploySelection).not.toHaveProperty('codex');
+
+    const nextPlan = await createDeployPlan(context);
+    expect(nextPlan.linkOutcomes).toEqual([expect.objectContaining({
+      status: 'satisfied-via-link',
+      ownership: 'managed',
+      scope: 'skill-package',
+      linkPath: projectionPath,
+      resolvedPath: storePackage,
+    })]);
+    expect(nextPlan.changes.some((change) => change.targetPath === projectionPath)).toBe(false);
+    const satisfiedResult = await applyDeployPlan(context, nextPlan, { changeIds: [] });
+    expect(satisfiedResult).toMatchObject({
+      status: 'succeeded',
+      linkOutcomes: [expect.objectContaining({
+        status: 'satisfied-via-link',
+        ownership: 'managed',
+        linkPath: projectionPath,
+      })],
+    });
+    const status = await inspectStatus(context);
+    expect(status.postDeployLocalState).toMatchObject({
+      drift: 0,
+      missing: 0,
+    });
+  });
+
+  it('rolls back materialized content when managed projection creation fails', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const storeFile = path.join(homeDir, '.agents', 'skills', 'review', 'SKILL.md');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(path.dirname(storeFile), { recursive: true });
+    fs.writeFileSync(storeFile, '# Previous review\n');
+    const plan = await createDeployPlan(context);
+    const selected = plan.changes.filter((change) => change.defaultSelected);
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      { changeIds: selected.map((change) => change.id) },
+      {
+        createSymbolicLink: () => {
+          throw new Error('simulated projection failure');
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'deploy.transactionFailed' },
+    });
+    expect(fs.readFileSync(storeFile, 'utf8')).toBe('# Previous review\n');
+    expect(fs.existsSync(projectionPath)).toBe(false);
+  });
+
+  it.each([
+    ['non-link node', (_target: string, linkPath: string) => fs.mkdirSync(linkPath)],
+    ['wrong raw target', (target: string, linkPath: string) =>
+      fs.symlinkSync(path.dirname(target), linkPath, 'dir')],
+  ] as const)('rejects and rolls back a managed projection created as a %s', async (
+    _scenario,
+    createSymbolicLink,
+  ) => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const storeRoot = path.join(homeDir, '.agents');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    const plan = await createDeployPlan(context);
+    const selected = plan.changes.filter((change) => change.defaultSelected);
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      { changeIds: selected.map((change) => change.id) },
+      { createSymbolicLink },
+    );
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'deploy.transactionFailed',
+        technicalDetails: expect.stringContaining('Deploy link verification failed'),
+      },
+    });
+    expect(fs.existsSync(projectionPath)).toBe(false);
+    expect(fs.existsSync(storeRoot)).toBe(false);
+  });
+
+  it('preserves an unowned projection node that wins the post-Plan creation race', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const storeRoot = path.join(homeDir, '.agents');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    const markerPath = path.join(projectionPath, 'external.txt');
+    const plan = await createDeployPlan(context);
+    const selected = plan.changes.filter((change) => change.defaultSelected);
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      { changeIds: selected.map((change) => change.id) },
+      {
+        createSymbolicLink: (_target, linkPath) => {
+          fs.mkdirSync(linkPath);
+          fs.writeFileSync(markerPath, 'externally owned\n');
+          const error = new Error('simulated EEXIST') as NodeJS.ErrnoException;
+          error.code = 'EEXIST';
+          throw error;
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'deploy.transactionFailed' },
+    });
+    expect(fs.readFileSync(markerPath, 'utf8')).toBe('externally owned\n');
+    expect(fs.existsSync(storeRoot)).toBe(false);
+  });
+
+  it('rejects selecting a managed projection without its pending Store materialization', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    const plan = await createDeployPlan(context);
+    const projection = plan.changes.find((change) =>
+      change.deploymentKind === 'managed-link-projection');
+    if (!projection) throw new Error('expected managed projection');
+
+    const result = await applyDeployPlan(context, plan, { changeIds: [projection.id] });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'deploy.invalidSelection' },
+    });
+    expect(fs.existsSync(projectionPath)).toBe(false);
+    expect(fs.existsSync(path.join(homeDir, '.agents'))).toBe(false);
+  });
+
+  it('removes newly created Store topology when projection activation fails', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const storeRoot = path.join(homeDir, '.agents');
+    const plan = await createDeployPlan(context);
+    const selected = plan.changes.filter((change) => change.defaultSelected);
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      { changeIds: selected.map((change) => change.id) },
+      { createSymbolicLink: () => { throw new Error('projection activation failed'); } },
+    );
+
+    expect(result).toMatchObject({ status: 'failed' });
+    expect(fs.existsSync(storeRoot)).toBe(false);
+  });
+
+  it('rejects a reviewed Plan when the Claude Skills ancestor topology changes', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const skillsRoot = path.join(homeDir, '.claude', 'skills');
+    const movedRoot = path.join(homeDir, '.claude', 'skills-before-retarget');
+    const plan = await createDeployPlan(context);
+    fs.renameSync(skillsRoot, movedRoot);
+    fs.mkdirSync(skillsRoot);
+
+    const result = await applyDeployPlan(context, plan, {
+      changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'operation.stalePlan' },
+    });
+    expect(fs.existsSync(path.join(homeDir, '.agents'))).toBe(false);
+  });
+
+  it('rejects identical Store bytes under a replaced physical ancestor', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const storeRoot = path.join(homeDir, '.agents');
+    const storeFile = path.join(storeRoot, 'skills', 'review', 'SKILL.md');
+    fs.mkdirSync(path.dirname(storeFile), { recursive: true });
+    fs.writeFileSync(storeFile, '# Previous review\n');
+    const plan = await createDeployPlan(context);
+    fs.renameSync(storeRoot, path.join(homeDir, '.agents-before-retarget'));
+    fs.mkdirSync(path.dirname(storeFile), { recursive: true });
+    fs.writeFileSync(storeFile, '# Previous review\n');
+
+    const result = await applyDeployPlan(context, plan, {
+      changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'operation.stalePlan' },
+    });
+    expect(fs.readFileSync(storeFile, 'utf8')).toBe('# Previous review\n');
+  });
+
+  it('falls back to copy projection when managed directory links are unsupported', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    context.platform = 'win32';
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'deploy-operation-test',
+      repositoryPath,
+    });
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.readyToApply).toBe(true);
+    expect(plan.changes).toContainEqual(expect.objectContaining({
+      targetPath: path.join(homeDir, '.claude', 'skills', 'review', 'SKILL.md'),
+      deploymentKind: 'copy-projection',
+    }));
+    expect(plan.changes.some((change) =>
+      change.deploymentKind === 'managed-link-projection'
+      || change.deploymentKind === 'physical-materialization')).toBe(false);
+  });
+
+  it('uses the Store as Codex conventional Skills location without creating a Claude projection', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8')
+        .replace('useSymlinks: false', 'useSymlinks: true')
+        .replace('  claudeCode:', '  codex:\n    enabled: true\n  claudeCode:')
+        .replace('  claudeCode:\n    enabled: true', '  claudeCode:\n    enabled: false'),
+    );
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.changes).toContainEqual(expect.objectContaining({
+      targetPath: path.join(homeDir, '.agents', 'skills', 'review', 'SKILL.md'),
+      deploymentKind: 'physical-materialization',
+    }));
+    expect(plan.changes.some((change) =>
+      change.deploymentKind === 'managed-link-projection')).toBe(false);
   });
 
   it('applies only selected capabilities and updates only their device state scope', async () => {

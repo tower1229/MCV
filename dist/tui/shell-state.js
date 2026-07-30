@@ -907,6 +907,8 @@ function initialDeploySelection(plan, lastSelection) {
         .filter((change) => {
         if (change.group === 'advanced' || change.change === 'delete')
             return false;
+        if (change.owner === 'canonical-store')
+            return change.defaultSelected;
         if (!lastSelection)
             return change.defaultSelected;
         return lastSelection[change.ide]?.includes(change.capability) === true;

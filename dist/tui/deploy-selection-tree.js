@@ -1,4 +1,4 @@
-const ideOrder = ['codex', 'claude-code', 'gemini'];
+const targetOrder = ['canonical-store', 'codex', 'claude-code', 'gemini'];
 const capabilityOrder = [
     'rules',
     'skills',
@@ -35,7 +35,7 @@ export function flattenDeploySelectionTree(tree, expandedNodeIds) {
 function buildCapabilityNodes(changes, group) {
     const groups = new Map();
     for (const change of changes) {
-        const key = `${change.ide}/${change.capability}`;
+        const key = `${targetKey(change)}/${change.capability}`;
         const items = groups.get(key) ?? [];
         items.push(change);
         groups.set(key, items);
@@ -43,11 +43,11 @@ function buildCapabilityNodes(changes, group) {
     return [...groups.entries()]
         .sort(([left], [right]) => compareGroupKeys(left, right))
         .map(([key, items]) => {
-        const [ide, capability] = key.split('/');
+        const [target, capability] = key.split('/');
         return {
             id: `capability:${group}:${key}`,
             kind: 'capability',
-            label: `${displayIde(ide)} / ${displayCapability(capability)}`,
+            label: `${displayTarget(target)} / ${displayCapability(capability)}`,
             changeIds: items.map((change) => change.id),
             children: capability === 'skills'
                 ? buildSkillPackageNodes(items, group)
@@ -65,7 +65,7 @@ function buildSkillPackageNodes(changes, group) {
     return [...packages.entries()]
         .sort(([left], [right]) => left.localeCompare(right))
         .map(([name, items]) => ({
-        id: `package:${group}:${items[0].ide}:${name}`,
+        id: `package:${group}:${targetKey(items[0])}:${name}`,
         kind: 'package',
         label: name,
         changeIds: items.map((change) => change.id),
@@ -96,18 +96,23 @@ function displayFilePath(change) {
     return normalized;
 }
 function compareGroupKeys(left, right) {
-    const [leftIde, leftCapability] = left.split('/');
-    const [rightIde, rightCapability] = right.split('/');
-    const ideDelta = ideOrder.indexOf(leftIde) - ideOrder.indexOf(rightIde);
-    if (ideDelta !== 0)
-        return ideDelta;
+    const [leftTarget, leftCapability] = left.split('/');
+    const [rightTarget, rightCapability] = right.split('/');
+    const targetDelta = targetOrder.indexOf(leftTarget) - targetOrder.indexOf(rightTarget);
+    if (targetDelta !== 0)
+        return targetDelta;
     return capabilityOrder.indexOf(leftCapability)
         - capabilityOrder.indexOf(rightCapability);
 }
-function displayIde(ide) {
-    if (ide === 'claude-code')
+function targetKey(change) {
+    return change.owner === 'canonical-store' ? 'canonical-store' : change.ide;
+}
+function displayTarget(target) {
+    if (target === 'canonical-store')
+        return 'Canonical Device Skill Store';
+    if (target === 'claude-code')
         return 'Claude Code';
-    return ide.charAt(0).toUpperCase() + ide.slice(1);
+    return target.charAt(0).toUpperCase() + target.slice(1);
 }
 function displayCapability(capability) {
     return {

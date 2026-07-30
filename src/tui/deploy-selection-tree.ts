@@ -2,6 +2,7 @@ import type {
   DeployChange,
   DeployPlan,
 } from '../operations/deploy.js';
+import type { CanonicalSkillIde } from '../core/canonical-skill-device-layout.js';
 
 export interface DeploySelectionNode {
   id: string;
@@ -18,7 +19,7 @@ export interface VisibleDeploySelectionNode {
   parentId?: string;
 }
 
-const ideOrder: DeployChange['ide'][] = ['codex', 'claude-code', 'gemini'];
+const targetOrder = ['canonical-store', 'codex', 'claude-code', 'gemini'] as const;
 const capabilityOrder: DeployChange['capability'][] = [
   'rules',
   'skills',
@@ -75,7 +76,7 @@ function buildCapabilityNodes(
 ): DeploySelectionNode[] {
   const groups = new Map<string, DeployChange[]>();
   for (const change of changes) {
-    const key = `${change.ide}/${change.capability}`;
+    const key = `${targetKey(change)}/${change.capability}`;
     const items = groups.get(key) ?? [];
     items.push(change);
     groups.set(key, items);
@@ -83,14 +84,14 @@ function buildCapabilityNodes(
   return [...groups.entries()]
     .sort(([left], [right]) => compareGroupKeys(left, right))
     .map(([key, items]): DeploySelectionNode => {
-      const [ide, capability] = key.split('/') as [
-        DeployChange['ide'],
+      const [target, capability] = key.split('/') as [
+        'canonical-store' | CanonicalSkillIde,
         DeployChange['capability'],
       ];
       return {
         id: `capability:${group}:${key}`,
         kind: 'capability',
-        label: `${displayIde(ide)} / ${displayCapability(capability)}`,
+        label: `${displayTarget(target)} / ${displayCapability(capability)}`,
         changeIds: items.map((change) => change.id),
         children: capability === 'skills'
           ? buildSkillPackageNodes(items, group)
@@ -112,7 +113,7 @@ function buildSkillPackageNodes(
   return [...packages.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([name, items]): DeploySelectionNode => ({
-      id: `package:${group}:${items[0].ide}:${name}`,
+      id: `package:${group}:${targetKey(items[0])}:${name}`,
       kind: 'package',
       label: name,
       changeIds: items.map((change) => change.id),
@@ -150,23 +151,28 @@ function displayFilePath(change: DeployChange): string {
 }
 
 function compareGroupKeys(left: string, right: string): number {
-  const [leftIde, leftCapability] = left.split('/') as [
-    DeployChange['ide'],
+  const [leftTarget, leftCapability] = left.split('/') as [
+    'canonical-store' | CanonicalSkillIde,
     DeployChange['capability'],
   ];
-  const [rightIde, rightCapability] = right.split('/') as [
-    DeployChange['ide'],
+  const [rightTarget, rightCapability] = right.split('/') as [
+    'canonical-store' | CanonicalSkillIde,
     DeployChange['capability'],
   ];
-  const ideDelta = ideOrder.indexOf(leftIde) - ideOrder.indexOf(rightIde);
-  if (ideDelta !== 0) return ideDelta;
+  const targetDelta = targetOrder.indexOf(leftTarget) - targetOrder.indexOf(rightTarget);
+  if (targetDelta !== 0) return targetDelta;
   return capabilityOrder.indexOf(leftCapability)
     - capabilityOrder.indexOf(rightCapability);
 }
 
-function displayIde(ide: DeployChange['ide']): string {
-  if (ide === 'claude-code') return 'Claude Code';
-  return ide.charAt(0).toUpperCase() + ide.slice(1);
+function targetKey(change: DeployChange): 'canonical-store' | CanonicalSkillIde {
+  return change.owner === 'canonical-store' ? 'canonical-store' : change.ide;
+}
+
+function displayTarget(target: 'canonical-store' | CanonicalSkillIde): string {
+  if (target === 'canonical-store') return 'Canonical Device Skill Store';
+  if (target === 'claude-code') return 'Claude Code';
+  return target.charAt(0).toUpperCase() + target.slice(1);
 }
 
 function displayCapability(

@@ -7,6 +7,10 @@ import { GEMINI_MANAGED_PATHS } from './overlay-policies.js';
 export class GeminiAdapter {
     nativeFileHandler;
     canonicalTransformer;
+    skillSurface = {
+        destinationRoot: (context) => path.join(context.homeDir, '.gemini', 'skills'),
+        supportsManagedDirectoryLinks: (_platform) => false,
+    };
     constructor(nativeFileHandler = new GeminiNativeFileHandler(), canonicalTransformer = new GeminiCanonicalTransformer()) {
         this.nativeFileHandler = nativeFileHandler;
         this.canonicalTransformer = canonicalTransformer;

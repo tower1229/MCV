@@ -93,6 +93,7 @@ Quit   Ctrl+C Cancel",
 Deploy · Diff
 
 Shared Rules · modify
+Layout: Ordinary file
 Apply semantics: Whole-file replacement — replace the complete target file.
 /Users/张涛/.codex/AGENTS.md
   - old rule

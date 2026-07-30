@@ -24,7 +24,7 @@ export interface McvManifest {
   variables: Record<string, unknown>;
   security: { scanSecrets: true; allowPlaintextSecrets: false };
   capture: { preserveUnknownNativeFields: boolean };
-  deploy: { backupBeforeWrite: true; useSymlinks: false };
+  deploy: { backupBeforeWrite: true; useSymlinks: boolean };
 }
 
 export function readManifest(repositoryPath: string): McvManifest {

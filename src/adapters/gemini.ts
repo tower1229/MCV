@@ -17,6 +17,11 @@ import type {
 } from './types.js';
 
 export class GeminiAdapter implements IdeAdapter {
+  readonly skillSurface = {
+    destinationRoot: (context: DeviceContext) => path.join(context.homeDir, '.gemini', 'skills'),
+    supportsManagedDirectoryLinks: (_platform: NodeJS.Platform) => false,
+  };
+
   constructor(
     private readonly nativeFileHandler: NativeFileHandler = new GeminiNativeFileHandler(),
     private readonly canonicalTransformer: CanonicalTransformer = new GeminiCanonicalTransformer(),

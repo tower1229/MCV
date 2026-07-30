@@ -473,6 +473,7 @@ describe('TUI Shell view', () => {
       status: 'satisfied-via-link',
       ownership: 'external',
       scope: 'shared-link-root',
+      owner: 'ide',
       ide: 'claude-code',
       linkPath: '/Users/张涛/.claude/skills',
       linkPaths: ['/Users/张涛/.claude/skills'],
@@ -838,6 +839,7 @@ describe('TUI Shell view', () => {
       status: 'satisfied-via-link',
       ownership: 'external',
       scope: 'shared-link-root',
+      owner: 'ide',
       ide: 'codex',
       linkPath: '/Users/张涛/.claude/skills',
       linkPaths: ['/Users/张涛/.claude/skills'],
@@ -859,11 +861,52 @@ describe('TUI Shell view', () => {
     expect(rendered).toContain('/Users/张涛/.claude/skills → /Users/张涛/.agents/skills');
   });
 
+  it('labels an owned link as an already satisfied managed projection', () => {
+    const plan = deployPlan();
+    plan.linkOutcomes = [{
+      status: 'satisfied-via-link',
+      ownership: 'managed',
+      scope: 'skill-package',
+      owner: 'ide',
+      ide: 'claude-code',
+      linkPath: '/Users/张涛/.claude/skills/review',
+      linkPaths: ['/Users/张涛/.claude/skills/review'],
+      resolvedPath: '/Users/张涛/.agents/skills/review',
+      resolvedPaths: ['/Users/张涛/.agents/skills/review'],
+      packageNames: ['review'],
+      affectedFileCount: 1,
+    }];
+    const state = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan,
+    });
+
+    const rendered = renderToString(<ShellView state={state} />, { columns: 100 });
+
+    expect(rendered).toContain('Already satisfied projection · Managed');
+  });
+
+  it('shows the physical materialization layout in Deploy detail without color', () => {
+    const plan = deployPlan();
+    plan.changes[0].deploymentKind = 'physical-materialization';
+    const loaded = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan,
+    });
+    const expanded = shellReducer(loaded, { type: 'deploy.open' });
+    const leafFocused = shellReducer(expanded, { type: 'deploy.open' });
+    const diff = shellReducer(leafFocused, { type: 'deploy.openDiff' });
+
+    expect(renderToString(<ShellView state={diff} />, { columns: 80 }))
+      .toContain('Layout: Physical materialization');
+  });
+
   it('bounds many linked-Skill outcomes in Deploy and Overview viewports', () => {
     const outcomes = Array.from({ length: 20 }, (_, index): DeployPlan['linkOutcomes'][number] => ({
       status: index < 18 ? 'satisfied-via-link' : 'blocked',
       ownership: 'external',
       scope: 'skill-package',
+      owner: 'ide',
       ide: 'claude-code',
       linkPath: `/Users/张涛/.claude/skills/skill-${index}`,
       linkPaths: [`/Users/张涛/.claude/skills/skill-${index}`],
@@ -1090,6 +1133,49 @@ describe('TUI Shell view', () => {
     }).toMatchSnapshot();
   });
 
+  it('shows an already satisfied managed projection in the Deploy Result', () => {
+    const loaded = shellReducer(createInitialShellState('deploy'), {
+      type: 'deploy.loaded',
+      plan: deployPlan(),
+    });
+    const confirmation = shellReducer(loaded, { type: 'deploy.continue' });
+    const confirmed = shellReducer(confirmation, { type: 'deploy.toggleWarning' });
+    const applying = shellReducer(confirmed, { type: 'deploy.apply' });
+    const result = shellReducer(applying, {
+      type: 'deploy.applied',
+      result: {
+        schemaVersion: 1,
+        operation: 'deploy',
+        status: 'succeeded',
+        repositoryPath: '/Users/张涛/Configuration Repository',
+        changes: [],
+        linkOutcomes: [{
+          status: 'satisfied-via-link',
+          ownership: 'managed',
+          scope: 'skill-package',
+          owner: 'ide',
+          ide: 'claude-code',
+          linkPath: '/Users/张涛/.claude/skills/review',
+          linkPaths: ['/Users/张涛/.claude/skills/review'],
+          resolvedPath: '/Users/张涛/.agents/skills/review',
+          resolvedPaths: ['/Users/张涛/.agents/skills/review'],
+          packageNames: ['review'],
+          affectedFileCount: 1,
+        }],
+        issues: [],
+        nextActions: [],
+        data: {
+          appliedChangeIds: [],
+          writtenPaths: [],
+          deletedPaths: [],
+        },
+      },
+    });
+
+    expect(renderToString(<ShellView state={result} />, { columns: 80 }))
+      .toContain('Already satisfied projections: 1');
+  });
+
   it('snapshots Restore no-backup, conflict, review, applying, stale, success, and rollback failure', () => {
     const noBackup = shellReducer(createInitialShellState('restore'), {
       type: 'restore.loaded',
@@ -1194,6 +1280,7 @@ function deployPlan(): DeployPlan {
     changes: [
       {
         id: 'deploy-rules',
+        owner: 'ide',
         ide: 'codex',
         capability: 'rules',
         name: 'Shared Rules',
@@ -1212,6 +1299,7 @@ function deployPlan(): DeployPlan {
       },
       {
         id: 'deploy-mcp',
+        owner: 'ide',
         ide: 'codex',
         capability: 'mcp',
         name: 'MCP',
@@ -1230,6 +1318,7 @@ function deployPlan(): DeployPlan {
       },
       {
         id: 'deploy-delete',
+        owner: 'ide',
         ide: 'codex',
         capability: 'skills',
         name: '旧 Skill',
@@ -1264,6 +1353,7 @@ function largeDeployPlan(): DeployPlan {
     const targetPath = `/Users/张涛/.agents/skills/hatch-pet/${relativePath}`;
     return {
     id: `deploy-skill-${index}`,
+    owner: 'ide',
     ide: 'codex',
     capability: 'skills',
     name: 'hatch-pet',
