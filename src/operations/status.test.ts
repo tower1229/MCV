@@ -85,7 +85,14 @@ describe('inspectStatus', () => {
         schemaVersion: 2,
       },
       pendingDeployment: { add: 1, modify: 1, delete: 1, total: 3 },
-      postDeployLocalState: { unchanged: 1, drift: 1, missing: 1, total: 3 },
+      postDeployLocalState: {
+        unchanged: 1,
+        drift: 1,
+        contentDrift: 0,
+        topologyDrift: 0,
+        missing: 1,
+        total: 3,
+      },
       environment: {
         missingVariables: ['MISSING_TOKEN'],
         ideSupport: [
@@ -171,7 +178,184 @@ describe('inspectStatus', () => {
       message: expect.stringContaining('Satisfied via link'),
     }));
   });
+
+  it('reports one Canonical package content Drift when managed alias content changes', async () => {
+    if (process.platform === 'win32') return;
+    context.platform = 'darwin';
+    seedManagedSkillRepository(repositoryPath, homeDir, context);
+    const { applyDeployPlan, createDeployPlan } = await import('./deploy.js');
+    const plan = await createDeployPlan(context);
+    const selected = plan.changes.filter((change) => change.defaultSelected);
+    const result = await applyDeployPlan(context, plan, {
+      changeIds: selected.map((change) => change.id),
+    });
+    expect(result.status).toBe('succeeded');
+
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Edited through alias\n');
+
+    const report = await inspectStatus(context);
+
+    expect(report.postDeployLocalState.contentDrift).toBe(1);
+    expect(report.postDeployLocalState.topologyDrift).toBe(0);
+    expect(report.postDeployLocalState.contentDrifts).toEqual([expect.objectContaining({
+      kind: 'canonical-skill-package',
+      packageName: 'review',
+      state: 'drift',
+    })]);
+    expect(report.postDeployLocalState.topologyDrifts).toEqual([]);
+    expect(report.postDeployLocalState.drift).toBe(1);
+    expect(report.linkOutcomes).toEqual([expect.objectContaining({
+      status: 'satisfied-via-link',
+      ownership: 'managed',
+      linkPath: projectionPath,
+    })]);
+    expect(report.pendingDeployment.total).toBeGreaterThanOrEqual(1);
+    expect(report.changes.filter((change) =>
+      change.deploymentKind === 'physical-materialization')).toHaveLength(1);
+  });
+
+  it('reports topology Drift with IDE and Surface when a managed projection is replaced or retargeted', async () => {
+    if (process.platform === 'win32') return;
+    context.platform = 'darwin';
+    seedManagedSkillRepository(repositoryPath, homeDir, context);
+    const { applyDeployPlan, createDeployPlan } = await import('./deploy.js');
+    const plan = await createDeployPlan(context);
+    await applyDeployPlan(context, plan, {
+      changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+    });
+
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    fs.rmSync(projectionPath, { recursive: true, force: true });
+    fs.mkdirSync(projectionPath, { recursive: true });
+    fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
+
+    const replaced = await inspectStatus(context);
+    expect(replaced.postDeployLocalState.topologyDrift).toBe(1);
+    expect(replaced.postDeployLocalState.contentDrift).toBe(0);
+    expect(replaced.postDeployLocalState.topologyDrifts).toEqual([expect.objectContaining({
+      kind: 'skill-projection',
+      packageName: 'review',
+      projectionPath,
+      ide: 'claude-code',
+      surface: 'claude-code',
+      reason: 'replaced',
+    })]);
+
+    fs.rmSync(projectionPath, { recursive: true, force: true });
+    const externalPackage = path.join(testRoot, 'external-review');
+    fs.mkdirSync(externalPackage, { recursive: true });
+    fs.writeFileSync(path.join(externalPackage, 'SKILL.md'), '# Review\n');
+    fs.symlinkSync(externalPackage, projectionPath, 'dir');
+
+    const retargeted = await inspectStatus(context);
+    expect(retargeted.postDeployLocalState.topologyDrifts).toEqual([expect.objectContaining({
+      reason: 'external',
+      ide: 'claude-code',
+      surface: 'claude-code',
+      packageName: 'review',
+    })]);
+    expect(fs.realpathSync(storePackage)).not.toBe(fs.realpathSync(projectionPath));
+  });
+
+  it('reads older state without topology metadata without inventing deletion candidates for unowned files', async () => {
+    createRepository(repositoryPath);
+    const owned = path.join(homeDir, '.codex', 'AGENTS.md');
+    const unowned = path.join(homeDir, '.codex', 'unowned.txt');
+    fs.mkdirSync(path.dirname(owned), { recursive: true });
+    fs.writeFileSync(owned, '# Local rules\n');
+    fs.writeFileSync(unowned, 'leave me alone\n');
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'repository-id',
+      repositoryPath,
+      managedInventory: {
+        [owned]: { source: repositoryPath, hash: sha256('# Repository rules\n') },
+      },
+      baselineSnapshot: {
+        recordedAt: '2026-07-21T00:00:00.000Z',
+        files: {
+          [owned]: sha256('# Repository rules\n'),
+        },
+      },
+    });
+
+    const report = await inspectStatus(context);
+
+    expect(report.postDeployLocalState).toMatchObject({
+      contentDrift: 0,
+      topologyDrift: 0,
+      drift: 1,
+      missing: 0,
+    });
+    expect(report.changes.some((change) => change.targetPath === unowned)).toBe(false);
+    expect(fs.readFileSync(unowned, 'utf8')).toBe('leave me alone\n');
+  });
+  it('reports topology Drift when a managed projection is missing', async () => {
+    if (process.platform === 'win32') return;
+    context.platform = 'darwin';
+    seedManagedSkillRepository(repositoryPath, homeDir, context);
+    const { applyDeployPlan, createDeployPlan } = await import('./deploy.js');
+    const plan = await createDeployPlan(context);
+    await applyDeployPlan(context, plan, {
+      changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+    });
+
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.rmSync(projectionPath, { recursive: true, force: true });
+
+    const report = await inspectStatus(context);
+    expect(report.postDeployLocalState.topologyDrifts).toEqual([expect.objectContaining({
+      reason: 'missing',
+      ide: 'claude-code',
+      surface: 'claude-code',
+      packageName: 'review',
+    })]);
+    expect(report.postDeployLocalState.contentDrift).toBe(0);
+  });
 });
+
+function seedManagedSkillRepository(
+  repositoryPath: string,
+  homeDir: string,
+  context: DeviceContext,
+): void {
+  fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+    'schemaVersion: 2',
+    'repositoryId: repository-id',
+    'initializedAt: 2026-07-21T00:00:00.000Z',
+    'targets:',
+    '  codex:',
+    '    enabled: false',
+    '  claudeCode:',
+    '    enabled: true',
+    '  gemini:',
+    '    enabled: false',
+    '    surfaces:',
+    '      geminiCli: auto',
+    '      antigravity: auto',
+    'variables: {}',
+    'security:',
+    '  scanSecrets: true',
+    '  allowPlaintextSecrets: false',
+    'capture:',
+    '  preserveUnknownNativeFields: true',
+    'deploy:',
+    '  backupBeforeWrite: true',
+    '  useSymlinks: true',
+    '',
+  ].join('\n'));
+  fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'review'), { recursive: true });
+  fs.mkdirSync(path.join(homeDir, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Repository rules\n');
+  fs.writeFileSync(path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md'), '# Review\n');
+  writeState(context, {
+    schemaVersion: 2,
+    defaultRepositoryId: 'repository-id',
+    repositoryPath,
+  });
+}
 
 function createRepository(repositoryPath: string, codexEnabled = true): void {
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [

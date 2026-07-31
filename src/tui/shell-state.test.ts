@@ -1532,9 +1532,13 @@ function statusReport(): StatusReport {
     postDeployLocalState: {
       unchanged: 0,
       drift: 0,
+      contentDrift: 0,
+      topologyDrift: 0,
       missing: 0,
       total: 0,
       files: [],
+      contentDrifts: [],
+      topologyDrifts: [],
     },
     environment: {
       missingVariables: [],

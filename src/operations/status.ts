@@ -4,11 +4,18 @@ import {
   hashDeviceTopologyNode,
 } from '../core/canonical-skill-device-layout.js';
 import {
+  inspectManagedSkillDrift,
+  isPathCoveredByManagedSkillLayout,
+  resolveSkillPackageStorePath,
+  type ContentDriftEntry,
+  type TopologyDriftEntry,
+} from '../core/managed-skill-layout.js';
+import {
   readManifest,
   resolveBoundRepository,
   type McvManifest,
 } from '../utils/repository.js';
-import { readState } from '../utils/state.js';
+import { readState, type McvState } from '../utils/state.js';
 import {
   createDeployPlan,
   type DeployChange,
@@ -50,9 +57,13 @@ export interface LocalStateFileStatus {
 export interface PostDeployLocalStateSummary {
   unchanged: number;
   drift: number;
+  contentDrift: number;
+  topologyDrift: number;
   missing: number;
   total: number;
   files: LocalStateFileStatus[];
+  contentDrifts: ContentDriftEntry[];
+  topologyDrifts: TopologyDriftEntry[];
 }
 
 export interface SurfaceSupport {
@@ -114,7 +125,7 @@ export async function inspectStatus(context: DeviceContext): Promise<StatusRepor
     changes,
     linkOutcomes: deployPlan.linkOutcomes,
     pendingDeployment: summarizePendingDeployment(changes),
-    postDeployLocalState: summarizePostDeployLocalState(state.baselineSnapshot?.files ?? {}),
+    postDeployLocalState: summarizePostDeployLocalState(state),
     environment: {
       missingVariables: environmentReport.missingVariables,
       ideSupport: summarizeIdeSupport(environmentReport, manifest),
@@ -126,27 +137,61 @@ export async function inspectStatus(context: DeviceContext): Promise<StatusRepor
 }
 
 function summarizePendingDeployment(changes: DeployChange[]): PendingDeploymentSummary {
-  const summary: PendingDeploymentSummary = { add: 0, modify: 0, delete: 0, total: changes.length };
-  for (const change of changes) summary[change.change] += 1;
+  const materializationPackages = new Set<string>();
+  const summary: PendingDeploymentSummary = { add: 0, modify: 0, delete: 0, total: 0 };
+  for (const change of changes) {
+    if (change.deploymentKind === 'physical-materialization') {
+      const packagePath = resolveSkillPackageStorePath(change.targetPath);
+      if (materializationPackages.has(packagePath)) continue;
+      materializationPackages.add(packagePath);
+    }
+    summary[change.change] += 1;
+    summary.total += 1;
+  }
   return summary;
 }
 
-function summarizePostDeployLocalState(
-  baselineFiles: Record<string, string>,
-): PostDeployLocalStateSummary {
-  const files = Object.entries(baselineFiles).map(([filePath, expectedHash]): LocalStateFileStatus => {
-    if (!deployPathExists(filePath)) return { path: filePath, state: 'missing' };
-    return {
-      path: filePath,
-      state: hashDeviceTopologyNode(filePath) === expectedHash ? 'unchanged' : 'drift',
-    };
-  });
+function summarizePostDeployLocalState(state: McvState): PostDeployLocalStateSummary {
+  const baselineFiles = state.baselineSnapshot?.files ?? {};
+  const {
+    contentDrifts,
+    topologyDrifts,
+    coveredPaths,
+  } = inspectManagedSkillDrift(state.managedSkillLayout);
+
+  const files = Object.entries(baselineFiles)
+    .filter(([filePath]) => !isPathCoveredByManagedSkillLayout(filePath, coveredPaths))
+    .map(([filePath, expectedHash]): LocalStateFileStatus => {
+      if (!deployPathExists(filePath)) return { path: filePath, state: 'missing' };
+      return {
+        path: filePath,
+        state: hashDeviceTopologyNode(filePath) === expectedHash ? 'unchanged' : 'drift',
+      };
+    });
+
+  const ordinaryDrift = files.filter((file) => file.state === 'drift').length;
+  const missing = files.filter((file) => file.state === 'missing').length;
+  const unchanged = files.filter((file) => file.state === 'unchanged').length
+    + (state.managedSkillLayout
+      ? Object.values(state.managedSkillLayout.packages).length
+        - contentDrifts.length
+        + Object.values(state.managedSkillLayout.projections).length
+        - topologyDrifts.length
+      : 0);
+  const contentDrift = contentDrifts.length;
+  const topologyDrift = topologyDrifts.length;
+  const drift = ordinaryDrift + contentDrift + topologyDrift;
+
   return {
-    unchanged: files.filter((file) => file.state === 'unchanged').length,
-    drift: files.filter((file) => file.state === 'drift').length,
-    missing: files.filter((file) => file.state === 'missing').length,
-    total: files.length,
+    unchanged,
+    drift,
+    contentDrift,
+    topologyDrift,
+    missing,
+    total: unchanged + drift + missing,
     files,
+    contentDrifts,
+    topologyDrifts,
   };
 }
 

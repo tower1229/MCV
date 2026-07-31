@@ -1,4 +1,5 @@
 import { deployPathExists, hashDeviceTopologyNode, } from '../core/canonical-skill-device-layout.js';
+import { inspectManagedSkillDrift, isPathCoveredByManagedSkillLayout, resolveSkillPackageStorePath, } from '../core/managed-skill-layout.js';
 import { readManifest, resolveBoundRepository, } from '../utils/repository.js';
 import { readState } from '../utils/state.js';
 import { createDeployPlan, } from './deploy.js';
@@ -33,7 +34,7 @@ export async function inspectStatus(context) {
         changes,
         linkOutcomes: deployPlan.linkOutcomes,
         pendingDeployment: summarizePendingDeployment(changes),
-        postDeployLocalState: summarizePostDeployLocalState(state.baselineSnapshot?.files ?? {}),
+        postDeployLocalState: summarizePostDeployLocalState(state),
         environment: {
             missingVariables: environmentReport.missingVariables,
             ideSupport: summarizeIdeSupport(environmentReport, manifest),
@@ -44,13 +45,26 @@ export async function inspectStatus(context) {
     };
 }
 function summarizePendingDeployment(changes) {
-    const summary = { add: 0, modify: 0, delete: 0, total: changes.length };
-    for (const change of changes)
+    const materializationPackages = new Set();
+    const summary = { add: 0, modify: 0, delete: 0, total: 0 };
+    for (const change of changes) {
+        if (change.deploymentKind === 'physical-materialization') {
+            const packagePath = resolveSkillPackageStorePath(change.targetPath);
+            if (materializationPackages.has(packagePath))
+                continue;
+            materializationPackages.add(packagePath);
+        }
         summary[change.change] += 1;
+        summary.total += 1;
+    }
     return summary;
 }
-function summarizePostDeployLocalState(baselineFiles) {
-    const files = Object.entries(baselineFiles).map(([filePath, expectedHash]) => {
+function summarizePostDeployLocalState(state) {
+    const baselineFiles = state.baselineSnapshot?.files ?? {};
+    const { contentDrifts, topologyDrifts, coveredPaths, } = inspectManagedSkillDrift(state.managedSkillLayout);
+    const files = Object.entries(baselineFiles)
+        .filter(([filePath]) => !isPathCoveredByManagedSkillLayout(filePath, coveredPaths))
+        .map(([filePath, expectedHash]) => {
         if (!deployPathExists(filePath))
             return { path: filePath, state: 'missing' };
         return {
@@ -58,12 +72,28 @@ function summarizePostDeployLocalState(baselineFiles) {
             state: hashDeviceTopologyNode(filePath) === expectedHash ? 'unchanged' : 'drift',
         };
     });
+    const ordinaryDrift = files.filter((file) => file.state === 'drift').length;
+    const missing = files.filter((file) => file.state === 'missing').length;
+    const unchanged = files.filter((file) => file.state === 'unchanged').length
+        + (state.managedSkillLayout
+            ? Object.values(state.managedSkillLayout.packages).length
+                - contentDrifts.length
+                + Object.values(state.managedSkillLayout.projections).length
+                - topologyDrifts.length
+            : 0);
+    const contentDrift = contentDrifts.length;
+    const topologyDrift = topologyDrifts.length;
+    const drift = ordinaryDrift + contentDrift + topologyDrift;
     return {
-        unchanged: files.filter((file) => file.state === 'unchanged').length,
-        drift: files.filter((file) => file.state === 'drift').length,
-        missing: files.filter((file) => file.state === 'missing').length,
-        total: files.length,
+        unchanged,
+        drift,
+        contentDrift,
+        topologyDrift,
+        missing,
+        total: unchanged + drift + missing,
         files,
+        contentDrifts,
+        topologyDrifts,
     };
 }
 function summarizeIdeSupport(environmentReport, manifest) {

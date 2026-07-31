@@ -466,14 +466,14 @@ describe('mcv deploy', () => {
     vi.mocked(console.log).mockClear();
     await run('status');
     expect(vi.mocked(console.log)).toHaveBeenCalledWith(
-      'Post-deploy local state: 1 unchanged, 0 Drift, 0 missing',
+      'Post-deploy local state: 1 unchanged, 0 content Drift, 0 topology Drift, 0 Drift, 0 missing',
     );
 
     fs.appendFileSync(settingsPath, '\n');
     vi.mocked(console.log).mockClear();
     await run('status');
     expect(vi.mocked(console.log)).toHaveBeenCalledWith(
-      'Post-deploy local state: 0 unchanged, 1 Drift, 0 missing',
+      'Post-deploy local state: 0 unchanged, 0 content Drift, 0 topology Drift, 1 Drift, 0 missing',
     );
   });
 

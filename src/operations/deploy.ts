@@ -14,6 +14,10 @@ import { atomicWriteFile, findSymbolicLinkAncestor, hashFile } from '../utils/fi
 import { isRecord } from '../utils/objects.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
 import { scanTextForSecrets } from '../utils/sanitize.js';
+import {
+  hashSkillPackageContent,
+  resolveSkillPackageStorePath,
+} from '../core/managed-skill-layout.js';
 import { getStateFilePath, readState, writeState } from '../utils/state.js';
 import {
   parseStructuredObject,
@@ -24,6 +28,7 @@ import { resolveVariableDefinitions } from '../utils/variables.js';
 import { findLegacyCodexSkillDuplicates } from '../utils/deploy-skills.js';
 import {
   classifyCanonicalSkillLinks,
+  canonicalSkillPackageName,
   deployPathExists,
   hashDeviceTopologyNode,
   planCanonicalSkillDeviceLayout,
@@ -352,10 +357,27 @@ async function buildDeployPlan(
 
   const sourcePreconditions = new Map<string, string>();
   const desiredPaths = new Set(safeDesired.map((file) => path.resolve(file.targetPath)));
+  for (const change of layout.projectionChanges) {
+    desiredPaths.add(path.resolve(change.targetPath));
+  }
+  for (const outcome of linkedSkills.outcomes) {
+    if (outcome.status !== 'satisfied-via-link' || outcome.ownership !== 'managed') continue;
+    for (const linkPath of outcome.linkPaths) desiredPaths.add(path.resolve(linkPath));
+  }
   const managedInventory = readState(context).managedInventory ?? {};
+  const managedSkillLayout = readState(context).managedSkillLayout;
   for (const [targetPath, inventoryEntry] of Object.entries(managedInventory)) {
-    if (desiredPaths.has(path.resolve(targetPath)) || !fs.existsSync(targetPath)) continue;
-    if (findSymbolicLinkAncestor(targetPath)) continue;
+    if (desiredPaths.has(path.resolve(targetPath)) || !deployPathExists(targetPath)) continue;
+    const resolvedTarget = path.resolve(targetPath);
+    const linkAncestor = findSymbolicLinkAncestor(targetPath);
+    const projection = managedSkillLayout?.projections[targetPath]
+      ?? managedSkillLayout?.projections[resolvedTarget];
+    const isManagedProjection = Boolean(projection);
+    const isSelfSymlink = linkAncestor !== undefined
+      && path.resolve(linkAncestor) === resolvedTarget;
+    const hasSymlinkParent = linkAncestor !== undefined && !isSelfSymlink;
+    if (hasSymlinkParent) continue;
+    if (isSelfSymlink && !isManagedProjection) continue;
     const target = inferDeployTarget(targetPath, context);
     if (!target) continue;
     const targetKey = canonicalTargetKey(target);
@@ -368,21 +390,29 @@ async function buildDeployPlan(
       id: selectionId(targetKey, capability, targetPath),
       ...canonicalTarget(target),
       capability,
-      name: displayName(targetPath, capability),
+      name: projection?.packageName ?? displayName(targetPath, capability),
       targetPath,
       change: 'delete',
       defaultSelected: false,
       group: 'advanced',
       strategy: semantics.strategy,
-      deploymentKind: capability === 'skills' ? 'copy-projection' : 'ordinary-file',
-      preview: preview(
-        targetPath,
-        targetKey,
-        capability,
-        Buffer.alloc(0),
-        fs.readFileSync(targetPath),
-        issues,
-      ),
+      deploymentKind: projection
+        ? 'managed-link-projection'
+        : capability === 'skills' ? 'copy-projection' : 'ordinary-file',
+      preview: projection
+        ? {
+          targetPath,
+          kind: 'link',
+          linkTarget: projection.expectedLinkTarget,
+        }
+        : preview(
+          targetPath,
+          targetKey,
+          capability,
+          Buffer.alloc(0),
+          fs.readFileSync(targetPath),
+          issues,
+        ),
     };
     changes.push(deletion);
     mutations.set(deletion.id, {});
@@ -1147,15 +1177,58 @@ function updateDeployState(
   const state = readState(context);
   const baselineFiles = { ...(state.baselineSnapshot?.files ?? {}) };
   const managedInventory = { ...(state.managedInventory ?? {}) };
+  const managedSkillLayout = {
+    packages: { ...(state.managedSkillLayout?.packages ?? {}) },
+    projections: { ...(state.managedSkillLayout?.projections ?? {}) },
+  };
+  const touchedPackages = new Set<string>();
   for (const change of changes) {
     if (change.change === 'delete' || !deployPathExists(change.targetPath)) {
       delete baselineFiles[change.targetPath];
       delete managedInventory[change.targetPath];
+      if (change.deploymentKind === 'managed-link-projection'
+        || change.deploymentKind === 'topology-migration') {
+        delete managedSkillLayout.projections[change.targetPath];
+      }
+      if (change.deploymentKind === 'physical-materialization') {
+        const storePath = resolveSkillPackageStorePath(change.targetPath);
+        touchedPackages.add(storePath);
+        if (!deployPathExists(storePath)) delete managedSkillLayout.packages[storePath];
+      }
     } else {
       const hash = hashDeviceTopologyNode(change.targetPath);
       baselineFiles[change.targetPath] = hash;
       managedInventory[change.targetPath] = { source: repositoryPath, hash };
+      if (change.deploymentKind === 'physical-materialization') {
+        touchedPackages.add(resolveSkillPackageStorePath(change.targetPath));
+      }
+      if ((change.deploymentKind === 'managed-link-projection'
+        || change.deploymentKind === 'topology-migration')
+        && change.owner === 'ide'
+        && change.preview.kind === 'link') {
+        managedSkillLayout.projections[change.targetPath] = {
+          packageName: change.name,
+          projectionPath: change.targetPath,
+          ide: change.ide,
+          surface: change.ide,
+          expectedLinkTarget: change.preview.linkTarget,
+          topologyHash: hash,
+          source: repositoryPath,
+        };
+      }
     }
+  }
+  for (const storePath of touchedPackages) {
+    if (!deployPathExists(storePath)) {
+      delete managedSkillLayout.packages[storePath];
+      continue;
+    }
+    managedSkillLayout.packages[storePath] = {
+      packageName: canonicalSkillPackageName(storePath),
+      storePath,
+      contentHash: hashSkillPackageContent(storePath),
+      source: repositoryPath,
+    };
   }
   const lastDeploySelection: NonNullable<typeof state.lastDeploySelection> = {};
   for (const change of changes) {
@@ -1167,6 +1240,12 @@ function updateDeployState(
   }
   state.baselineSnapshot = { recordedAt: new Date().toISOString(), files: baselineFiles };
   state.managedInventory = managedInventory;
+  if (Object.keys(managedSkillLayout.packages).length > 0
+    || Object.keys(managedSkillLayout.projections).length > 0) {
+    state.managedSkillLayout = managedSkillLayout;
+  } else {
+    delete state.managedSkillLayout;
+  }
   state.lastDeploySelection = lastDeploySelection;
   state.lastOperation = { kind: 'deploy', time: new Date().toISOString(), success: true };
   writeState(context, state);

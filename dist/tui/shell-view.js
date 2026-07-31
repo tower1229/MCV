@@ -532,7 +532,7 @@ function PrimaryNavigation({ focusId, }) {
 }
 function OverviewStatus({ report }) {
     const status = createOverviewStatusViewModel(report);
-    return (_jsxs(_Fragment, { children: [_jsx(StatusLine, { tone: status.repository.tone, label: status.repository.label, children: statusItemText(status.repository) }), _jsxs(Text, { wrap: "wrap", children: ['  ', "Path: ", report.repository.path] }), status.git && (_jsx(StatusLine, { tone: status.git.tone, label: status.git.label, children: statusItemText(status.git) })), _jsx(StatusLine, { tone: status.pending.tone, label: status.pending.label, children: statusItemText(status.pending) }), status.linkedSkills.map((item) => (_jsx(StatusLine, { tone: item.tone, label: item.label, children: statusItemText(item) }, item.key))), _jsx(StatusLine, { tone: status.drift.tone, label: status.drift.label, children: statusItemText(status.drift) }), _jsx(StatusLine, { tone: status.environment.tone, label: status.environment.label, children: statusItemText(status.environment) }), _jsx(Text, { children: "IDE support:" }), status.ideSupport.map((ide) => (_jsx(StatusLine, { tone: ide.tone, label: ide.label, indent: 2, children: statusItemText(ide) }, ide.key))), _jsx(StatusLine, { tone: status.lastOperation.tone, label: status.lastOperation.label, children: statusItemText(status.lastOperation) }), status.issues.map((issue) => (_jsx(StatusLine, { tone: issue.tone, label: issue.label, children: statusItemText(issue) }, issue.key)))] }));
+    return (_jsxs(_Fragment, { children: [_jsx(StatusLine, { tone: status.repository.tone, label: status.repository.label, children: statusItemText(status.repository) }), _jsxs(Text, { wrap: "wrap", children: ['  ', "Path: ", report.repository.path] }), status.git && (_jsx(StatusLine, { tone: status.git.tone, label: status.git.label, children: statusItemText(status.git) })), _jsx(StatusLine, { tone: status.pending.tone, label: status.pending.label, children: statusItemText(status.pending) }), status.linkedSkills.map((item) => (_jsx(StatusLine, { tone: item.tone, label: item.label, children: statusItemText(item) }, item.key))), _jsx(StatusLine, { tone: status.drift.tone, label: status.drift.label, children: statusItemText(status.drift) }), status.contentDrifts.map((item) => (_jsx(StatusLine, { tone: item.tone, label: item.label, children: statusItemText(item) }, item.key))), status.topologyDrifts.map((item) => (_jsx(StatusLine, { tone: item.tone, label: item.label, children: statusItemText(item) }, item.key))), _jsx(StatusLine, { tone: status.environment.tone, label: status.environment.label, children: statusItemText(status.environment) }), _jsx(Text, { children: "IDE support:" }), status.ideSupport.map((ide) => (_jsx(StatusLine, { tone: ide.tone, label: ide.label, indent: 2, children: statusItemText(ide) }, ide.key))), _jsx(StatusLine, { tone: status.lastOperation.tone, label: status.lastOperation.label, children: statusItemText(status.lastOperation) }), status.issues.map((issue) => (_jsx(StatusLine, { tone: issue.tone, label: issue.label, children: statusItemText(issue) }, issue.key)))] }));
 }
 function CompactOverview({ report, focusId, terminalColumns, }) {
     const status = createOverviewStatusViewModel(report);
@@ -594,8 +594,22 @@ function createOverviewStatusViewModel(report) {
             tone: local.drift > 0 || local.missing > 0 ? 'warning' : 'success',
             label: 'Drift',
             state: local.drift > 0 || local.missing > 0 ? 'Review' : 'None',
-            details: `${local.drift} changed, ${local.missing} missing`,
+            details: `${local.contentDrift} content, ${local.topologyDrift} topology, ${local.drift} changed, ${local.missing} missing`,
         },
+        contentDrifts: local.contentDrifts.map((entry) => ({
+            key: `content-drift:${entry.storePath}`,
+            tone: 'warning',
+            label: 'Content Drift',
+            state: entry.packageName,
+            details: 'Canonical Skill package',
+        })),
+        topologyDrifts: local.topologyDrifts.map((entry) => ({
+            key: `topology-drift:${entry.projectionPath}`,
+            tone: 'warning',
+            label: 'Topology Drift',
+            state: entry.reason,
+            details: `${displaySkillSurface(entry.surface)} · ${entry.packageName}`,
+        })),
         environment: {
             key: 'environment',
             tone: missingVariables > 0 ? 'warning' : 'success',

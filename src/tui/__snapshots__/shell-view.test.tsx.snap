@@ -22,7 +22,8 @@ main
 ! Pending Deployment Changes: Review ·
 226542 changes (123456 add, 98765 modify,
 4321 delete)
-! Drift: Review · 9876 changed, 543 missing
+! Drift: Review · 0 content, 0 topology,
+9876 changed, 543 missing
 ! Environment: Warning · 2 missing variables
 IDE support:
   ✓ Codex: Ready · enabled, detected
@@ -43,7 +44,7 @@ Status Overview
 ✓ Repository: Ready · Path: /Users/张涛/Configuration Repository/超长路径
 ! Git: Changes · 1234 uncommitted changes · main
 ! Pending Deployment Changes: Review · 226542 changes (123456 add, 98765 modify, 4321 delete)
-! Drift: Review · 9876 changed, 543 missing  ! Environment: Warning · 2 missing variables
+! Drift: Review · 0 content, 0 topology, 9876 changed, 543 missing  ! Environment: Warning · 2 missing variables
 IDE:  ✓ Codex: Ready  ○ Claude Code: Not detected  ○ Gemini: Disabled
 × Last operation: Failed · deploy  × Error: test.blocked
 ↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel
@@ -57,7 +58,7 @@ Navigation                      Status Overview
   Deploy (d)                    ! Git: Changes · 1234 uncommitted changes · main
   Restore Latest Deployment (s) ! Pending Deployment Changes: Review · 226542 changes (123456 add,
 › Repository (r)                98765 modify, 4321 delete)
-  Help (h)                      ! Drift: Review · 9876 changed, 543 missing
+  Help (h)                      ! Drift: Review · 0 content, 0 topology, 9876 changed, 543 missing
                                 ! Environment: Warning · 2 missing variables
                                 IDE support:
                                   ✓ Codex: Ready · enabled, detected

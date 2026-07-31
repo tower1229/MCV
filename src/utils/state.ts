@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { DeviceContext } from '../adapters/types.js';
 import type { ConfigurationCapability } from '../adapters/types.js';
+import type { ManagedSkillLayout } from '../core/managed-skill-layout.js';
 import { atomicWriteTextFile } from './files.js';
 
 export interface BaselineSnapshot {
@@ -16,6 +17,7 @@ export interface McvState {
   repositoryPath?: string;
   baselineSnapshot?: BaselineSnapshot;
   managedInventory?: Record<string, { source: string; hash: string }>;
+  managedSkillLayout?: ManagedSkillLayout;
   lastDeploySelection?: Partial<Record<'codex' | 'claude-code' | 'gemini', ConfigurationCapability[]>>;
   lastOperation?: { kind: 'capture' | 'deploy' | 'restore'; time: string; success: boolean };
 }

@@ -78,7 +78,7 @@ describe('TUI Shell view', () => {
       expect(text).toContain(
         '! Pending Deployment Changes: Review · 226542 changes',
       );
-      expect(text).toContain('! Drift: Review · 9876 changed, 543 missing');
+      expect(text).toContain('! Drift: Review · 0 content, 0 topology, 9876 changed, 543 missing');
       expect(text).toContain('! Environment: Warning · 2 missing variables');
       expect(text).toContain('✓ Codex: Ready');
       expect(text).toContain('○ Claude Code: Not detected');
@@ -118,9 +118,13 @@ describe('TUI Shell view', () => {
         postDeployLocalState: {
           unchanged: 3,
           drift: 0,
+          contentDrift: 0,
+          topologyDrift: 0,
           missing: 0,
           total: 3,
           files: [],
+          contentDrifts: [],
+          topologyDrifts: [],
         },
         environment: {
           ...base.page.report.environment,
@@ -275,9 +279,13 @@ describe('TUI Shell view', () => {
         postDeployLocalState: {
           unchanged: 10_000,
           drift: 9_876,
+          contentDrift: 0,
+          topologyDrift: 0,
           missing: 543,
           total: 20_419,
           files: [],
+          contentDrifts: [],
+          topologyDrifts: [],
         },
         environment: {
           missingVariables: ['OPENAI_API_KEY', 'GEMINI_API_KEY'],
@@ -399,7 +407,7 @@ describe('TUI Shell view', () => {
         Deploy (d)                    ! Git: Changes · 1234 uncommitted changes · main
         Restore Latest Deployment (s) ! Pending Deployment Changes: Review · 226542 changes (123456 add,
         Repository (r)                98765 modify, 4321 delete)
-        Help (h)                      ! Drift: Review · 9876 changed, 543 missing
+        Help (h)                      ! Drift: Review · 0 content, 0 topology, 9876 changed, 543 missing
                                       ! Environment: Warning · 2 missing variables
                                       IDE support:
                                         ✓ Codex: Ready · enabled, detected
@@ -430,7 +438,8 @@ describe('TUI Shell view', () => {
       ! Pending Deployment Changes: Review ·
       226542 changes (123456 add, 98765 modify,
       4321 delete)
-      ! Drift: Review · 9876 changed, 543 missing
+      ! Drift: Review · 0 content, 0 topology,
+      9876 changed, 543 missing
       ! Environment: Warning · 2 missing variables
       IDE support:
         ✓ Codex: Ready · enabled, detected
@@ -1832,9 +1841,13 @@ function overviewState(linkOutcomes: StatusReport['linkOutcomes'] = []): ShellSt
     postDeployLocalState: {
       unchanged: 10_000,
       drift: 9_876,
+      contentDrift: 0,
+      topologyDrift: 0,
       missing: 543,
       total: 20_419,
       files: [],
+      contentDrifts: [],
+      topologyDrifts: [],
     },
       environment: {
       missingVariables: ['OPENAI_API_KEY', 'GEMINI_API_KEY'],

@@ -40,7 +40,17 @@ export function renderStatusPlain(report: StatusReport): string[] {
   }
   const local = report.postDeployLocalState;
   lines.push(
-    `Post-deploy local state: ${local.unchanged} unchanged, ${styleText(String(local.drift), local.drift > 0 ? 'yellow' : 'green')} Drift, ${styleText(String(local.missing), local.missing > 0 ? 'red' : 'green')} missing`,
+    `Post-deploy local state: ${local.unchanged} unchanged, ${styleText(String(local.contentDrift), local.contentDrift > 0 ? 'yellow' : 'green')} content Drift, ${styleText(String(local.topologyDrift), local.topologyDrift > 0 ? 'yellow' : 'green')} topology Drift, ${styleText(String(local.drift), local.drift > 0 ? 'yellow' : 'green')} Drift, ${styleText(String(local.missing), local.missing > 0 ? 'red' : 'green')} missing`,
+  );
+  for (const entry of local.contentDrifts) {
+    lines.push(`  Content Drift: Canonical Skill package ${entry.packageName}`);
+  }
+  for (const entry of local.topologyDrifts) {
+    lines.push(
+      `  Topology Drift: ${entry.surface} · ${entry.packageName} · ${entry.reason}`,
+    );
+  }
+  lines.push(
     `Environment: ${report.environment.missingVariables.length} missing ${plural(
       report.environment.missingVariables.length,
       'variable',

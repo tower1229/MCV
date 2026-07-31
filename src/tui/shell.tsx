@@ -958,7 +958,7 @@ function summarizeDirectRoute(
   if (initialRoute === 'overview') {
     const report = state.reports.overview;
     if (!report) return undefined;
-    return `Overview: ${report.pendingDeployment.total} pending deployment changes; ${report.postDeployLocalState.drift} local managed changes; ${report.environment.missingVariables.length} missing variables.`;
+    return `Overview: ${report.pendingDeployment.total} pending deployment changes; ${report.postDeployLocalState.contentDrift} content Drift, ${report.postDeployLocalState.topologyDrift} topology Drift; ${report.environment.missingVariables.length} missing variables.`;
   }
   if (initialRoute === 'environment') {
     const report = state.reports.environment;

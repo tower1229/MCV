@@ -955,6 +955,16 @@ function OverviewStatus({ report }: { report: StatusReport }): ReactNode {
       <StatusLine tone={status.drift.tone} label={status.drift.label}>
         {statusItemText(status.drift)}
       </StatusLine>
+      {status.contentDrifts.map((item) => (
+        <StatusLine key={item.key} tone={item.tone} label={item.label}>
+          {statusItemText(item)}
+        </StatusLine>
+      ))}
+      {status.topologyDrifts.map((item) => (
+        <StatusLine key={item.key} tone={item.tone} label={item.label}>
+          {statusItemText(item)}
+        </StatusLine>
+      ))}
       <StatusLine tone={status.environment.tone} label={status.environment.label}>
         {statusItemText(status.environment)}
       </StatusLine>
@@ -1091,6 +1101,8 @@ interface OverviewStatusViewModel {
   pending: OverviewStatusItem;
   linkedSkills: OverviewStatusItem[];
   drift: OverviewStatusItem;
+  contentDrifts: OverviewStatusItem[];
+  topologyDrifts: OverviewStatusItem[];
   environment: OverviewStatusItem;
   ideSupport: OverviewStatusItem[];
   lastOperation: OverviewStatusItem;
@@ -1149,8 +1161,22 @@ function createOverviewStatusViewModel(
       tone: local.drift > 0 || local.missing > 0 ? 'warning' : 'success',
       label: 'Drift',
       state: local.drift > 0 || local.missing > 0 ? 'Review' : 'None',
-      details: `${local.drift} changed, ${local.missing} missing`,
+      details: `${local.contentDrift} content, ${local.topologyDrift} topology, ${local.drift} changed, ${local.missing} missing`,
     },
+    contentDrifts: local.contentDrifts.map((entry) => ({
+      key: `content-drift:${entry.storePath}`,
+      tone: 'warning' as const,
+      label: 'Content Drift',
+      state: entry.packageName,
+      details: 'Canonical Skill package',
+    })),
+    topologyDrifts: local.topologyDrifts.map((entry) => ({
+      key: `topology-drift:${entry.projectionPath}`,
+      tone: 'warning' as const,
+      label: 'Topology Drift',
+      state: entry.reason,
+      details: `${displaySkillSurface(entry.surface)} · ${entry.packageName}`,
+    })),
     environment: {
       key: 'environment',
       tone: missingVariables > 0 ? 'warning' : 'success',
