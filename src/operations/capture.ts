@@ -14,7 +14,12 @@ import {
   collectSkills,
   getSkillSources,
   type SkillPackage,
+  type SkillProjection,
 } from '../core/skills.js';
+import {
+  canonicalDeviceSkillStoreRoot,
+  hashDeviceTopologyNode,
+} from '../core/canonical-skill-device-layout.js';
 import { isRecord, mergeRecords } from '../utils/objects.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
 import { scanTextForSecrets } from '../utils/sanitize.js';
@@ -65,6 +70,7 @@ export interface CaptureChange {
   decisionGroupId?: string;
   decision?: 'candidate' | 'skip';
   sourceLabel?: string;
+  contributingProjections?: SkillProjection[];
 }
 
 export interface CapturePlanSummary {
@@ -229,7 +235,7 @@ async function buildCapturePlan(
     codex: manifest.targets.codex?.enabled === true,
     claudeCode: manifest.targets.claudeCode?.enabled === true,
     gemini: manifest.targets.gemini?.enabled === true,
-  }));
+  }), { storeRoot: canonicalDeviceSkillStoreRoot(captureContext) });
   for (let index = 0; index < skills.warnings.length; index += 1) {
     issues.push({
       severity: 'warning',
@@ -266,8 +272,10 @@ async function buildCapturePlan(
 
   const rawSourceHash = hashSourcePaths([
     ...captured.flatMap(({ discovered }) => discovered.map((file) => file.path)),
-    ...[...skills.packages.values()].flatMap((copies) => copies.flatMap((skill) =>
-      skill.files.map((file) => path.join(skill.directory, file.relativePath)))),
+    ...[...skills.packages.values()].flatMap((copies) => copies.flatMap((skill) => [
+      ...skill.files.map((file) => path.join(skill.directory, file.relativePath)),
+      ...skill.projections.map(skillTopologyMarker),
+    ])),
   ]);
   for (const mutation of mutations.values()) mutation.sourceHash = rawSourceHash;
 
@@ -471,10 +479,12 @@ function sameCaptureSnapshot(left: CapturePlan, right: CapturePlan): boolean {
       id: change.id,
       change: change.change,
       repositoryPaths: change.repositoryPaths,
+      contributingProjections: change.contributingProjections,
     }))) === stableValue(right.changes.map((change) => ({
       id: change.id,
       change: change.change,
       repositoryPaths: change.repositoryPaths,
+      contributingProjections: change.contributingProjections,
     })))
     && stableValue(left.issues.map((issue) => [issue.severity, issue.code]))
       === stableValue(right.issues.map((issue) => [issue.severity, issue.code]));
@@ -658,6 +668,7 @@ function hashSourcePaths(sourcePaths: string[]): string {
   if (unique.length === 0) hash.update('<missing>');
   for (const sourcePath of unique) {
     hash.update(sourcePath);
+    if (sourcePath.startsWith('skill-topology:')) continue;
     hash.update(fs.existsSync(sourcePath) ? fs.readFileSync(sourcePath) : '<missing>');
   }
   return hash.digest('hex');
@@ -1025,13 +1036,18 @@ function addSkillChanges(
       defaultSelected: true,
       repositoryPaths: repositoryPaths.sort(),
       previews: previews.sort((left, right) => left.repositoryPath.localeCompare(right.repositoryPath)),
+      contributingProjections: [...selected.projections].sort((left, right) =>
+        left.surface.localeCompare(right.surface)
+        || left.projectionPath.localeCompare(right.projectionPath)),
     };
     changes.push(change);
     mutations.set(change.id, {
       writes,
       deletes,
-      sourceHash: hashSourcePaths(selected.files.map((file) =>
-        path.join(selected.directory, file.relativePath))),
+      sourceHash: hashSourcePaths([
+        ...selected.files.map((file) => path.join(selected.directory, file.relativePath)),
+        ...selected.projections.map(skillTopologyMarker),
+      ]),
     });
   }
 }
@@ -1308,9 +1324,36 @@ function mergeCanonicalRules(contents: string[]): string {
   return `${blocks.join('\n\n')}\n`;
 }
 
+function skillTopologyMarker(projection: SkillProjection): string {
+  return `skill-topology:${projection.projectionPath}:${hashDeviceTopologyNode(projection.projectionPath)}`;
+}
+
 function uniqueSkillCopies(copies: SkillPackage[]): SkillPackage[] {
-  const seen = new Set<string>();
-  return copies.filter((copy) => !seen.has(copy.hash) && seen.add(copy.hash));
+  const byHash = new Map<string, SkillPackage>();
+  for (const copy of copies) {
+    const existing = byHash.get(copy.hash);
+    if (!existing) {
+      byHash.set(copy.hash, {
+        ...copy,
+        projections: [...copy.projections],
+      });
+      continue;
+    }
+    if (copy.modifiedAtMs > existing.modifiedAtMs) {
+      existing.modifiedAtMs = copy.modifiedAtMs;
+      existing.source = copy.source;
+      existing.directory = copy.directory;
+      existing.files = copy.files;
+      existing.warnings = copy.warnings;
+    }
+    for (const projection of copy.projections) {
+      if (!existing.projections.some((entry) =>
+        path.resolve(entry.projectionPath) === path.resolve(projection.projectionPath))) {
+        existing.projections.push(projection);
+      }
+    }
+  }
+  return [...byHash.values()];
 }
 
 function newestSkillCopy(copies: SkillPackage[]): SkillPackage {

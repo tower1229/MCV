@@ -1,5 +1,6 @@
 import { Fragment as _Fragment, jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { Box, Text, useWindowSize } from 'ink';
+import { formatContributingProjections } from '../renderers/capture.js';
 import { buildDeploySelectionTree, flattenDeploySelectionTree, } from './deploy-selection-tree.js';
 import { captureDecisionGroups, captureWarnings, deployWarnings, } from './shell-state.js';
 import { PRIMARY_DESTINATIONS, } from './overview-navigation.js';
@@ -747,14 +748,17 @@ function CaptureSelection({ workflow, terminalRows, }) {
                 const label = destructive
                     ? 'Destructive'
                     : selected ? 'Selected' : 'Unselected';
-                return (_jsxs(Text, { color: style.color, dimColor: style.dimColor, wrap: "truncate-end", children: [index === workflow.cursor ? '>' : ' ', ' ', "[", selected ? 'x' : ' ', "] ", style.symbol, " ", label, " \u00B7 [", change.change, "]", ' ', change.name, " \u00B7 ", displayGroup(change)] }, change.id));
+                return (_jsxs(Text, { color: style.color, dimColor: style.dimColor, wrap: "truncate-end", children: [index === workflow.cursor ? '>' : ' ', ' ', "[", selected ? 'x' : ' ', "] ", style.symbol, " ", label, " \u00B7 [", change.change, "]", ' ', change.name, " \u00B7 ", displayGroup(change), change.contributingProjections && change.contributingProjections.length > 0
+                            ? ` · ${formatContributingProjections(change.contributingProjections)}`
+                            : ''] }, change.id));
             }), !viewport.combinedIndicator && viewport.hiddenAfter > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenAfter, " more"] })), viewport.combinedIndicator && (_jsxs(Text, { dimColor: true, children: ['  ', "\u2026 ", viewport.hiddenBefore, " earlier \u00B7 ", viewport.hiddenAfter, " more"] })), workflow.plan.issues.some((issue) => issue.severity === 'error') && (_jsx(StatusLine, { tone: "error", label: "Blocked", children: "resolve every error before continuing." }))] }));
 }
 function CaptureDiff({ workflow, }) {
     const change = workflow.plan.changes.find((item) => item.id === workflow.changeId);
     if (!change)
         return _jsx(Text, { children: "Selected Capture change is no longer available." });
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: [change.name, " \u00B7 ", change.change] }), change.previews.map((preview) => (_jsx(CapturePreviewView, { preview: preview }, `${change.id}:${preview.repositoryPath}`))), change.previews.length === 0 && _jsx(Text, { children: "No content preview is available." })] }));
+    const projections = change.contributingProjections ?? [];
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: [change.name, " \u00B7 ", change.change] }), projections.length > 0 && (_jsxs(Text, { children: ["Projections: ", formatContributingProjections(projections)] })), change.previews.map((preview) => (_jsx(CapturePreviewView, { preview: preview }, `${change.id}:${preview.repositoryPath}`))), change.previews.length === 0 && _jsx(Text, { children: "No content preview is available." })] }));
 }
 function CapturePreviewView({ preview, }) {
     if (preview.kind === 'binary') {

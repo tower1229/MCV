@@ -83,6 +83,7 @@ TTY workflow 会按 IDE 与 File、Skill、MCP 显示经过处理的安全预览
 - 把 HOME 和已声明变量对应的绝对路径替换为便携变量；
 - 结构化合并 JSON、YAML 和 TOML，保留未识别的 Native 字段；
 - 多 IDE Rules 自动按 Markdown 块去重合并，并保留 Repository 已有规则；同名但内容不同的 Skill 自动选择完整包内最新修改时间较新的副本。
+- 多个 IDE Skill 投影若解析到同一物理包，Capture 只产生一个 Canonical 候选与一份脱敏预览，并标明贡献的 Surface；设备上的投影链接属于拓扑，不会作为可移植 Skill 包内容写入仓库，包内符号链接仍会拒绝。
 - MCP 自动合并不重名 Server；同名 MCP 的核心定义冲突等无法安全自动处理的候选仍要求选择权威来源，留空只跳过该项并显示 warning。
 - Skill 以完整目录包收集，保留 scripts、references、examples、assets 和二进制资源。
 - 自动排除 runtime/cache/session MCP 与高置信明文密钥；无法安全处理的候选阻止写入。

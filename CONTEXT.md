@@ -61,7 +61,7 @@ A Canonical YAML file (`common/mcp.yaml`) that stores the core definitions of MC
 _Avoid_: "MCP config", "server list"
 
 **Skill**:
-A reusable instruction package stored as a directory containing a `SKILL.md` file (with YAML frontmatter) and optional subdirectories (`scripts/`, `examples/`, `resources/`, `references/`). Skills live in `common/skills/` as Canonical content. Deployment is a directory copy to each IDE's global skills path — no content transformation needed. IDEs that don't support Skills are skipped with a notice.
+A reusable instruction package stored as a directory containing a `SKILL.md` file (with YAML frontmatter) and optional subdirectories (`scripts/`, `examples/`, `resources/`, `references/`). Skills live in `common/skills/` as Canonical content. On device, one physical package may be projected to several IDE Skill Surfaces through managed directory links; those projection links are device topology, not part of the portable Canonical package. Symbolic links inside a portable Skill package are unsafe content and are rejected during Capture. Deployment is a directory copy or managed-link projection to each IDE's global skills path — no content transformation needed. IDEs that don't support Skills are skipped with a notice.
 _Avoid_: "recipe", "template", "rule pack"
 
 **Baseline Snapshot（基线快照）**:

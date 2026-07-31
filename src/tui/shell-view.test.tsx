@@ -605,6 +605,52 @@ describe('TUI Shell view', () => {
     expect(JSON.stringify(rendered)).not.toContain('raw-secret-must-not-render');
   });
 
+  it('shows contributing Skill projections once in Capture Diff', () => {
+    const plan = capturePlan(1);
+    plan.changes[0] = {
+      id: 'capture-skill-shared',
+      ide: 'shared',
+      surface: 'codex',
+      itemType: 'skill',
+      capability: 'skills',
+      name: 'shared-demo',
+      change: 'add',
+      defaultSelected: true,
+      repositoryPaths: ['common/skills/shared-demo/SKILL.md'],
+      previews: [{
+        repositoryPath: 'common/skills/shared-demo/SKILL.md',
+        kind: 'text',
+        bytes: 20,
+        sha256: 'c'.repeat(64),
+        diff: '+ # Shared',
+      }],
+      contributingProjections: [
+        {
+          ide: 'claude-code',
+          surface: 'claude-code',
+          projectionPath: '/home/.claude/skills/shared-demo',
+          ownership: 'managed',
+        },
+        {
+          ide: 'codex',
+          surface: 'codex',
+          projectionPath: '/home/.agents/skills/shared-demo',
+          ownership: 'physical',
+        },
+      ],
+    };
+    const loaded = shellReducer(createInitialShellState('capture'), {
+      type: 'capture.loaded',
+      plan,
+    });
+    const diff = shellReducer(loaded, { type: 'capture.openDiff' });
+    const rendered = renderToString(<ShellView state={diff} />, { columns: 100 });
+
+    expect(rendered).toContain('shared-demo · add');
+    expect(rendered).toContain('Projections: claude-code (managed), codex (physical)');
+    expect(rendered.match(/shared-demo · add/g)).toHaveLength(1);
+  });
+
   it('snapshots decision, warning confirmation, applying, regeneration, and result states', () => {
     const plan = capturePlan(1, true);
     const loaded = shellReducer(createInitialShellState('capture'), {

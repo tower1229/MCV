@@ -1,4 +1,5 @@
 import type { CapturePlan, CaptureResult } from '../operations/capture.js';
+import type { SkillProjection } from '../core/skills.js';
 import { renderIssuePlain } from './color.js';
 
 export function renderCapturePlanPlain(plan: CapturePlan): string[] {
@@ -13,6 +14,9 @@ export function renderCapturePlanPlain(plan: CapturePlan): string[] {
     lines.push(
       `  [${change.change}] ${change.name} (${change.id})${change.defaultSelected ? ' [selected]' : ' [not selected]'}`,
     );
+    if (change.contributingProjections && change.contributingProjections.length > 0) {
+      lines.push(`    Projections: ${formatContributingProjections(change.contributingProjections)}`);
+    }
     for (const preview of change.previews) {
       if (preview.kind === 'binary') {
         lines.push(
@@ -45,6 +49,12 @@ export function renderCaptureResultPlain(result: CaptureResult): string[] {
     ...result.issues.map(renderIssuePlain),
     ...result.nextActions.map((action) => `Next: ${action}`),
   ];
+}
+
+export function formatContributingProjections(projections: SkillProjection[]): string {
+  return projections
+    .map((projection) => `${projection.surface} (${projection.ownership})`)
+    .join(', ');
 }
 
 function displayIde(ide: string): string {

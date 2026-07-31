@@ -7,6 +7,7 @@ import type {
   CapturePreview,
   CaptureResult,
 } from '../operations/capture.js';
+import { formatContributingProjections } from '../renderers/capture.js';
 import type { StatusReport } from '../operations/status.js';
 import type { RepositoryReport } from '../operations/repository.js';
 import type {
@@ -1439,6 +1440,9 @@ function CaptureSelection({
             {index === workflow.cursor ? '>' : ' '}{' '}
             [{selected ? 'x' : ' '}] {style.symbol} {label} · [{change.change}]{' '}
             {change.name} · {displayGroup(change)}
+            {change.contributingProjections && change.contributingProjections.length > 0
+              ? ` · ${formatContributingProjections(change.contributingProjections)}`
+              : ''}
           </Text>
         );
       })}
@@ -1466,9 +1470,15 @@ function CaptureDiff({
 }): ReactNode {
   const change = workflow.plan.changes.find((item) => item.id === workflow.changeId);
   if (!change) return <Text>Selected Capture change is no longer available.</Text>;
+  const projections = change.contributingProjections ?? [];
   return (
     <Box flexDirection="column">
       <Text>{change.name} · {change.change}</Text>
+      {projections.length > 0 && (
+        <Text>
+          Projections: {formatContributingProjections(projections)}
+        </Text>
+      )}
       {change.previews.map((preview) => (
         <CapturePreviewView
           key={`${change.id}:${preview.repositoryPath}`}

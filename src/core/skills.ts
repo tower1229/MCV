@@ -11,6 +11,15 @@ export interface SkillSource {
   legacy?: boolean;
 }
 
+export type SkillProjectionOwnership = 'physical' | 'managed' | 'external';
+
+export interface SkillProjection {
+  ide: string;
+  surface: string;
+  projectionPath: string;
+  ownership: SkillProjectionOwnership;
+}
+
 export interface SkillPackage {
   name: string;
   source: SkillSource;
@@ -19,6 +28,7 @@ export interface SkillPackage {
   modifiedAtMs: number;
   files: Array<{ relativePath: string; content: Buffer }>;
   warnings: string[];
+  projections: SkillProjection[];
 }
 
 export interface SkillCollection {
@@ -50,19 +60,49 @@ export function getSkillSources(
   ];
 }
 
-export function collectSkills(sources: SkillSource[]): SkillCollection {
+export function collectSkills(
+  sources: SkillSource[],
+  options: { storeRoot?: string } = {},
+): SkillCollection {
   const packages = new Map<string, SkillPackage[]>();
   const warnings: string[] = [];
   let excludedFileCount = 0;
+  let storeRoot: string | undefined;
+  if (options.storeRoot) {
+    try {
+      storeRoot = fs.existsSync(options.storeRoot)
+        ? fs.realpathSync(options.storeRoot)
+        : path.resolve(options.storeRoot);
+    } catch {
+      storeRoot = path.resolve(options.storeRoot);
+    }
+  }
+
   for (const source of sources) {
     if (!fs.existsSync(source.root)) continue;
     for (const entry of fs.readdirSync(source.root, { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.name === '.system') continue;
-      const directory = path.join(source.root, entry.name);
-      if (!fs.existsSync(path.join(directory, 'SKILL.md'))) continue;
+      if (entry.name === '.system') continue;
+      const projectionPath = path.join(source.root, entry.name);
+      const isLink = entry.isSymbolicLink();
+      if (!isLink && !entry.isDirectory()) continue;
+
+      let physicalDirectory: string;
+      try {
+        physicalDirectory = fs.realpathSync(projectionPath);
+      } catch {
+        warnings.push(`Skipped Skill projection ${projectionPath}: unresolved link target.`);
+        continue;
+      }
+
+      const physicalStat = fs.statSync(physicalDirectory);
+      if (!physicalStat.isDirectory()) continue;
+      if (!fs.existsSync(path.join(physicalDirectory, 'SKILL.md'))) continue;
+
       const files: SkillPackage['files'] = [];
       const packageWarnings: string[] = [];
-      walkSkill(directory, directory, files, packageWarnings, () => { excludedFileCount += 1; });
+      walkSkill(physicalDirectory, physicalDirectory, files, packageWarnings, () => {
+        excludedFileCount += 1;
+      });
       if (packageWarnings.some((warning) => warning.startsWith('Blocked Skill'))) {
         warnings.push(...packageWarnings);
         continue;
@@ -71,24 +111,40 @@ export function collectSkills(sources: SkillSource[]): SkillCollection {
       const skillText = files.find((file) => file.relativePath === 'SKILL.md')!.content.toString('utf8');
       const declaredName = skillText.match(/^---\s*[\r\n]+[\s\S]*?^name:\s*["']?([^"'\r\n]+)["']?\s*$[\s\S]*?^---\s*$/m)?.[1]?.trim();
       if (declaredName && declaredName !== entry.name) {
-        warnings.push(`Skipped Skill ${directory}: frontmatter name "${declaredName}" does not match directory name "${entry.name}".`);
+        warnings.push(`Skipped Skill ${projectionPath}: frontmatter name "${declaredName}" does not match directory name "${entry.name}".`);
         excludedFileCount += files.length;
         continue;
       }
+
       const hash = crypto.createHash('sha256');
       for (const file of files.sort((a, b) => a.relativePath.localeCompare(b.relativePath))) {
         hash.update(file.relativePath.replace(/\\/g, '/'));
         hash.update(file.content);
       }
+      const ownership = classifyProjectionOwnership(physicalDirectory, isLink, storeRoot);
+      const projection: SkillProjection = {
+        ide: source.ide,
+        surface: source.surface,
+        projectionPath,
+        ownership,
+      };
+      const existing = (packages.get(entry.name) ?? [])
+        .find((skill) => path.resolve(skill.directory) === path.resolve(physicalDirectory));
+      if (existing) {
+        existing.projections.push(projection);
+        continue;
+      }
+
       const skill: SkillPackage = {
         name: entry.name,
         source,
-        directory,
+        directory: physicalDirectory,
         hash: hash.digest('hex'),
         modifiedAtMs: Math.max(...files.map((file) =>
-          fs.statSync(path.join(directory, file.relativePath)).mtimeMs)),
+          fs.statSync(path.join(physicalDirectory, file.relativePath)).mtimeMs)),
         files,
         warnings: packageWarnings,
+        projections: [projection],
       };
       packages.set(entry.name, [...(packages.get(entry.name) ?? []), skill]);
       warnings.push(...packageWarnings);
@@ -106,6 +162,22 @@ export function skillPackageToCaptureFiles(skill: SkillPackage): CaptureFile[] {
   }));
 }
 
+function classifyProjectionOwnership(
+  physicalDirectory: string,
+  isLink: boolean,
+  storeRoot: string | undefined,
+): SkillProjectionOwnership {
+  if (!isLink) return 'physical';
+  if (!storeRoot) return 'external';
+  let physicalParent: string;
+  try {
+    physicalParent = fs.realpathSync(path.dirname(physicalDirectory));
+  } catch {
+    physicalParent = path.resolve(path.dirname(physicalDirectory));
+  }
+  return physicalParent === storeRoot ? 'managed' : 'external';
+}
+
 function walkSkill(
   root: string,
   directory: string,
@@ -116,7 +188,7 @@ function walkSkill(
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const current = path.join(directory, entry.name);
     if (entry.isSymbolicLink()) {
-      warnings.push(`Skipped symlink outside portable Skill package: ${current}`);
+      warnings.push(`Blocked Skill: symbolic link inside portable Skill package: ${current}`);
       excluded();
       continue;
     }

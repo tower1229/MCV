@@ -196,6 +196,153 @@ describe('Capture operations', () => {
     );
   });
 
+  it('captures one Skill candidate from managed projection aliases of one physical package', async () => {
+    if (process.platform === 'win32') return;
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 2',
+      'repositoryId: capture-operation-test',
+      'initializedAt: 2026-07-22T00:00:00.000Z',
+      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: true }',
+      'targets:',
+      '  codex:',
+      '    enabled: true',
+      '  claudeCode:',
+      '    enabled: true',
+      '  gemini:',
+      '    enabled: true',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'shared-demo');
+    const claudeProjection = path.join(homeDir, '.claude', 'skills', 'shared-demo');
+    const geminiProjection = path.join(homeDir, '.gemini', 'skills', 'shared-demo');
+    fs.mkdirSync(path.join(storePackage, 'assets'), { recursive: true });
+    fs.mkdirSync(path.dirname(claudeProjection), { recursive: true });
+    fs.mkdirSync(path.dirname(geminiProjection), { recursive: true });
+    fs.writeFileSync(path.join(storePackage, 'SKILL.md'), '---\nname: shared-demo\n---\n# Shared\n');
+    fs.writeFileSync(path.join(storePackage, 'assets', 'icon.bin'), Buffer.from([9, 8, 7]));
+    fs.symlinkSync(storePackage, claudeProjection, 'dir');
+    fs.symlinkSync(storePackage, geminiProjection, 'dir');
+
+    const plan = await createCapturePlan(context);
+    const skillChanges = plan.changes.filter((change) => change.name === 'shared-demo');
+
+    expect(skillChanges).toHaveLength(1);
+    expect(skillChanges[0]).toMatchObject({
+      ide: 'shared',
+      itemType: 'skill',
+      change: 'add',
+      defaultSelected: true,
+      repositoryPaths: [
+        'common/skills/shared-demo/SKILL.md',
+        'common/skills/shared-demo/assets/icon.bin',
+      ],
+      contributingProjections: [
+        expect.objectContaining({ surface: 'claude-code', ownership: 'managed' }),
+        expect.objectContaining({ surface: 'codex', ownership: 'physical' }),
+        expect.objectContaining({ surface: 'gemini-cli', ownership: 'managed' }),
+      ],
+    });
+    expect(skillChanges[0].previews).toHaveLength(2);
+    expect(JSON.stringify(plan.changes.filter((change) => change.name === 'shared-demo')))
+      .toContain('"contributingProjections"');
+    expect(JSON.stringify(plan.changes.filter((change) => change.name === 'shared-demo'))
+      .match(/"name":"shared-demo"/g)).toHaveLength(1);
+
+    const result = await applyCapturePlan(context, plan, {
+      changeIds: [skillChanges[0].id],
+    });
+    expect(result.status).toBe('succeeded');
+    expect(fs.readFileSync(
+      path.join(repositoryPath, 'common', 'skills', 'shared-demo', 'SKILL.md'),
+      'utf8',
+    )).toContain('# Shared');
+    expect(fs.lstatSync(path.join(repositoryPath, 'common', 'skills', 'shared-demo')).isSymbolicLink())
+      .toBe(false);
+    expect(readState(context).managedSkillLayout).toBeUndefined();
+  });
+
+  it('invalidates Capture Plan when Skill projection topology changes before Apply', async () => {
+    if (process.platform === 'win32') return;
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 2',
+      'repositoryId: capture-operation-test',
+      'initializedAt: 2026-07-22T00:00:00.000Z',
+      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: true }',
+      'targets:',
+      '  codex:',
+      '    enabled: true',
+      '  claudeCode:',
+      '    enabled: true',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'topo');
+    const otherPackage = path.join(homeDir, 'elsewhere', 'topo');
+    const claudeProjection = path.join(homeDir, '.claude', 'skills', 'topo');
+    fs.mkdirSync(storePackage, { recursive: true });
+    fs.mkdirSync(otherPackage, { recursive: true });
+    fs.mkdirSync(path.dirname(claudeProjection), { recursive: true });
+    const identical = '---\nname: topo\n---\n# Same bytes\n';
+    fs.writeFileSync(path.join(storePackage, 'SKILL.md'), identical);
+    fs.writeFileSync(path.join(otherPackage, 'SKILL.md'), identical);
+    fs.symlinkSync(storePackage, claudeProjection, 'dir');
+
+    const plan = await createCapturePlan(context);
+    const skill = plan.changes.find((change) => change.name === 'topo');
+    if (!skill) throw new Error('expected topo skill change');
+    expect(skill.contributingProjections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ surface: 'claude-code', ownership: 'managed' }),
+    ]));
+
+    fs.rmSync(claudeProjection, { force: true });
+    fs.symlinkSync(otherPackage, claudeProjection, 'dir');
+
+    const result = await applyCapturePlan(context, plan, { changeIds: [skill.id] });
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'operation.stalePlan' } });
+    expect(fs.existsSync(path.join(repositoryPath, 'common', 'skills', 'topo'))).toBe(false);
+  });
+
+  it('keeps independent same-named Skill packages on the newest-complete selection path', async () => {
+    const older = path.join(homeDir, '.codex', 'skills', 'review');
+    const newer = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 2',
+      'repositoryId: capture-operation-test',
+      'initializedAt: 2026-07-22T00:00:00.000Z',
+      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets:',
+      '  codex:',
+      '    enabled: true',
+      '  claudeCode:',
+      '    enabled: true',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    fs.mkdirSync(older, { recursive: true });
+    fs.mkdirSync(newer, { recursive: true });
+    const oldFile = path.join(older, 'SKILL.md');
+    const newFile = path.join(newer, 'SKILL.md');
+    fs.writeFileSync(oldFile, '---\nname: review\n---\n# Older independent\n');
+    fs.writeFileSync(newFile, '---\nname: review\n---\n# Newer independent\n');
+    fs.utimesSync(oldFile, new Date('2026-01-01T00:00:00Z'), new Date('2026-01-01T00:00:00Z'));
+    fs.utimesSync(newFile, new Date('2026-07-01T00:00:00Z'), new Date('2026-07-01T00:00:00Z'));
+
+    const plan = await createCapturePlan(context);
+    const skill = plan.changes.find((change) => change.name === 'review');
+    expect(skill?.contributingProjections).toEqual([
+      expect.objectContaining({ surface: 'claude-code', ownership: 'physical' }),
+    ]);
+    const skillDiff = skill?.previews.find((item) => item.repositoryPath.endsWith('SKILL.md'));
+    expect(skillDiff?.kind === 'text' ? skillDiff.diff : '').toContain('# Newer independent');
+  });
+
   it('merges Repository-first Canonical Rules and chooses the newest complete Skill copy deterministically', async () => {
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
       'schemaVersion: 2',
