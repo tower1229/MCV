@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceContext } from '../adapters/types.js';
+import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
 import { readState, writeState } from '../utils/state.js';
 import { applyRestorePlan, createRestorePlan } from './restore.js';
 
@@ -357,6 +358,303 @@ describe('Restore operations', () => {
     });
   });
 
+  it('restores a managed symlink projection and labels it distinctly from physical packages', () => {
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    const storeFile = path.join(storePackage, 'SKILL.md');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    const previousPackage = path.join(homeDir, 'previous-skills', 'review');
+    fs.mkdirSync(storePackage, { recursive: true });
+    fs.mkdirSync(previousPackage, { recursive: true });
+    fs.mkdirSync(path.dirname(projectionPath), { recursive: true });
+    fs.writeFileSync(storeFile, 'latest deployed content');
+    fs.writeFileSync(path.join(previousPackage, 'SKILL.md'), '# Previous\n');
+    fs.symlinkSync(storePackage, projectionPath, 'dir');
+    const projectionAfterHash = hashDeviceTopologyNode(projectionPath);
+    const storeAfterHash = hash('latest deployed content');
+
+    const directory = path.join(backupRoot, 'topology');
+    const relativeBackupPath = path.join('files', '0-review');
+    fs.mkdirSync(path.join(directory, 'files'), { recursive: true });
+    fs.symlinkSync(previousPackage, path.join(directory, relativeBackupPath), 'dir');
+    fs.writeFileSync(path.join(directory, 'manifest.json'), `${JSON.stringify({
+      createdAt: '2026-07-19T00:00:00.000Z',
+      status: 'complete',
+      files: [{
+        action: 'modify',
+        originalPath: projectionPath,
+        backupPath: relativeBackupPath,
+        beforeHash: hashDeviceTopologyNode(path.join(directory, relativeBackupPath)),
+        afterHash: projectionAfterHash,
+        nodeKind: 'symlink',
+        linkText: previousPackage,
+        layoutKind: 'managed-link-projection',
+      }, {
+        action: 'add',
+        originalPath: storeFile,
+        afterHash: storeAfterHash,
+        layoutKind: 'physical-materialization',
+      }],
+    }, null, 2)}\n`);
+    writeState(context, {
+      schemaVersion: 2,
+      managedSkillLayout: {
+        packages: {
+          [storePackage]: {
+            packageName: 'review',
+            storePath: storePackage,
+            contentHash: storeAfterHash,
+            source: 'repository',
+          },
+        },
+        projections: {
+          [projectionPath]: {
+            packageName: 'review',
+            projectionPath,
+            ide: 'claude-code',
+            surface: 'claude-code',
+            expectedLinkTarget: storePackage,
+            topologyHash: projectionAfterHash,
+            source: 'repository',
+          },
+        },
+      },
+    });
+
+    const plan = createRestorePlan(context);
+    expect(plan).toMatchObject({
+      status: 'planned',
+      readyToApply: true,
+      changes: [
+        {
+          action: 'restore',
+          targetPath: projectionPath,
+          nodeKind: 'symlink',
+          layoutKind: 'managed-link-projection',
+          linkTarget: previousPackage,
+        },
+        {
+          action: 'delete',
+          targetPath: storeFile,
+          layoutKind: 'physical-package',
+        },
+      ],
+    });
+
+    const result = applyRestorePlan(context, plan, {
+      changeIds: plan.changes.map((change) => change.id),
+    });
+
+    expect(result.status).toBe('succeeded');
+    expect(fs.lstatSync(projectionPath).isSymbolicLink()).toBe(true);
+    expect(fs.readlinkSync(projectionPath)).toBe(previousPackage);
+    expect(fs.existsSync(storeFile)).toBe(false);
+    expect(readState(context).managedSkillLayout).toBeUndefined();
+  });
+
+  it('reports Restore Conflict when a managed projection is replaced with a directory', () => {
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(storePackage, { recursive: true });
+    fs.mkdirSync(path.dirname(projectionPath), { recursive: true });
+    fs.writeFileSync(path.join(storePackage, 'SKILL.md'), '# Store\n');
+    fs.symlinkSync(storePackage, projectionPath, 'dir');
+    const afterHash = hashDeviceTopologyNode(projectionPath);
+    fs.rmSync(projectionPath, { force: true });
+    fs.mkdirSync(projectionPath, { recursive: true });
+    fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Replaced\n');
+
+    const directory = path.join(backupRoot, 'replaced');
+    const relativeBackupPath = path.join('files', '0-review');
+    fs.mkdirSync(path.join(directory, 'files'), { recursive: true });
+    fs.symlinkSync(storePackage, path.join(directory, relativeBackupPath), 'dir');
+    fs.writeFileSync(path.join(directory, 'manifest.json'), `${JSON.stringify({
+      createdAt: '2026-07-19T00:00:00.000Z',
+      status: 'complete',
+      files: [{
+        action: 'modify',
+        originalPath: projectionPath,
+        backupPath: relativeBackupPath,
+        beforeHash: hashDeviceTopologyNode(path.join(directory, relativeBackupPath)),
+        afterHash,
+        nodeKind: 'symlink',
+        linkText: storePackage,
+        layoutKind: 'managed-link-projection',
+      }],
+    }, null, 2)}\n`);
+
+    const plan = createRestorePlan(context);
+    expect(plan).toMatchObject({
+      status: 'planned',
+      readyToApply: false,
+      issues: [{
+        code: 'restore.conflict',
+        message: expect.stringContaining('paths that changed'),
+        details: projectionPath,
+      }],
+    });
+  });
+
+  it('reports Restore Conflict when a managed projection is retargeted after deploy', () => {
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    const externalPackage = path.join(homeDir, 'external-skills', 'review');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(storePackage, { recursive: true });
+    fs.mkdirSync(externalPackage, { recursive: true });
+    fs.mkdirSync(path.dirname(projectionPath), { recursive: true });
+    fs.writeFileSync(path.join(storePackage, 'SKILL.md'), '# Store\n');
+    fs.writeFileSync(path.join(externalPackage, 'SKILL.md'), '# External\n');
+    fs.symlinkSync(storePackage, projectionPath, 'dir');
+    const afterHash = hashDeviceTopologyNode(projectionPath);
+    fs.rmSync(projectionPath, { force: true });
+    fs.symlinkSync(externalPackage, projectionPath, 'dir');
+
+    const directory = path.join(backupRoot, 'retargeted');
+    const relativeBackupPath = path.join('files', '0-review');
+    fs.mkdirSync(path.join(directory, 'files'), { recursive: true });
+    fs.symlinkSync(storePackage, path.join(directory, relativeBackupPath), 'dir');
+    fs.writeFileSync(path.join(directory, 'manifest.json'), `${JSON.stringify({
+      createdAt: '2026-07-19T00:00:00.000Z',
+      status: 'complete',
+      files: [{
+        action: 'modify',
+        originalPath: projectionPath,
+        backupPath: relativeBackupPath,
+        beforeHash: hashDeviceTopologyNode(path.join(directory, relativeBackupPath)),
+        afterHash,
+        nodeKind: 'symlink',
+        linkText: storePackage,
+        layoutKind: 'managed-link-projection',
+      }],
+    }, null, 2)}\n`);
+
+    const plan = createRestorePlan(context);
+    expect(plan).toMatchObject({
+      status: 'planned',
+      readyToApply: false,
+      issues: [{ code: 'restore.conflict', details: projectionPath }],
+    });
+  });
+
+  it('backs up and rolls back symlink topology when a later Restore write fails', () => {
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    const previousPackage = path.join(homeDir, 'previous-skills', 'review');
+    const fileTarget = path.join(testRoot, 'target', 'settings.json');
+    fs.mkdirSync(storePackage, { recursive: true });
+    fs.mkdirSync(previousPackage, { recursive: true });
+    fs.mkdirSync(path.dirname(projectionPath), { recursive: true });
+    fs.writeFileSync(path.join(storePackage, 'SKILL.md'), '# Store\n');
+    fs.writeFileSync(path.join(previousPackage, 'SKILL.md'), '# Previous\n');
+    fs.symlinkSync(storePackage, projectionPath, 'dir');
+    fs.writeFileSync(fileTarget, 'latest deployed content');
+    const projectionAfterHash = hashDeviceTopologyNode(projectionPath);
+
+    const directory = path.join(backupRoot, 'partial');
+    const relativeBackupPath = path.join('files', '0-review');
+    fs.mkdirSync(path.join(directory, 'files'), { recursive: true });
+    fs.symlinkSync(previousPackage, path.join(directory, relativeBackupPath), 'dir');
+    fs.writeFileSync(path.join(directory, 'files', 'settings.json'), 'original content');
+    fs.writeFileSync(path.join(directory, 'manifest.json'), `${JSON.stringify({
+      createdAt: '2026-07-19T00:00:00.000Z',
+      status: 'complete',
+      files: [{
+        action: 'modify',
+        originalPath: projectionPath,
+        backupPath: relativeBackupPath,
+        beforeHash: hashDeviceTopologyNode(path.join(directory, relativeBackupPath)),
+        afterHash: projectionAfterHash,
+        nodeKind: 'symlink',
+        linkText: previousPackage,
+        layoutKind: 'managed-link-projection',
+      }, {
+        action: 'modify',
+        originalPath: fileTarget,
+        backupPath: 'files/settings.json',
+        beforeHash: hash('original content'),
+        afterHash: hash('latest deployed content'),
+      }],
+    }, null, 2)}\n`);
+
+    const plan = createRestorePlan(context);
+    const result = applyRestorePlan(
+      context,
+      plan,
+      { changeIds: plan.changes.map((change) => change.id) },
+      { writeFile: () => { throw new Error('simulated write failure'); } },
+    );
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'restore.transactionFailed' },
+    });
+    expect(fs.lstatSync(projectionPath).isSymbolicLink()).toBe(true);
+    expect(fs.readlinkSync(projectionPath)).toBe(storePackage);
+    expect(fs.readFileSync(fileTarget, 'utf8')).toBe('latest deployed content');
+  });
+
+  it('restores a physical Skill directory topology from backup metadata', () => {
+    const packagePath = path.join(homeDir, '.claude', 'skills', 'review');
+    const backupPackage = path.join(homeDir, 'backup-skills', 'review');
+    fs.mkdirSync(packagePath, { recursive: true });
+    fs.mkdirSync(backupPackage, { recursive: true });
+    fs.writeFileSync(path.join(packagePath, 'SKILL.md'), '# Deployed\n');
+    fs.writeFileSync(path.join(backupPackage, 'SKILL.md'), '# Previous\n');
+    const afterHash = hashDeviceTopologyNode(packagePath);
+
+    const directory = path.join(backupRoot, 'directory');
+    const relativeBackupPath = path.join('files', '0-review');
+    fs.mkdirSync(path.join(directory, 'files'), { recursive: true });
+    fs.cpSync(backupPackage, path.join(directory, relativeBackupPath), { recursive: true });
+    const beforeHash = hashDirectoryTree(path.join(directory, relativeBackupPath));
+    fs.writeFileSync(path.join(directory, 'manifest.json'), `${JSON.stringify({
+      createdAt: '2026-07-19T00:00:00.000Z',
+      status: 'complete',
+      files: [{
+        action: 'modify',
+        originalPath: packagePath,
+        backupPath: relativeBackupPath,
+        beforeHash,
+        afterHash,
+        nodeKind: 'directory',
+        layoutKind: 'copy-projection',
+      }],
+    }, null, 2)}\n`);
+
+    const plan = createRestorePlan(context);
+    expect(plan.changes[0]).toMatchObject({
+      action: 'restore',
+      nodeKind: 'directory',
+      layoutKind: 'copy-projection',
+    });
+    const result = applyRestorePlan(context, plan, {
+      changeIds: plan.changes.map((change) => change.id),
+    });
+    expect(result.status).toBe('succeeded');
+    expect(fs.lstatSync(packagePath).isDirectory()).toBe(true);
+    expect(fs.lstatSync(packagePath).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(path.join(packagePath, 'SKILL.md'), 'utf8')).toBe('# Previous\n');
+  });
+
+  it('accepts older backups without topology entries as plain file restores', () => {
+    createBackup('legacy', '2026-07-19T00:00:00.000Z', 'original content');
+    const plan = createRestorePlan(context);
+    expect(plan).toMatchObject({
+      status: 'planned',
+      readyToApply: true,
+      changes: [{
+        action: 'restore',
+        targetPath,
+        nodeKind: 'file',
+        layoutKind: 'ordinary-file',
+      }],
+    });
+    const result = applyRestorePlan(context, plan, {
+      changeIds: plan.changes.map((change) => change.id),
+    });
+    expect(result.status).toBe('succeeded');
+    expect(fs.readFileSync(targetPath, 'utf8')).toBe('original content');
+  });
+
   it('honors cancellation before backup and ignores it once commit starts', () => {
     createBackup('valid', '2026-07-19T00:00:00.000Z', 'original content');
     const cancelledPlan = createRestorePlan(context);
@@ -420,6 +718,29 @@ describe('Restore operations', () => {
 
 function hash(value: string): string {
   return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function hashDirectoryTree(root: string): string {
+  const hashValue = crypto.createHash('sha256');
+  const visit = (directory: string): void => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      const current = path.join(directory, entry.name);
+      hashValue.update(`${path.relative(root, current)}\0`);
+      if (entry.isSymbolicLink()) {
+        hashValue.update(`symlink\0${fs.readlinkSync(current)}\0`);
+        continue;
+      }
+      if (entry.isDirectory()) {
+        hashValue.update('directory\0');
+        visit(current);
+        continue;
+      }
+      hashValue.update(fs.readFileSync(current));
+    }
+  };
+  visit(root);
+  return hashValue.digest('hex');
 }
 
 function hashDirectory(root: string): string {

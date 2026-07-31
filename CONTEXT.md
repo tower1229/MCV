@@ -45,7 +45,7 @@ A difference between the current Repository's desired managed state and the curr
 _Avoid_: "sync status", "unsynced"
 
 **Restore Conflict（恢复冲突）**:
-A local file change made after the latest deployment that would be overwritten by Restore. A Restore Conflict blocks restoration in v0.1 and is distinct from Drift, which describes managed-field changes relative to a Baseline Snapshot.
+A local content or topology change made after the latest deployment that would be overwritten by Restore — including file edits, replaced directories, retargeted or removed managed-link projections, and other node-type changes. A Restore Conflict blocks restoration in v0.1 and is distinct from Drift, which describes managed-field changes relative to a Baseline Snapshot.
 _Avoid_: "restore drift", "extra confirmation"
 
 **Capture（收集）**:

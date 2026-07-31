@@ -1236,6 +1236,64 @@ describe('Deploy operations', () => {
     expect(fs.existsSync(path.join(storePackage, 'SKILL.md'))).toBe(true);
   });
 
+  it('offers the final physical package as a separate Advanced Cleanup candidate when all projections are gone', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      [
+        'schemaVersion: 2',
+        'repositoryId: deploy-operation-test',
+        'initializedAt: 2026-07-22T00:00:00.000Z',
+        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+        'capture: { preserveUnknownNativeFields: true }',
+        'deploy: { backupBeforeWrite: true, useSymlinks: true }',
+        'targets:',
+        '  claudeCode:',
+        '    enabled: true',
+        '  gemini:',
+        '    enabled: true',
+        'variables: {}',
+        '',
+      ].join('\n'),
+    );
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    const claudeProjection = path.join(homeDir, '.claude', 'skills', 'review');
+    const geminiProjection = path.join(homeDir, '.gemini', 'skills', 'review');
+    const firstPlan = await createDeployPlan(context);
+    await applyDeployPlan(context, firstPlan, {
+      changeIds: firstPlan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+    });
+    expect(fs.lstatSync(claudeProjection).isSymbolicLink()).toBe(true);
+    expect(fs.lstatSync(geminiProjection).isSymbolicLink()).toBe(true);
+
+    fs.rmSync(path.join(repositoryPath, 'common', 'skills', 'review'), { recursive: true, force: true });
+    const cleanupPlan = await createDeployPlan(context);
+    const projectionDeletes = cleanupPlan.changes.filter((change) =>
+      change.change === 'delete'
+      && change.deploymentKind === 'managed-link-projection'
+      && (change.targetPath === claudeProjection || change.targetPath === geminiProjection));
+    const packageDeletes = cleanupPlan.changes.filter((change) =>
+      change.change === 'delete'
+      && change.deploymentKind === 'physical-materialization'
+      && change.targetPath === storePackage);
+    const storeFileDeletes = cleanupPlan.changes.filter((change) =>
+      change.change === 'delete'
+      && change.targetPath.startsWith(`${storePackage}${path.sep}`));
+
+    expect(projectionDeletes).toHaveLength(2);
+    expect(packageDeletes).toEqual([expect.objectContaining({
+      owner: 'canonical-store',
+      group: 'advanced',
+      defaultSelected: false,
+      deploymentKind: 'physical-materialization',
+      name: 'review',
+    })]);
+    expect(storeFileDeletes).toEqual([]);
+    expect(cleanupPlan.changes.some((change) =>
+      change.change === 'delete'
+      && change.defaultSelected)).toBe(false);
+  });
+
   it('disabling Codex does not invalidate the Canonical Device Skill Store', async () => {
     const manifestPath = path.join(repositoryPath, 'mcv.yaml');
     fs.writeFileSync(

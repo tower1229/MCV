@@ -178,10 +178,14 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
     }
     const managedInventory = readState(context).managedInventory ?? {};
     const managedSkillLayout = readState(context).managedSkillLayout;
+    const managedStorePaths = Object.keys(managedSkillLayout?.packages ?? {})
+        .map((storePath) => path.resolve(storePath));
     for (const [targetPath, inventoryEntry] of Object.entries(managedInventory)) {
         if (desiredPaths.has(path.resolve(targetPath)) || !deployPathExists(targetPath))
             continue;
         const resolvedTarget = path.resolve(targetPath);
+        if (isPathUnderAnyRoot(resolvedTarget, managedStorePaths))
+            continue;
         const linkAncestor = findSymbolicLinkAncestor(targetPath);
         const projection = managedSkillLayout?.projections[targetPath]
             ?? managedSkillLayout?.projections[resolvedTarget];
@@ -203,6 +207,11 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
         const capability = semantics.capabilities[0];
         if (semantics.strategy !== 'replace-entire-file' || !capability)
             continue;
+        const deploymentKind = projection
+            ? 'managed-link-projection'
+            : target.owner === 'canonical-store'
+                ? 'physical-materialization'
+                : capability === 'skills' ? 'copy-projection' : 'ordinary-file';
         const deletion = {
             id: selectionId(targetKey, capability, targetPath),
             ...canonicalTarget(target),
@@ -213,9 +222,7 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
             defaultSelected: false,
             group: 'advanced',
             strategy: semantics.strategy,
-            deploymentKind: projection
-                ? 'managed-link-projection'
-                : capability === 'skills' ? 'copy-projection' : 'ordinary-file',
+            deploymentKind,
             preview: projection
                 ? {
                     targetPath,
@@ -227,6 +234,54 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
         changes.push(deletion);
         mutations.set(deletion.id, {});
         sourcePreconditions.set(deletion.id, hashText(stableValue(inventoryEntry)));
+    }
+    for (const pkg of Object.values(managedSkillLayout?.packages ?? {})) {
+        const storePath = path.resolve(pkg.storePath);
+        if (!deployPathExists(storePath))
+            continue;
+        if (desiredPaths.has(storePath) || [...desiredPaths].some((desired) => isPathUnderRoot(desired, storePath)))
+            continue;
+        const stillRequired = Object.values(managedSkillLayout?.projections ?? {}).some((projection) => {
+            if (path.resolve(projection.expectedLinkTarget) !== storePath
+                && projection.packageName !== pkg.packageName)
+                return false;
+            return desiredPaths.has(path.resolve(projection.projectionPath));
+        });
+        if (stillRequired)
+            continue;
+        try {
+            const storeStat = fs.lstatSync(storePath);
+            if (storeStat.isSymbolicLink() || !storeStat.isDirectory())
+                continue;
+        }
+        catch {
+            continue;
+        }
+        const id = selectionId('canonical-store', 'skills', storePath);
+        if (changes.some((change) => change.id === id))
+            continue;
+        const deletion = {
+            id,
+            owner: 'canonical-store',
+            capability: 'skills',
+            name: pkg.packageName,
+            targetPath: storePath,
+            change: 'delete',
+            defaultSelected: false,
+            group: 'advanced',
+            strategy: 'replace-entire-file',
+            deploymentKind: 'physical-materialization',
+            preview: {
+                targetPath: storePath,
+                kind: 'text',
+                bytes: 0,
+                sha256: hashText(`remove-package:${pkg.packageName}`),
+                diff: `Remove MCV-owned Canonical Skill package ${pkg.packageName}`,
+            },
+        };
+        changes.push(deletion);
+        mutations.set(deletion.id, {});
+        sourcePreconditions.set(deletion.id, hashText(stableValue(pkg)));
     }
     changes.sort(compareChanges);
     const repositorySourceHash = hashRepositoryInputs(repositoryPath);
@@ -635,10 +690,16 @@ function createDeployBackup(context, plan, changes, copyFile) {
     try {
         const files = changes.map((change, index) => {
             const expected = plan.preconditions[`target:${change.id}`];
+            const layoutKind = change.deploymentKind;
             if (change.change === 'add') {
                 if (deployPathExists(change.targetPath))
                     throw new StaleDeployPlanError('A selected add target appeared during backup.');
-                return { changeId: change.id, action: change.change, originalPath: change.targetPath };
+                return {
+                    changeId: change.id,
+                    action: change.change,
+                    originalPath: change.targetPath,
+                    layoutKind,
+                };
             }
             const relativeBackupPath = path.join('files', `${index}-${path.basename(change.targetPath)}`);
             const copiedPath = path.join(backupPath, relativeBackupPath);
@@ -661,6 +722,7 @@ function createDeployBackup(context, plan, changes, copyFile) {
                 backupPath: relativeBackupPath,
                 beforeHash: node.beforeHash,
                 nodeKind: node.nodeKind,
+                layoutKind,
                 ...(node.linkText !== undefined ? { linkText: node.linkText } : {}),
             };
         });
@@ -880,6 +942,14 @@ function updateDeployState(context, repositoryPath, changes) {
             if (change.deploymentKind === 'physical-materialization') {
                 const storePath = resolveSkillPackageStorePath(change.targetPath);
                 touchedPackages.add(storePath);
+                for (const inventoryPath of Object.keys(managedInventory)) {
+                    if (isPathUnderRoot(inventoryPath, storePath))
+                        delete managedInventory[inventoryPath];
+                }
+                for (const baselinePath of Object.keys(baselineFiles)) {
+                    if (isPathUnderRoot(baselinePath, storePath))
+                        delete baselineFiles[baselinePath];
+                }
                 if (!deployPathExists(storePath))
                     delete managedSkillLayout.packages[storePath];
             }
@@ -1270,6 +1340,17 @@ function inferDeployTarget(targetPath, context) {
         [{ owner: 'ide', ide: 'gemini' }, path.resolve(context.homeDir, '.gemini')],
     ];
     return roots.find(([, root]) => resolved === root || resolved.startsWith(`${root}${path.sep}`))?.[0];
+}
+function isPathUnderRoot(candidate, root) {
+    const resolvedCandidate = path.resolve(candidate);
+    const resolvedRoot = path.resolve(root);
+    if (resolvedCandidate === resolvedRoot)
+        return true;
+    const relative = path.relative(resolvedRoot, resolvedCandidate);
+    return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+function isPathUnderAnyRoot(candidate, roots) {
+    return roots.some((root) => isPathUnderRoot(candidate, root));
 }
 function resolveManifestVariables(declarations, context, repositoryPath) {
     const platformKey = context.platform === 'win32'

@@ -111,6 +111,9 @@ export function applyRestorePlan(context, plan, selection, options = {}) {
     const removeFile = options.removeFile ?? ((targetPath) => fs.rmSync(targetPath, { recursive: true, force: true }));
     try {
         for (const change of plan.changes) {
+            if (currentFileHash(change.targetPath) !== plan.preconditions[`target:${change.id}`]) {
+                throw new Error(`Restore target changed after the current-state backup: ${change.targetPath}`);
+            }
             attemptedPaths.add(change.targetPath);
             if (change.action === 'delete') {
                 removeFile(change.targetPath);
@@ -123,6 +126,9 @@ export function applyRestorePlan(context, plan, selection, options = {}) {
                 const sourcePath = resolveVerifiedBackupDirectory(transactionBackup.directory, source.backupPath);
                 if (!sourcePath)
                     throw new Error(`Backup directory is no longer valid for ${change.targetPath}.`);
+                if (hashDirectoryTree(sourcePath) !== source.beforeHash) {
+                    throw new Error(`Backup directory content changed for ${change.targetPath}.`);
+                }
                 removeFile(change.targetPath);
                 fs.cpSync(sourcePath, change.targetPath, { recursive: true, verbatimSymlinks: true });
                 continue;
@@ -146,6 +152,7 @@ export function applyRestorePlan(context, plan, selection, options = {}) {
         const nextState = { ...previousState };
         delete nextState.baselineSnapshot;
         delete nextState.managedInventory;
+        delete nextState.managedSkillLayout;
         nextState.lastOperation = { kind: 'restore', time: new Date().toISOString(), success: true };
         stateCommitAttempted = true;
         (options.updateState ?? writeState)(context, nextState);
@@ -242,11 +249,24 @@ function createCurrentStateBackup(stateDirectory, plan, copyFile) {
             const backupPath = path.join('files', `${index}-${path.basename(change.targetPath)}`);
             const destination = path.join(directory, backupPath);
             fs.mkdirSync(path.dirname(destination), { recursive: true });
-            copyFile(change.targetPath, destination);
-            if (hashFile(destination) !== actualHash || currentFileHash(change.targetPath) !== expectedHash) {
+            const node = backupCurrentNode(change.targetPath, destination, copyFile);
+            if (node.hash !== actualHash || currentFileHash(change.targetPath) !== expectedHash) {
                 throw new Error(`Current-state backup verification failed for ${change.targetPath}.`);
             }
-            files.push({ originalPath: change.targetPath, backupPath, hash: actualHash });
+            if (node.nodeKind === 'file' && hashFile(destination) !== hashFile(change.targetPath)) {
+                throw new Error(`Current-state backup verification failed for ${change.targetPath}.`);
+            }
+            if (node.nodeKind === 'symlink'
+                && (typeof node.linkText !== 'string' || fs.readlinkSync(destination) !== node.linkText)) {
+                throw new Error(`Current-state backup verification failed for ${change.targetPath}.`);
+            }
+            files.push({
+                originalPath: change.targetPath,
+                backupPath,
+                hash: actualHash,
+                nodeKind: node.nodeKind,
+                ...(node.linkText !== undefined ? { linkText: node.linkText } : {}),
+            });
         }
         const manifest = {
             createdAt: new Date().toISOString(),
@@ -263,6 +283,30 @@ function createCurrentStateBackup(stateDirectory, plan, copyFile) {
         fs.rmSync(directory, { recursive: true, force: true });
         throw error;
     }
+}
+function backupCurrentNode(targetPath, destination, copyFile) {
+    const stats = fs.lstatSync(targetPath);
+    if (stats.isSymbolicLink()) {
+        const linkText = fs.readlinkSync(targetPath);
+        fs.symlinkSync(linkText, destination, 'dir');
+        return {
+            hash: hashDeviceTopologyNode(targetPath),
+            nodeKind: 'symlink',
+            linkText,
+        };
+    }
+    if (stats.isDirectory()) {
+        fs.cpSync(targetPath, destination, { recursive: true, verbatimSymlinks: true });
+        return {
+            hash: hashDeviceTopologyNode(targetPath),
+            nodeKind: 'directory',
+        };
+    }
+    copyFile(targetPath, destination);
+    return {
+        hash: currentFileHash(targetPath),
+        nodeKind: 'file',
+    };
 }
 function verifyCurrentStateBackup(directory, changes) {
     try {
@@ -295,10 +339,45 @@ function verifyCurrentStateBackup(directory, changes) {
             }
             if (typeof entry.backupPath !== 'string')
                 return undefined;
+            const nodeKind = entry.nodeKind === 'directory' || entry.nodeKind === 'symlink'
+                ? entry.nodeKind
+                : 'file';
+            if (nodeKind === 'directory') {
+                const sourcePath = resolveVerifiedBackupDirectory(directory, entry.backupPath);
+                if (!sourcePath)
+                    return undefined;
+                files.push({
+                    originalPath: entry.originalPath,
+                    backupPath: entry.backupPath,
+                    hash: entry.hash,
+                    nodeKind,
+                });
+                continue;
+            }
+            if (nodeKind === 'symlink') {
+                if (typeof entry.linkText !== 'string')
+                    return undefined;
+                const sourcePath = resolveVerifiedBackupSymlink(directory, entry.backupPath, entry.linkText);
+                if (!sourcePath)
+                    return undefined;
+                files.push({
+                    originalPath: entry.originalPath,
+                    backupPath: entry.backupPath,
+                    hash: entry.hash,
+                    nodeKind,
+                    linkText: entry.linkText,
+                });
+                continue;
+            }
             const sourcePath = resolveVerifiedBackupFile(directory, entry.backupPath);
-            if (!sourcePath || hashFile(sourcePath) !== entry.hash)
+            if (!sourcePath)
                 return undefined;
-            files.push({ originalPath: entry.originalPath, backupPath: entry.backupPath, hash: entry.hash });
+            files.push({
+                originalPath: entry.originalPath,
+                backupPath: entry.backupPath,
+                hash: entry.hash,
+                nodeKind: 'file',
+            });
         }
         return expectedPaths.size === 0
             ? { createdAt: value.createdAt, status: 'complete', files }
@@ -315,10 +394,25 @@ function rollbackRestoreWrites(backupPath, changes, attemptedPaths, removeFile, 
     const errors = [];
     for (const entry of manifest.files.filter((file) => attemptedPaths.has(file.originalPath)).reverse()) {
         try {
-            if (!entry.backupPath)
+            if (!entry.backupPath) {
                 removeFile(entry.originalPath);
-            else
-                restoreFile(entry.originalPath, fs.readFileSync(path.join(backupPath, entry.backupPath)));
+                continue;
+            }
+            const sourcePath = path.join(backupPath, entry.backupPath);
+            if (entry.nodeKind === 'directory') {
+                removeFile(entry.originalPath);
+                fs.cpSync(sourcePath, entry.originalPath, { recursive: true, verbatimSymlinks: true });
+            }
+            else if (entry.nodeKind === 'symlink') {
+                if (typeof entry.linkText !== 'string') {
+                    throw new Error(`Current-state symlink metadata is missing for ${entry.originalPath}.`);
+                }
+                removeFile(entry.originalPath);
+                fs.symlinkSync(entry.linkText, entry.originalPath, 'dir');
+            }
+            else {
+                restoreFile(entry.originalPath, fs.readFileSync(sourcePath));
+            }
         }
         catch (error) {
             errors.push(`${entry.originalPath}: ${errorMessage(error)}`);
@@ -340,12 +434,21 @@ function buildRestorePlan(operationId, repositoryPath, backup) {
         preconditions[`target:${id}`] = targetHash;
         if (targetHash !== expectedTargetHash)
             conflicts.push(file.originalPath);
-        return { id, action, targetPath: file.originalPath };
+        const nodeKind = file.nodeKind ?? 'file';
+        const layoutKind = restoreLayoutKind(file.layoutKind, nodeKind);
+        return {
+            id,
+            action,
+            targetPath: file.originalPath,
+            nodeKind,
+            layoutKind,
+            ...(file.linkText !== undefined ? { linkTarget: file.linkText } : {}),
+        };
     });
     const issues = conflicts.length === 0 ? [] : [{
             severity: 'error',
             code: 'restore.conflict',
-            message: 'Restore would overwrite files that changed after the deployment.',
+            message: 'Restore would overwrite paths that changed after the deployment.',
             details: conflicts.join('\n'),
         }];
     return {
@@ -363,9 +466,23 @@ function buildRestorePlan(operationId, repositoryPath, backup) {
         changes,
         issues,
         nextActions: issues.length === 0
-            ? ['Review this Plan, then run `mcv restore` to restore the listed files.']
+            ? ['Review this Plan, then run `mcv restore` to restore the listed paths.']
             : ['Back up or manually resolve every Restore Conflict, then generate a new Restore Plan.'],
     };
+}
+function restoreLayoutKind(layoutKind, nodeKind) {
+    if (layoutKind === 'physical-materialization')
+        return 'physical-package';
+    if (layoutKind === 'managed-link-projection' || layoutKind === 'topology-migration') {
+        return 'managed-link-projection';
+    }
+    if (layoutKind === 'copy-projection')
+        return 'copy-projection';
+    if (nodeKind === 'symlink')
+        return 'managed-link-projection';
+    if (nodeKind === 'directory')
+        return 'copy-projection';
+    return 'ordinary-file';
 }
 export function findLatestVerifiedBackup(backupRoot) {
     if (!fs.existsSync(backupRoot))
@@ -418,6 +535,9 @@ function verifyDeployBackupFile(directory, value) {
         || typeof value.originalPath !== 'string'
         || !path.isAbsolute(value.originalPath))
         return undefined;
+    const layoutKind = parseBackupLayoutKind(value.layoutKind);
+    if (value.layoutKind !== undefined && layoutKind === undefined)
+        return undefined;
     const action = value.action;
     if (action === 'add') {
         if (value.backupPath !== undefined
@@ -425,7 +545,12 @@ function verifyDeployBackupFile(directory, value) {
             || typeof value.afterHash !== 'string'
             || !SHA256_PATTERN.test(value.afterHash))
             return undefined;
-        return { action, originalPath: value.originalPath, afterHash: value.afterHash };
+        return {
+            action,
+            originalPath: value.originalPath,
+            afterHash: value.afterHash,
+            ...(layoutKind !== undefined ? { layoutKind } : {}),
+        };
     }
     if (typeof value.backupPath !== 'string'
         || typeof value.beforeHash !== 'string'
@@ -447,6 +572,7 @@ function verifyDeployBackupFile(directory, value) {
             backupPath: value.backupPath,
             beforeHash: value.beforeHash,
             nodeKind,
+            ...(layoutKind !== undefined ? { layoutKind } : {}),
             ...(action === 'modify' ? { afterHash: value.afterHash } : {}),
         };
     }
@@ -463,6 +589,7 @@ function verifyDeployBackupFile(directory, value) {
             beforeHash: value.beforeHash,
             nodeKind,
             linkText: value.linkText,
+            ...(layoutKind !== undefined ? { layoutKind } : {}),
             ...(action === 'modify' ? { afterHash: value.afterHash } : {}),
         };
     }
@@ -474,8 +601,20 @@ function verifyDeployBackupFile(directory, value) {
         originalPath: value.originalPath,
         backupPath: value.backupPath,
         beforeHash: value.beforeHash,
+        nodeKind: 'file',
+        ...(layoutKind !== undefined ? { layoutKind } : {}),
         ...(action === 'modify' ? { afterHash: value.afterHash } : {}),
     };
+}
+function parseBackupLayoutKind(value) {
+    if (value === 'ordinary-file'
+        || value === 'physical-materialization'
+        || value === 'managed-link-projection'
+        || value === 'copy-projection'
+        || value === 'topology-migration') {
+        return value;
+    }
+    return undefined;
 }
 function resolveVerifiedBackupDirectory(directory, backupPath) {
     const sourcePath = path.resolve(directory, backupPath);

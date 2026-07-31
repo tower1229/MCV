@@ -1,6 +1,7 @@
 import { Fragment as _Fragment, jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { Box, Text, useWindowSize } from 'ink';
 import { formatContributingProjections } from '../renderers/capture.js';
+import { restoreLayoutLabel } from '../renderers/restore-layout.js';
 import { buildDeploySelectionTree, flattenDeploySelectionTree, } from './deploy-selection-tree.js';
 import { captureDecisionGroups, captureWarnings, deployWarnings, } from './shell-state.js';
 import { PRIMARY_DESTINATIONS, } from './overview-navigation.js';
@@ -929,12 +930,20 @@ function RestoreReview({ workflow, terminalRows, }) {
     const hasConflict = plan.issues.some((issue) => issue.code === 'restore.conflict');
     const detail = plan.changes.find((change) => change.id === workflow.detailChangeId);
     if (detail) {
-        return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "Focused Restore detail" }), _jsxs(Text, { children: ["Action: ", detail.action === 'restore' ? 'write' : 'delete'] }), _jsxs(Text, { wrap: "wrap", children: ["Target: ", detail.targetPath] }), _jsx(Text, { children: detail.action === 'restore'
-                        ? 'The deployment backup will replace this file.'
-                        : 'Restore will delete this file because it did not exist in the deployment backup.' })] }));
+        return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: "Focused Restore detail" }), _jsxs(Text, { children: ["Action: ", detail.action === 'restore' ? 'write' : 'delete'] }), _jsxs(Text, { children: ["Layout: ", restoreLayoutLabel(detail.layoutKind, detail.nodeKind)] }), _jsxs(Text, { wrap: "wrap", children: ["Target: ", detail.targetPath] }), detail.linkTarget && (_jsxs(Text, { wrap: "wrap", children: ["Link target: ", detail.linkTarget] })), _jsx(Text, { children: detail.action === 'restore'
+                        ? detail.nodeKind === 'symlink'
+                            ? 'The deployment backup will restore this managed-link projection.'
+                            : detail.layoutKind === 'physical-package'
+                                ? 'The deployment backup will restore this physical Skill package.'
+                                : 'The deployment backup will replace this path.'
+                        : detail.layoutKind === 'physical-package'
+                            ? 'Restore will delete this physical Skill package because it was added by the deployment.'
+                            : detail.layoutKind === 'managed-link-projection'
+                                ? 'Restore will delete this managed-link projection because it was added by the deployment.'
+                                : 'Restore will delete this path because it did not exist in the deployment backup.' })] }));
     }
     const viewport = listViewport(plan.changes, workflow.cursor, Math.max(1, terminalRows - 13));
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: ["Repository: ", plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: ["Backup time: ", plan.backup?.createdAt ?? 'not available'] }), _jsxs(Text, { children: ["Impact: ", writeCount, " file(s) to write, ", deleteCount, " file(s) to delete"] }), _jsx(Text, { children: " " }), viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["\u2026 ", viewport.hiddenBefore, " earlier changes"] })), viewport.items.map(({ item: change }, visibleIndex) => (_jsxs(Text, { children: [viewport.start + visibleIndex === workflow.cursor ? '>' : ' ', ' ', "[", change.action === 'restore' ? 'write' : 'delete', "] ", change.targetPath] }, change.id))), viewport.hiddenAfter > 0 && (_jsxs(Text, { dimColor: true, children: ["\u2026 ", viewport.hiddenAfter, " more changes"] })), plan.issues.map((issue) => (_jsxs(Box, { flexDirection: "column", children: [_jsxs(StatusLine, { tone: "error", label: issue.code === 'restore.conflict'
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: ["Repository: ", plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: ["Backup time: ", plan.backup?.createdAt ?? 'not available'] }), _jsxs(Text, { children: ["Impact: ", writeCount, " change(s) to write, ", deleteCount, " change(s) to delete", ' · ', plan.changes.filter((change) => change.layoutKind === 'managed-link-projection').length, ' ', "projection(s)", ' · ', plan.changes.filter((change) => change.layoutKind === 'physical-package').length, ' ', "physical package(s)"] }), _jsx(Text, { children: " " }), viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["\u2026 ", viewport.hiddenBefore, " earlier changes"] })), viewport.items.map(({ item: change }, visibleIndex) => (_jsxs(Text, { children: [viewport.start + visibleIndex === workflow.cursor ? '>' : ' ', ' ', "[", change.action === 'restore' ? 'write' : 'delete', "]", ' ', "[", restoreLayoutLabel(change.layoutKind, change.nodeKind), "] ", change.targetPath] }, change.id))), viewport.hiddenAfter > 0 && (_jsxs(Text, { dimColor: true, children: ["\u2026 ", viewport.hiddenAfter, " more changes"] })), plan.issues.map((issue) => (_jsxs(Box, { flexDirection: "column", children: [_jsxs(StatusLine, { tone: "error", label: issue.code === 'restore.conflict'
                             ? 'Restore Conflict'
                             : 'Error', children: ["Blocked \u00B7 ", issue.message] }), issue.details?.split('\n').map((detail) => (_jsxs(Text, { children: ['  ', detail] }, `${issue.code}:${detail}`)))] }, issue.code))), (plan.status === 'failed' || !plan.readyToApply || hasConflict) && (_jsx(Text, { color: "red", children: "Apply disabled: resolve the blocking Restore error, then regenerate the Plan." })), plan.nextActions.map((action) => (_jsxs(Text, { children: ["Next: ", action] }, action)))] }));
 }

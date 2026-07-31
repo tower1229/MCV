@@ -1414,11 +1414,15 @@ describe('TUI Shell view', () => {
     expect(rendered.conflict).toContain('/Users/张涛/.codex/config.toml');
     expect(rendered.conflict).not.toContain('force');
     expect(rendered.review).toContain('Backup time: 2026-07-27T08:30:00.000Z');
-    expect(rendered.review).toContain('1 file(s) to write, 1 file(s) to delete');
-    expect(rendered.review).toContain('> [write] /Users/张涛/.codex/config.toml');
-    expect(rendered.deleteFocused).toContain('> [delete] /Users/张涛/.codex/added.toml');
+    expect(rendered.review).toContain('1 change(s) to write, 1 change(s) to delete');
+    expect(rendered.review).toContain('projection(s)');
+    expect(rendered.review).toContain('physical package(s)');
+    expect(rendered.review).toContain('[Ordinary file]');
+    expect(rendered.review).toContain('> [write] [Ordinary file] /Users/张涛/.codex/config.toml');
+    expect(rendered.deleteFocused).toContain('> [delete] [Ordinary file] /Users/张涛/.codex/added.toml');
     expect(rendered.detail).toContain('Focused Restore detail');
     expect(rendered.detail).toContain('Action: delete');
+    expect(rendered.detail).toContain('Layout: Ordinary file');
     expect(rendered.applying).toContain('input is disabled during backup, Apply, and rollback');
     expect(rendered.stale).toContain('Regenerating');
     expect(rendered.success).toContain('Restore succeeded');
@@ -1579,11 +1583,15 @@ function restorePlan(
         id: 'restore-settings',
         action: 'restore',
         targetPath: '/Users/张涛/.codex/config.toml',
+        nodeKind: 'file',
+        layoutKind: 'ordinary-file',
       },
       {
         id: 'restore-added',
         action: 'delete',
         targetPath: '/Users/张涛/.codex/added.toml',
+        nodeKind: 'file',
+        layoutKind: 'ordinary-file',
       },
     ],
     issues: [],

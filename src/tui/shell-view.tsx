@@ -20,6 +20,7 @@ import type {
   RestorePlan,
   RestoreResult,
 } from '../operations/restore.js';
+import { restoreLayoutLabel } from '../renderers/restore-layout.js';
 import {
   buildDeploySelectionTree,
   flattenDeploySelectionTree,
@@ -2046,11 +2047,23 @@ function RestoreReview({
       <Box flexDirection="column">
         <Text>Focused Restore detail</Text>
         <Text>Action: {detail.action === 'restore' ? 'write' : 'delete'}</Text>
+        <Text>Layout: {restoreLayoutLabel(detail.layoutKind, detail.nodeKind)}</Text>
         <Text wrap="wrap">Target: {detail.targetPath}</Text>
+        {detail.linkTarget && (
+          <Text wrap="wrap">Link target: {detail.linkTarget}</Text>
+        )}
         <Text>
           {detail.action === 'restore'
-            ? 'The deployment backup will replace this file.'
-            : 'Restore will delete this file because it did not exist in the deployment backup.'}
+            ? detail.nodeKind === 'symlink'
+              ? 'The deployment backup will restore this managed-link projection.'
+              : detail.layoutKind === 'physical-package'
+                ? 'The deployment backup will restore this physical Skill package.'
+                : 'The deployment backup will replace this path.'
+            : detail.layoutKind === 'physical-package'
+              ? 'Restore will delete this physical Skill package because it was added by the deployment.'
+              : detail.layoutKind === 'managed-link-projection'
+                ? 'Restore will delete this managed-link projection because it was added by the deployment.'
+                : 'Restore will delete this path because it did not exist in the deployment backup.'}
         </Text>
       </Box>
     );
@@ -2065,7 +2078,13 @@ function RestoreReview({
       <Text>Repository: {plan.repositoryPath ?? 'not bound'}</Text>
       <Text>Backup time: {plan.backup?.createdAt ?? 'not available'}</Text>
       <Text>
-        Impact: {writeCount} file(s) to write, {deleteCount} file(s) to delete
+        Impact: {writeCount} change(s) to write, {deleteCount} change(s) to delete
+        {' · '}
+        {plan.changes.filter((change) => change.layoutKind === 'managed-link-projection').length}
+        {' '}projection(s)
+        {' · '}
+        {plan.changes.filter((change) => change.layoutKind === 'physical-package').length}
+        {' '}physical package(s)
       </Text>
       <Text> </Text>
       {viewport.hiddenBefore > 0 && (
@@ -2074,7 +2093,8 @@ function RestoreReview({
       {viewport.items.map(({ item: change }, visibleIndex) => (
         <Text key={change.id}>
           {viewport.start + visibleIndex === workflow.cursor ? '>' : ' '}{' '}
-          [{change.action === 'restore' ? 'write' : 'delete'}] {change.targetPath}
+          [{change.action === 'restore' ? 'write' : 'delete'}]{' '}
+          [{restoreLayoutLabel(change.layoutKind, change.nodeKind)}] {change.targetPath}
         </Text>
       ))}
       {viewport.hiddenAfter > 0 && (
@@ -2106,3 +2126,4 @@ function RestoreReview({
     </Box>
   );
 }
+

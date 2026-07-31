@@ -130,10 +130,11 @@ Restore Latest Deployment · Review
 
 Repository: /Users/张涛/Configuration Repository
 Backup time: 2026-07-27T08:30:00.000Z
-Impact: 1 file(s) to write, 1 file(s) to delete
+Impact: 1 change(s) to write, 1 change(s) to delete · 0 projection(s) · 0
+physical package(s)
 
-> [write] /Users/张涛/.codex/config.toml
-  [delete] /Users/张涛/.codex/added.toml
+> [write] [Ordinary file] /Users/张涛/.codex/config.toml
+  [delete] [Ordinary file] /Users/张涛/.codex/added.toml
 × Restore Conflict: Blocked · Restore would overwrite files that changed after
 the deployment.
   /Users/张涛/.codex/config.toml
@@ -147,10 +148,11 @@ Restore Latest Deployment · Review
 
 Repository: /Users/张涛/Configuration Repository
 Backup time: 2026-07-27T08:30:00.000Z
-Impact: 1 file(s) to write, 1 file(s) to delete
+Impact: 1 change(s) to write, 1 change(s) to delete · 0 projection(s) · 0
+physical package(s)
 
-  [write] /Users/张涛/.codex/config.toml
-> [delete] /Users/张涛/.codex/added.toml
+  [write] [Ordinary file] /Users/张涛/.codex/config.toml
+> [delete] [Ordinary file] /Users/张涛/.codex/added.toml
 
 ↑↓ Browse   → Detail   Enter Apply   ←/Escape Overview   q Quit   Ctrl+C Cancel",
   "detail": "MCV
@@ -158,8 +160,9 @@ Restore Latest Deployment · Review
 
 Focused Restore detail
 Action: delete
+Layout: Ordinary file
 Target: /Users/张涛/.codex/added.toml
-Restore will delete this file because it did not exist in the deployment backup.
+Restore will delete this path because it did not exist in the deployment backup.
 
 ←/Escape Close Detail   q Quit   Ctrl+C Cancel",
   "noBackup": "MCV
@@ -167,7 +170,8 @@ Restore Latest Deployment · Review
 
 Repository: /Users/张涛/Configuration Repository
 Backup time: not available
-Impact: 0 file(s) to write, 0 file(s) to delete
+Impact: 0 change(s) to write, 0 change(s) to delete · 0 projection(s) · 0
+physical package(s)
 
 × Error: Blocked · No complete and verified deployment backup is available.
 Apply disabled: resolve the blocking Restore error, then regenerate the Plan.
@@ -179,10 +183,11 @@ Restore Latest Deployment · Review
 
 Repository: /Users/张涛/Configuration Repository
 Backup time: 2026-07-27T08:30:00.000Z
-Impact: 1 file(s) to write, 1 file(s) to delete
+Impact: 1 change(s) to write, 1 change(s) to delete · 0 projection(s) · 0
+physical package(s)
 
-> [write] /Users/张涛/.codex/config.toml
-  [delete] /Users/张涛/.codex/added.toml
+> [write] [Ordinary file] /Users/张涛/.codex/config.toml
+  [delete] [Ordinary file] /Users/张涛/.codex/added.toml
 
 ↑↓ Browse   → Detail   Enter Apply   ←/Escape Overview   q Quit   Ctrl+C Cancel",
   "rollbackFailure": "MCV

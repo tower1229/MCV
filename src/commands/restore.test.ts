@@ -35,7 +35,7 @@ describe('mcv restore', () => {
       .parseAsync(['node', 'mcv', 'restore', '--yes']);
 
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('restored content');
-    expect(vi.mocked(console.log)).toHaveBeenCalledWith('Restored 1 file(s) from the latest backup.');
+    expect(vi.mocked(console.log)).toHaveBeenCalledWith('Restored 1 change(s) from the latest backup.');
 
     function createBackup(name: string, createdAt: string, content: string): void {
       const directory = path.join(backupRoot, name);
@@ -114,8 +114,10 @@ describe('mcv restore', () => {
 
     expect(vi.mocked(console.log).mock.calls.map(([line]) => line)).toEqual(expect.arrayContaining([
       'Backup time: 2026-07-19T00:00:00.000Z',
-      `  [restore] ${targetPath}`,
-      'Summary: 1 file(s) to restore, 0 file(s) to delete.',
+      `  [restore] ${targetPath} [Ordinary file]`,
+      'Summary: 1 change(s) to restore, 0 change(s) to delete.',
+      'Managed-link projections: 0',
+      'Physical packages: 0',
       expect.stringContaining('Next:'),
     ]));
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('deployed content');
@@ -136,7 +138,13 @@ describe('mcv restore', () => {
       status: 'planned',
       readyToApply: true,
       backup: { createdAt: '2026-07-19T00:00:00.000Z' },
-      changes: [{ action: 'restore', targetPath }],
+      changes: [{
+        action: 'restore',
+        targetPath,
+        nodeKind: 'file',
+        layoutKind: 'ordinary-file',
+      }],
+      issues: [],
     });
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('deployed content');
   });
@@ -153,7 +161,12 @@ describe('mcv restore', () => {
       schemaVersion: 1,
       operation: 'restore',
       status: 'succeeded',
-      changes: [{ action: 'restore', targetPath }],
+      changes: [{
+        action: 'restore',
+        targetPath,
+        nodeKind: 'file',
+        layoutKind: 'ordinary-file',
+      }],
       data: {
         restoredPaths: [targetPath],
         deletedPaths: [],

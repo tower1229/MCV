@@ -1,15 +1,25 @@
 import type { RestorePlan, RestoreResult } from '../operations/restore.js';
 import { renderIssuePlain } from './color.js';
+import { restoreLayoutLabel } from './restore-layout.js';
 
 export function renderRestorePlanPlain(plan: RestorePlan): string[] {
   const lines = ['Restore Plan: latest complete deployment backup'];
   if (plan.backup) lines.push(`Backup time: ${plan.backup.createdAt}`);
   for (const change of plan.changes) {
-    lines.push(`  [${change.action}] ${change.targetPath}`);
+    lines.push(
+      `  [${change.action}] ${change.targetPath} [${restoreLayoutLabel(change.layoutKind, change.nodeKind)}]`,
+    );
+    if (change.linkTarget) lines.push(`    ${change.targetPath} -> ${change.linkTarget}`);
   }
   const restoreCount = plan.changes.filter((change) => change.action === 'restore').length;
   const deleteCount = plan.changes.length - restoreCount;
-  lines.push(`Summary: ${restoreCount} file(s) to restore, ${deleteCount} file(s) to delete.`);
+  const projectionCount = plan.changes.filter((change) =>
+    change.layoutKind === 'managed-link-projection').length;
+  const packageCount = plan.changes.filter((change) =>
+    change.layoutKind === 'physical-package').length;
+  lines.push(`Summary: ${restoreCount} change(s) to restore, ${deleteCount} change(s) to delete.`);
+  lines.push(`Managed-link projections: ${projectionCount}`);
+  lines.push(`Physical packages: ${packageCount}`);
   for (const issue of plan.issues) {
     lines.push(renderIssuePlain(issue));
     if (issue.details) {
@@ -25,7 +35,7 @@ export function renderRestoreResultPlain(result: RestoreResult): string[] {
   if (result.status === 'succeeded') {
     return [
       `Current pre-restore state saved to ${result.data?.backupPath}.`,
-      `Restored ${result.data?.appliedChangeIds.length ?? 0} file(s) from the latest backup.`,
+      `Restored ${result.data?.appliedChangeIds.length ?? 0} change(s) from the latest backup.`,
     ];
   }
   const lines = [`Restore ${result.status}.`];
