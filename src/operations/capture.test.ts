@@ -355,6 +355,23 @@ describe('Capture operations', () => {
     fs.writeFileSync(path.join(storePackage, 'SKILL.md'), identical);
     fs.writeFileSync(path.join(otherPackage, 'SKILL.md'), identical);
     fs.symlinkSync(storePackage, claudeProjection, 'dir');
+    writeState(context, {
+      ...readState(context),
+      managedSkillLayout: {
+        packages: {},
+        projections: {
+          [claudeProjection]: {
+            packageName: 'topo',
+            projectionPath: claudeProjection,
+            ide: 'claude-code',
+            surface: 'claude-code',
+            expectedLinkTarget: storePackage,
+            topologyHash: hashDeviceTopologyNode(claudeProjection),
+            source: repositoryPath,
+          },
+        },
+      },
+    });
 
     const plan = await createCapturePlan(context);
     const skill = plan.changes.find((change) => change.name === 'topo');
