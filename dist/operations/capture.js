@@ -471,8 +471,8 @@ function capturePlanFailureDetails(error) {
     if (message.includes('schema validation failed:')) {
         return 'The Repository manifest failed schema validation.';
     }
-    if (/ must contain a (?:JSON|YAML|TOML) object\.$/.test(message)) {
-        return 'A configuration file has an invalid root value.';
+    if (/^[^\r\n]+ must contain a (?:JSON|YAML|TOML) object\.$/.test(message)) {
+        return message;
     }
     return `Unexpected ${error.name || 'Error'} while reading Repository or IDE configuration.`;
 }
@@ -975,6 +975,8 @@ function lines(value) {
 }
 function mergeWithRepository(file, existingBuffer) {
     if (!existingBuffer || Buffer.isBuffer(file.content))
+        return file.content;
+    if (file.captureMerge === 'replace-entire-file')
         return file.content;
     const format = structuredFormat(file.repositoryPath);
     if (file.ownership !== 'native' || !format)

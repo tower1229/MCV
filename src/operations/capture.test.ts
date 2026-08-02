@@ -123,6 +123,73 @@ describe('Capture operations', () => {
     expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).toBe(sourceContent);
   });
 
+  it('identifies the configuration path when a structured root is invalid', async () => {
+    const repositoryFile = path.join(
+      repositoryPath,
+      'ide',
+      'claude-code',
+      'native',
+      'settings.json',
+    );
+    fs.mkdirSync(path.dirname(repositoryFile), { recursive: true });
+    fs.writeFileSync(repositoryFile, '["invalid-root-content-must-not-leak"]\n');
+    fs.writeFileSync(path.join(homeDir, '.claude', 'settings.json'), '{"theme":"dark"}\n');
+
+    const plan = await createCapturePlan(context);
+
+    expect(plan).toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'capture.planFailed',
+        technicalDetails: 'ide/claude-code/native/settings.json must contain a JSON object.',
+      },
+    });
+    expect(JSON.stringify(plan)).not.toContain('invalid-root-content-must-not-leak');
+  });
+
+  it('captures Antigravity keybindings arrays by replacing the Repository file', async () => {
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 2',
+      'repositoryId: capture-operation-test',
+      'initializedAt: 2026-07-22T00:00:00.000Z',
+      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets:',
+      '  gemini:',
+      '    enabled: true',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    const devicePath = path.join(context.env.APPDATA!, 'Antigravity', 'User', 'keybindings.json');
+    const repositoryFile = path.join(
+      repositoryPath,
+      'ide',
+      'gemini',
+      'native',
+      'antigravity',
+      'keybindings.json',
+    );
+    fs.mkdirSync(path.dirname(devicePath), { recursive: true });
+    fs.mkdirSync(path.dirname(repositoryFile), { recursive: true });
+    fs.writeFileSync(devicePath, '[{"key":"ctrl+b","command":"new"}]\n');
+    fs.writeFileSync(repositoryFile, '[{"key":"ctrl+a","command":"old"}]\n');
+
+    const plan = await createCapturePlan(context);
+
+    expect(plan.status).toBe('planned');
+    expect(plan.changes).toEqual([expect.objectContaining({
+      ide: 'gemini',
+      name: 'keybindings.json',
+      change: 'modify',
+      repositoryPaths: ['ide/gemini/native/antigravity/keybindings.json'],
+      previews: [expect.objectContaining({
+        kind: 'text',
+        diff: expect.stringContaining('"command": "new"'),
+      })],
+    })]);
+  });
+
   it('does not echo malformed source content through Issues or errors', async () => {
     fs.writeFileSync(
       path.join(homeDir, '.claude', 'settings.json'),

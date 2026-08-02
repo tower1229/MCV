@@ -60,7 +60,13 @@ export class GeminiNativeFileHandler {
                     if (!Array.isArray(parsed))
                         throw new Error(`${file.path} must contain a JSON array.`);
                     const native = sanitizeConfig(parsed, context);
-                    result.files.push({ sourcePath: file.path, repositoryPath: policy.repositoryPath, content: `${JSON.stringify(native.value, null, 2)}\n`, ownership: 'native' });
+                    result.files.push({
+                        sourcePath: file.path,
+                        repositoryPath: policy.repositoryPath,
+                        content: `${JSON.stringify(native.value, null, 2)}\n`,
+                        ownership: 'native',
+                        captureMerge: 'replace-entire-file',
+                    });
                     result.summary.sensitiveFieldCount += native.sensitiveFieldCount;
                     result.summary.parameterizedPathCount += native.parameterizedPathCount;
                     continue;

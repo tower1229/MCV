@@ -91,6 +91,7 @@ export interface CaptureFile {
   repositoryPath: string;
   content: string | Buffer;
   ownership: 'managed' | 'native';
+  captureMerge?: 'preserve-object-fields' | 'replace-entire-file';
   localPaths?: string[];
 }
 
