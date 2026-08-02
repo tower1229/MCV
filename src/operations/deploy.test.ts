@@ -432,7 +432,7 @@ describe('Deploy operations', () => {
     fs.rmSync(skillsRoot, { recursive: true });
     fs.mkdirSync(path.dirname(externalSkill), { recursive: true });
     fs.writeFileSync(externalSkill, '# Review\n');
-    fs.symlinkSync(externalRoot, skillsRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    createDirectoryLink(externalRoot, skillsRoot);
 
     const plan = await createDeployPlan(context);
 
@@ -494,11 +494,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(externalSkill, '# Review\n');
     fs.writeFileSync(path.join(externalReferences, 'guide.md'), '# Guide\n');
     fs.symlinkSync(externalSkill, skillLink);
-    fs.symlinkSync(
-      externalReferences,
-      referencesLink,
-      process.platform === 'win32' ? 'junction' : 'dir',
-    );
+    createDirectoryLink(externalReferences, referencesLink);
 
     const plan = await createDeployPlan(context);
 
@@ -535,7 +531,7 @@ describe('Deploy operations', () => {
     fs.mkdirSync(path.dirname(sourceReference), { recursive: true });
     fs.writeFileSync(externalSkill, '# Externally changed\n');
     fs.writeFileSync(sourceReference, '# Guide\n');
-    fs.symlinkSync(externalRoot, skillsRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    createDirectoryLink(externalRoot, skillsRoot);
 
     const plan = await createDeployPlan(context);
 
@@ -591,7 +587,7 @@ describe('Deploy operations', () => {
     fs.rmSync(skillsRoot, { recursive: true });
     fs.mkdirSync(path.dirname(externalStale), { recursive: true });
     fs.writeFileSync(externalStale, 'externally owned\n');
-    fs.symlinkSync(externalRoot, skillsRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    createDirectoryLink(externalRoot, skillsRoot);
 
     const plan = await createDeployPlan(context);
 
@@ -606,10 +602,9 @@ describe('Deploy operations', () => {
   ] as const)('blocks one %s Skill-link outcome without traversing it', async (reason, target) => {
     const skillsRoot = path.join(homeDir, '.claude', 'skills');
     fs.rmSync(skillsRoot, { recursive: true });
-    fs.symlinkSync(
+    createDirectoryLink(
       target === 'self' ? skillsRoot : path.join(testRoot, target),
       skillsRoot,
-      process.platform === 'win32' ? 'junction' : 'dir',
     );
 
     const plan = await createDeployPlan(context);
@@ -632,7 +627,7 @@ describe('Deploy operations', () => {
     fs.rmSync(claudeRoot, { recursive: true });
     fs.mkdirSync(path.dirname(externalSkill), { recursive: true });
     fs.writeFileSync(externalSkill, '# Review\n');
-    fs.symlinkSync(externalRoot, claudeRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    createDirectoryLink(externalRoot, claudeRoot);
 
     const plan = await createDeployPlan(context);
 
@@ -659,11 +654,7 @@ describe('Deploy operations', () => {
     fs.rmSync(linkedSkillsRoot, { recursive: true });
     fs.mkdirSync(path.dirname(physicalSkill), { recursive: true });
     fs.writeFileSync(physicalSkill, '# Old review\n');
-    fs.symlinkSync(
-      physicalSkillsRoot,
-      linkedSkillsRoot,
-      process.platform === 'win32' ? 'junction' : 'dir',
-    );
+    createDirectoryLink(physicalSkillsRoot, linkedSkillsRoot);
 
     const plan = await createDeployPlan(context);
 
@@ -676,7 +667,8 @@ describe('Deploy operations', () => {
       affectedFileCount: 1,
     })]);
     expect(plan.changes.filter((change) =>
-      change.capability === 'skills' && change.targetPath.endsWith('review/SKILL.md'))).toEqual([
+      change.capability === 'skills'
+      && change.targetPath.endsWith(path.join('review', 'SKILL.md')))).toEqual([
       expect.objectContaining({
         ide: 'codex',
         targetPath: physicalSkill,
@@ -1347,37 +1339,32 @@ describe('Deploy operations', () => {
     );
     const storeFile = path.join(homeDir, '.agents', 'skills', 'review', 'SKILL.md');
     const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
-    const stateDir = path.join(homeDir, 'Library', 'Application Support', 'mcv');
-    fs.mkdirSync(stateDir, { recursive: true });
     const plan = await createDeployPlan(context);
     const selected = plan.changes.filter((change) => change.defaultSelected);
 
-    let locked = false;
-    try {
-      const result = await applyDeployPlan(
-        context,
-        plan,
-        { changeIds: selected.map((change) => change.id) },
-        {
-          createSymbolicLink: (target, linkPath) => {
-            fs.symlinkSync(target, linkPath, 'dir');
-            fs.chmodSync(stateDir, 0o555);
-            locked = true;
-          },
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      { changeIds: selected.map((change) => change.id) },
+      {
+        createSymbolicLink: (target, linkPath) => {
+          createDirectoryLink(target, linkPath);
         },
-      );
+        updateState: () => { throw new Error('simulated state update failure'); },
+      },
+    );
 
-      expect(result).toMatchObject({
-        status: 'failed',
-        error: { code: 'deploy.transactionFailed' },
-      });
-      expect(fs.existsSync(storeFile)).toBe(false);
-      expect(fs.existsSync(projectionPath)).toBe(false);
-      expect(readState(context).managedSkillLayout).toBeUndefined();
-      expect(readState(context).managedInventory?.[projectionPath]).toBeUndefined();
-    } finally {
-      if (locked) fs.chmodSync(stateDir, 0o755);
-    }
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'deploy.transactionFailed',
+        technicalDetails: expect.stringContaining('simulated state update failure'),
+      },
+    });
+    expect(fs.existsSync(storeFile)).toBe(false);
+    expect(fs.existsSync(projectionPath)).toBe(false);
+    expect(readState(context).managedSkillLayout).toBeUndefined();
+    expect(readState(context).managedInventory?.[projectionPath]).toBeUndefined();
   });
 
   it('aggregates Pending Deployment Change totals for package materialization and projections', async () => {
@@ -1788,6 +1775,10 @@ describe('Deploy operations', () => {
     expect(state.lastDeploySelection).toEqual({ 'claude-code': ['native'] });
   });
 });
+
+function createDirectoryLink(target: string, linkPath: string): void {
+  fs.symlinkSync(target, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
+}
 
 function hashDirectory(root: string): string {
   const hash = crypto.createHash('sha256');

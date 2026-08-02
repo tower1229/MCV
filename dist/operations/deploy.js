@@ -481,7 +481,7 @@ export async function applyDeployPlan(context, plan, selection, options = {}) {
     const prepared = prepareDeployWrites(selectedChanges, active.mutations);
     if (selectedChanges.length === 0) {
         try {
-            updateDeployState(context, plan.repositoryPath, selectedChanges);
+            updateDeployState(context, plan.repositoryPath, selectedChanges, options.updateState);
         }
         catch (error) {
             activeDeployPlans.delete(plan);
@@ -525,7 +525,7 @@ export async function applyDeployPlan(context, plan, selection, options = {}) {
         assertSelectedPreconditions(context, plan, selectedChanges);
         applyPreparedDeployWrites(prepared, backupPath, options.writeFile ?? ((targetPath, content) => atomicWriteFile(targetPath, content)), options.removeFile ?? ((targetPath) => fs.rmSync(targetPath, { recursive: true, force: true })), options.restoreFile ?? ((targetPath, content) => atomicWriteFile(targetPath, content)), options.createSymbolicLink ?? ((target, linkPath) => fs.symlinkSync(target, linkPath, 'dir')), () => {
             finalizeDeployBackup(backupPath);
-            updateDeployState(context, plan.repositoryPath, selectedChanges);
+            updateDeployState(context, plan.repositoryPath, selectedChanges, options.updateState);
         });
         activeDeployPlans.delete(plan);
         return {
@@ -922,7 +922,7 @@ function markDeployBackupFailed(backupPath, error) {
 function readDeployBackupManifest(backupPath) {
     return JSON.parse(fs.readFileSync(path.join(backupPath, 'manifest.json'), 'utf8'));
 }
-function updateDeployState(context, repositoryPath, changes) {
+function updateDeployState(context, repositoryPath, changes, updateState = writeState) {
     const state = readState(context);
     const baselineFiles = { ...(state.baselineSnapshot?.files ?? {}) };
     const managedInventory = { ...(state.managedInventory ?? {}) };
@@ -1010,7 +1010,7 @@ function updateDeployState(context, repositoryPath, changes) {
     }
     state.lastDeploySelection = lastDeploySelection;
     state.lastOperation = { kind: 'deploy', time: new Date().toISOString(), success: true };
-    writeState(context, state);
+    updateState(context, state);
 }
 class StaleDeployPlanError extends Error {
 }

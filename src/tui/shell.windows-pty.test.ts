@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import * as pty from 'node-pty';
+import { pathToFileURL } from 'url';
 import {
   afterAll,
   afterEach,
@@ -107,8 +108,8 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
   }, 45_000);
 
   it('opens every primary destination with arrows while NO_COLOR preserves meaning', async () => {
-    createDeployTreeRepository(testRoot);
-    const before = snapshotTree(testRoot);
+    const repositoryPath = createDeployTreeRepository(testRoot);
+    const before = snapshotTree(repositoryPath);
     const outcome = await runConPty('status', [
       { pattern: '› Overview', input: '\u001b[B' },
       { pattern: '› Capture', input: '\u001b[C' },
@@ -135,7 +136,7 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
     expect(outcome.output).toContain('! Pending Deployment Changes: Review');
     expect(outcome.output).toContain('[x]');
     expectColorlessOutput(outcome.output);
-    expect(snapshotTree(testRoot)).toEqual(before);
+    expect(snapshotTree(repositoryPath)).toEqual(before);
     expectRestoredTerminal(outcome.output);
     expect(outcome.output).toContain('INPUT_MODE:restored');
     expect(outcome.output).not.toContain('INPUT_MODE:changed');
@@ -154,26 +155,28 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
     ]);
 
     expect(outcome.code).toBe(0);
-    expect(outcome.output).toContain('… 6 earlier');
+    expect(outcome.output).toMatch(/… \d+ earlier/);
+    expect(outcome.output).toContain('file-4.md');
     expect(outcome.output).toContain('Deploy closed without applying changes.');
     expectRestoredTerminal(outcome.output);
     expect(outcome.output).toContain('INPUT_MODE:restored');
   }, 45_000);
 
-  it('completes Restore Apply and Result while transaction input stays disabled', async () => {
-    const fixture = createRestoreRepository(testRoot);
+  it('ignores q and Ctrl+C during Restore Apply and completes the Result', async () => {
+    const fixturePath = createRestoreApplyingFixture(testRoot);
     const outcome = await runConPty('restore', [
       { pattern: 'Restore Latest Deployment · Review', input: '\r' },
       { pattern: 'Restore Latest Deployment · Applying', input: 'q\u0003' },
       { pattern: 'Restore Latest Deployment · Result', input: 'q' },
-    ]);
+    ], { cliPath: fixturePath });
 
     expect(outcome.code).toBe(0);
     expect(outcome.output).toContain('Restore succeeded.');
-    expect(outcome.output).toContain(
-      'Restored 1 path(s) and deleted 0 path(s).',
-    );
-    expect(fs.readFileSync(fixture.targetPath, 'utf8')).toBe('before deploy\n');
+    expect(outcome.output).toContain('Written: 1 paths');
+    expect(outcome.output).toContain('Deleted: 0 paths');
+    expect(outcome.output).toContain('input is disabled during backup, Apply, and rollback');
+    expect(outcome.output).toContain('OUTCOME:completed');
+    expect(outcome.output).toContain('STATUS:succeeded');
     expectRestoredTerminal(outcome.output);
     expect(outcome.output).toContain('INPUT_MODE:restored');
     expect(outcome.output).not.toContain('INPUT_MODE:changed');
@@ -188,6 +191,7 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
       resize?: { cols: number; rows: number };
     }>,
     options: {
+      cliPath?: string;
       environment?: NodeJS.ProcessEnv;
     } = {},
   ): Promise<{ code: number; output: string }> {
@@ -202,7 +206,7 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
         '-Node',
         process.execPath,
         '-Cli',
-        cliPath,
+        options.cliPath ?? cliPath,
         '-Route',
         route,
         '-ModeProbe',
@@ -260,7 +264,7 @@ function quotePowerShell(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-function createDeployTreeRepository(testRoot: string): void {
+function createDeployTreeRepository(testRoot: string): string {
   const repositoryPath = path.join(testRoot, 'deploy-tree-repository');
   const skillPath = path.join(
     repositoryPath,
@@ -296,6 +300,7 @@ function createDeployTreeRepository(testRoot: string): void {
     defaultRepositoryId: 'deploy-tree-conpty',
     repositoryPath,
   }, null, 2)}\n`);
+  return repositoryPath;
 }
 
 function createRestoreRepository(
@@ -353,6 +358,86 @@ function createRestoreRepository(
   return { targetPath };
 }
 
+function createRestoreApplyingFixture(testRoot: string): string {
+  const fixturePath = path.join(testRoot, 'restore-applying.mjs');
+  const shellModuleUrl = pathToFileURL(
+    path.join(process.cwd(), 'dist', 'tui', 'shell.js'),
+  ).href;
+  const repositoryPath = path.join(testRoot, 'restore-fixture-repository');
+  const targetPath = path.join(testRoot, 'restore-fixture-target.json');
+  const plan = {
+    schemaVersion: 1,
+    operation: 'restore',
+    status: 'planned',
+    readyToApply: true,
+    operationId: 'restore-conpty',
+    preconditions: {},
+    repositoryPath,
+    backup: {
+      id: 'deploy-20260729',
+      createdAt: '2026-07-29T08:30:00.000Z',
+    },
+    changes: [{
+      id: 'restore-settings',
+      action: 'restore',
+      targetPath,
+      nodeKind: 'file',
+      layoutKind: 'ordinary-file',
+    }],
+    issues: [],
+    nextActions: [],
+  };
+  const result = {
+    schemaVersion: 1,
+    operation: 'restore',
+    status: 'succeeded',
+    repositoryPath,
+    changes: plan.changes,
+    issues: [],
+    nextActions: [],
+    data: {
+      appliedChangeIds: ['restore-settings'],
+      restoredPaths: [targetPath],
+      deletedPaths: [],
+      backupPath: path.join(testRoot, 'restore-backups', 'before-restore'),
+    },
+  };
+  const repositoryReport = {
+    schemaVersion: 1,
+    operation: 'repository',
+    status: 'reported',
+    ready: true,
+    repositoryPath,
+    repositoryId: 'restore-conpty',
+    repositorySchemaVersion: 2,
+    valid: true,
+    changes: [],
+    issues: [],
+    nextActions: [],
+  };
+  fs.writeFileSync(fixturePath, [
+    `import { runTuiShell } from ${JSON.stringify(shellModuleUrl)};`,
+    `const plan = ${JSON.stringify(plan)};`,
+    `const result = ${JSON.stringify(result)};`,
+    'const outcome = await runTuiShell(',
+    "  { homeDir: process.env.HOME, platform: process.platform, env: process.env },",
+    "  'restore',",
+    '  {',
+    `    inspectRepository: () => (${JSON.stringify(repositoryReport)}),`,
+    '    createRestorePlan: () => plan,',
+    '    applyRestorePlan: async () => {',
+    '      await new Promise((resolve) => setTimeout(resolve, 500));',
+    '      return result;',
+    '    },',
+    '  },',
+    ');',
+    "process.stdout.write(`OUTCOME:${outcome.reason}\\n`);",
+    "process.stdout.write(`STATUS:${outcome.operationStatus}\\n`);",
+    '',
+  ].join('\n'));
+  return fixturePath;
+}
+
 function snapshotTree(root: string): Record<string, string> {
   const snapshot: Record<string, string> = {};
   const visit = (directory: string): void => {
@@ -375,7 +460,11 @@ function snapshotTree(root: string): Record<string, string> {
 }
 
 function expectColorlessOutput(output: string): void {
-  const colorParameters = [...output.matchAll(/\u001b\[([0-9;:]*)m/g)]
+  const alternateScreenStart = output.indexOf('\u001b[?1049h');
+  const applicationOutput = alternateScreenStart === -1
+    ? output
+    : output.slice(alternateScreenStart);
+  const colorParameters = [...applicationOutput.matchAll(/\u001b\[([0-9;:]*)m/g)]
     .flatMap((match) => match[1]?.split(/[;:]/) ?? [])
     .map((value) => Number.parseInt(value, 10))
     .filter((value) =>

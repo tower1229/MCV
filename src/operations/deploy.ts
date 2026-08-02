@@ -18,7 +18,7 @@ import {
   hashSkillPackageContent,
   resolveSkillPackageStorePath,
 } from '../core/managed-skill-layout.js';
-import { getStateFilePath, readState, writeState } from '../utils/state.js';
+import { getStateFilePath, readState, writeState, type McvState } from '../utils/state.js';
 import {
   parseStructuredObject,
   stringifyStructuredObject,
@@ -113,6 +113,7 @@ export interface DeployApplyOptions {
   writeFile?: (targetPath: string, content: Buffer) => void;
   removeFile?: (targetPath: string) => void;
   restoreFile?: (targetPath: string, content: Buffer) => void;
+  updateState?: (context: DeviceContext, state: McvState) => void;
 }
 
 export interface DeployResultData {
@@ -708,7 +709,7 @@ export async function applyDeployPlan(
   const prepared = prepareDeployWrites(selectedChanges, active.mutations);
   if (selectedChanges.length === 0) {
     try {
-      updateDeployState(context, plan.repositoryPath, selectedChanges);
+      updateDeployState(context, plan.repositoryPath, selectedChanges, options.updateState);
     } catch (error) {
       activeDeployPlans.delete(plan);
       return failedDeployResult(plan.repositoryPath, {
@@ -763,7 +764,12 @@ export async function applyDeployPlan(
       options.createSymbolicLink ?? ((target, linkPath) => fs.symlinkSync(target, linkPath, 'dir')),
       () => {
         finalizeDeployBackup(backupPath as string);
-        updateDeployState(context, plan.repositoryPath as string, selectedChanges);
+        updateDeployState(
+          context,
+          plan.repositoryPath as string,
+          selectedChanges,
+          options.updateState,
+        );
       },
     );
     activeDeployPlans.delete(plan);
@@ -1229,6 +1235,7 @@ function updateDeployState(
   context: DeviceContext,
   repositoryPath: string,
   changes: DeployChange[],
+  updateState: (context: DeviceContext, state: McvState) => void = writeState,
 ): void {
   const state = readState(context);
   const baselineFiles = { ...(state.baselineSnapshot?.files ?? {}) };
@@ -1310,7 +1317,7 @@ function updateDeployState(
   }
   state.lastDeploySelection = lastDeploySelection;
   state.lastOperation = { kind: 'deploy', time: new Date().toISOString(), success: true };
-  writeState(context, state);
+  updateState(context, state);
 }
 
 class StaleDeployPlanError extends Error {}
