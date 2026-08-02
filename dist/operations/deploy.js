@@ -1280,7 +1280,8 @@ function verifyManagedProjection(linkPath, expectedTarget) {
         throw new Error(`Deploy link verification failed: ${linkPath} is not a symbolic link.`);
     }
     const rawTarget = fs.readlinkSync(linkPath);
-    if (rawTarget !== expectedTarget) {
+    const resolvedRawTarget = path.resolve(path.dirname(linkPath), rawTarget);
+    if (resolvedRawTarget !== path.resolve(expectedTarget)) {
         throw new Error(`Deploy link verification failed: ${linkPath} targets ${rawTarget}, expected ${expectedTarget}.`);
     }
     if (fs.realpathSync(linkPath) !== fs.realpathSync(expectedTarget)) {

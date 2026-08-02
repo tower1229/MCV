@@ -128,7 +128,7 @@ describe.skipIf(process.platform !== 'win32')('packaged TUI Shell in Windows Con
       { pattern: 'Primary navigation:', input: '\u001b[D' },
       { pattern: '› Help', input: 'q' },
     ], {
-      environment: { NO_COLOR: '1' },
+      environment: { FORCE_COLOR: '0', NO_COLOR: '1' },
     });
 
     expect(outcome.code).toBe(0);
