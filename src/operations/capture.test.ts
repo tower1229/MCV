@@ -99,6 +99,30 @@ describe('Capture operations', () => {
     expect(readState(context)).toEqual(stateBefore);
   });
 
+  it('reports a safe diagnostic when Capture Plan generation fails', async () => {
+    const sourceContent = 'schemaVersion: [invalid-log-secret-must-not-leak\n';
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), sourceContent);
+
+    const plan = await createCapturePlan(context);
+
+    expect(plan).toMatchObject({
+      status: 'failed',
+      readyToApply: false,
+      error: {
+        code: 'capture.planFailed',
+        message: 'The Capture Plan could not be generated safely. Reason: Invalid YAML configuration.',
+        technicalDetails: 'Invalid YAML configuration.',
+      },
+      issues: [expect.objectContaining({
+        severity: 'error',
+        code: 'capture.planFailed',
+        details: 'Invalid YAML configuration.',
+      })],
+    });
+    expect(JSON.stringify(plan)).not.toContain('invalid-log-secret-must-not-leak');
+    expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).toBe(sourceContent);
+  });
+
   it('does not echo malformed source content through Issues or errors', async () => {
     fs.writeFileSync(
       path.join(homeDir, '.claude', 'settings.json'),

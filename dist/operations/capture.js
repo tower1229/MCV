@@ -29,7 +29,9 @@ export async function createCapturePlan(context) {
         registerCapturePlan(plan, mutations);
         return plan;
     }
-    catch {
+    catch (error) {
+        const technicalDetails = capturePlanFailureDetails(error);
+        const message = `The Capture Plan could not be generated safely. Reason: ${technicalDetails}`;
         return {
             schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'capture',
@@ -42,12 +44,14 @@ export async function createCapturePlan(context) {
             issues: [{
                     severity: 'error',
                     code: 'capture.planFailed',
-                    message: 'The Capture Plan could not be generated safely.',
+                    message,
+                    details: technicalDetails,
                 }],
             nextActions: ['Fix the reported Repository or IDE configuration problem, then regenerate the Capture Plan.'],
             error: {
                 code: 'capture.planFailed',
-                message: 'The Capture Plan could not be generated safely.',
+                message,
+                technicalDetails,
                 nextActions: ['Fix the Repository or IDE configuration problem, then regenerate the Capture Plan.'],
             },
             summary: EMPTY_SUMMARY,
@@ -432,6 +436,45 @@ function createRecoveryBackup(repositoryPath, originals) {
 }
 function errorMessage(error) {
     return error instanceof Error ? error.message : String(error);
+}
+function capturePlanFailureDetails(error) {
+    if (!(error instanceof Error))
+        return 'An unexpected non-Error exception occurred.';
+    if (error.name === 'YAMLParseError')
+        return 'Invalid YAML configuration.';
+    if (error instanceof SyntaxError)
+        return 'Invalid structured configuration.';
+    const filesystemError = error;
+    if (typeof filesystemError.code === 'string'
+        && (typeof filesystemError.syscall === 'string' || typeof filesystemError.path === 'string')) {
+        const syscall = typeof filesystemError.syscall === 'string'
+            ? ` during ${filesystemError.syscall}`
+            : '';
+        const targetPath = typeof filesystemError.path === 'string'
+            ? ` at ${filesystemError.path}`
+            : '';
+        return `Filesystem error ${filesystemError.code}${syscall}${targetPath}.`;
+    }
+    const message = error.message.trim();
+    if (message === 'No bound MCV repository found. Run `mcv bind <path>` or `mcv init`.') {
+        return message;
+    }
+    if (message === 'Bound repository ID does not match local state. Run `mcv bind <path>` again.') {
+        return message;
+    }
+    if (message.includes(' is not a valid MCV repository.')) {
+        return 'The bound directory is not a valid MCV Repository.';
+    }
+    if (message.startsWith('Repository schema ')) {
+        return 'The Repository schema requires migration; run `mcv migrate`.';
+    }
+    if (message.includes('schema validation failed:')) {
+        return 'The Repository manifest failed schema validation.';
+    }
+    if (/ must contain a (?:JSON|YAML|TOML) object\.$/.test(message)) {
+        return 'A configuration file has an invalid root value.';
+    }
+    return `Unexpected ${error.name || 'Error'} while reading Repository or IDE configuration.`;
 }
 function createParentDirectories(directory, repositoryPath, created) {
     if (fs.existsSync(directory) || directory === repositoryPath)

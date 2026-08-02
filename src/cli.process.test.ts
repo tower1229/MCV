@@ -917,6 +917,7 @@ describe('packaged mcv CLI', () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toBe('');
       expect(result.stdout).toContain('capture.planFailed');
+      expect(result.stdout).toContain('Invalid YAML configuration.');
       expect(result.stdout).not.toContain('invalid-log-secret-must-not-leak');
       expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).toContain(
         'invalid-log-secret-must-not-leak',

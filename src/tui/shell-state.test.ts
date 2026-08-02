@@ -534,6 +534,36 @@ describe('TUI Shell reducer', () => {
     });
   });
 
+  it('shows the safe Capture Plan diagnostic on the failure page', () => {
+    const failedPlan: CapturePlan = {
+      ...capturePlan(),
+      status: 'failed',
+      readyToApply: false,
+      issues: [{
+        severity: 'error',
+        code: 'capture.planFailed',
+        message: 'The Capture Plan could not be generated safely. Reason: Invalid YAML configuration.',
+      }],
+      error: {
+        code: 'capture.planFailed',
+        message: 'The Capture Plan could not be generated safely. Reason: Invalid YAML configuration.',
+        technicalDetails: 'Invalid YAML configuration.',
+        nextActions: [],
+      },
+    };
+
+    const failed = shellReducer(createInitialShellState('capture'), {
+      type: 'capture.loaded',
+      plan: failedPlan,
+    });
+
+    expect(failed.page).toEqual({
+      route: 'capture',
+      status: 'failure',
+      message: 'The Capture Plan could not be generated safely. Reason: Invalid YAML configuration.',
+    });
+  });
+
   it('pages Capture changes and restores stable focus after directional Diff review', () => {
     const plan = capturePlan();
     plan.changes.push(...Array.from({ length: 12 }, (_, index) => ({
