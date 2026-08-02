@@ -4,6 +4,28 @@ import * as path from 'path';
 export function hashFile(filePath) {
     return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
+export function hashDirectoryTree(root) {
+    const hash = createHash('sha256');
+    const visit = (directory) => {
+        for (const entry of fs.readdirSync(directory, { withFileTypes: true })
+            .sort((left, right) => left.name.localeCompare(right.name))) {
+            const current = path.join(directory, entry.name);
+            hash.update(`${path.relative(root, current)}\0`);
+            if (entry.isSymbolicLink()) {
+                hash.update(`symlink\0${fs.readlinkSync(current)}\0`);
+                continue;
+            }
+            if (entry.isDirectory()) {
+                hash.update('directory\0');
+                visit(current);
+                continue;
+            }
+            hash.update(fs.readFileSync(current));
+        }
+    };
+    visit(root);
+    return hash.digest('hex');
+}
 export function findSymbolicLinkAncestor(targetPath) {
     let current = path.resolve(targetPath);
     while (true) {

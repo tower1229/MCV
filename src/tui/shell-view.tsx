@@ -1,5 +1,7 @@
 import { Box, Text, useWindowSize } from 'ink';
 import type { ReactNode } from 'react';
+import type { SkillSurfaceId } from '../adapters/types.js';
+import { displaySkillSurface } from '../core/skill-surfaces.js';
 import type { EnvironmentReport } from '../operations/environment.js';
 import type {
   CaptureChange,
@@ -363,18 +365,16 @@ function scrollablePageLines(state: ShellState): ScrollablePageLine[] {
       const satisfied = result.linkOutcomes?.filter((outcome) =>
         outcome.status === 'satisfied-via-link' && outcome.ownership === 'managed') ?? [];
       const surfaceLabel = (
-        target: { owner: 'canonical-store' | 'ide'; ide?: string },
+        target: { owner: 'canonical-store' | 'ide'; ide?: string; surface?: SkillSurfaceId },
       ): string => {
-        if (target.owner === 'canonical-store') return 'Canonical Device Skill Store';
-        if (target.ide === 'claude-code') return 'Claude Code';
-        if (target.ide === 'gemini-cli') return 'Gemini CLI';
-        if (target.ide === 'antigravity') return 'Antigravity';
+        if (target.owner === 'canonical-store') return displaySkillSurface('canonical-store');
+        if (target.surface) return displaySkillSurface(target.surface);
         return target.ide
           ? target.ide.charAt(0).toUpperCase() + target.ide.slice(1)
           : 'Unknown';
       };
       const listSurfaces = (
-        items: Array<{ owner: 'canonical-store' | 'ide'; ide?: string }>,
+        items: Array<{ owner: 'canonical-store' | 'ide'; ide?: string; surface?: SkillSurfaceId }>,
       ): string => {
         const names = [...new Set(items.map(surfaceLabel))].sort();
         return names.length === 0 ? '' : ` (${names.join(', ')})`;
@@ -1173,11 +1173,13 @@ function createOverviewStatusViewModel(
       details: 'Canonical Skill package',
     })),
     topologyDrifts: local.topologyDrifts.map((entry) => ({
-      key: `topology-drift:${entry.projectionPath}`,
+      key: `topology-drift:${entry.kind === 'canonical-skill-package' ? entry.storePath : entry.projectionPath}`,
       tone: 'warning' as const,
       label: 'Topology Drift',
       state: entry.reason,
-      details: `${displaySkillSurface(entry.surface)} · ${entry.packageName}`,
+      details: `${entry.kind === 'canonical-skill-package'
+        ? displaySkillSurface('canonical-store')
+        : displaySkillSurface(entry.surface)} · ${entry.packageName}`,
     })),
     environment: {
       key: 'environment',
@@ -1233,7 +1235,7 @@ interface LinkOutcomeSummary {
   key: string;
   status: DeployLinkOutcome['status'];
   ownership: DeployLinkOutcome['ownership'];
-  surface: string;
+  surface: SkillSurfaceId | 'canonical-store';
   state: 'Satisfied via link' | 'Already satisfied projection' | 'Blocked';
   outcomeCount: number;
   packageCount: number;
@@ -1245,7 +1247,7 @@ function summarizeLinkOutcomes(
 ): LinkOutcomeSummary[] {
   const groups = new Map<string, DeployLinkOutcome[]>();
   for (const outcome of outcomes) {
-    const surface = outcome.owner === 'canonical-store' ? 'canonical-store' : outcome.ide;
+    const surface = linkOutcomeSurface(outcome);
     const key = `${outcome.ownership}:${outcome.status}:${surface}`;
     const matching = groups.get(key) ?? [];
     matching.push(outcome);
@@ -1255,7 +1257,7 @@ function summarizeLinkOutcomes(
     const [ownership, status, surface] = key.split(':') as [
       DeployLinkOutcome['ownership'],
       DeployLinkOutcome['status'],
-      string,
+      SkillSurfaceId | 'canonical-store',
     ];
     return {
       key,
@@ -1280,12 +1282,9 @@ function summarizeLinkOutcomes(
   });
 }
 
-function displaySkillSurface(surface: string): string {
-  if (surface === 'canonical-store') return 'Canonical Device Skill Store';
-  if (surface === 'claude-code') return 'Claude Code';
-  if (surface === 'gemini-cli') return 'Gemini CLI';
-  if (surface === 'antigravity') return 'Antigravity';
-  return surface.charAt(0).toUpperCase() + surface.slice(1);
+function linkOutcomeSurface(outcome: DeployLinkOutcome): SkillSurfaceId | 'canonical-store' {
+  if (outcome.owner === 'canonical-store') return 'canonical-store';
+  return outcome.surface;
 }
 
 function statusItemText(
@@ -2126,4 +2125,3 @@ function RestoreReview({
     </Box>
   );
 }
-

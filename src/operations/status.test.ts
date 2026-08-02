@@ -5,6 +5,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceContext } from '../adapters/types.js';
+import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
+import { hashSkillPackageContent } from '../core/managed-skill-layout.js';
 import { writeState } from '../utils/state.js';
 import { inspectStatus } from './status.js';
 
@@ -166,6 +168,8 @@ describe('inspectStatus', () => {
     expect(report.linkOutcomes).toEqual([expect.objectContaining({
       status: 'satisfied-via-link',
       ownership: 'external',
+      ide: 'codex',
+      surface: 'codex',
       linkPath: linkedRoot,
       resolvedPath: externalRoot,
       packageNames: ['review'],
@@ -208,6 +212,8 @@ describe('inspectStatus', () => {
     expect(report.linkOutcomes).toEqual([expect.objectContaining({
       status: 'satisfied-via-link',
       ownership: 'managed',
+      ide: 'claude-code',
+      surface: 'claude-code',
       linkPath: projectionPath,
     })]);
     expect(report.pendingDeployment.total).toBeGreaterThanOrEqual(1);
@@ -313,6 +319,117 @@ describe('inspectStatus', () => {
       packageName: 'review',
     })]);
     expect(report.postDeployLocalState.contentDrift).toBe(0);
+  });
+
+  it('reports a missing managed Store package as content Drift instead of unchanged', async () => {
+    createRepository(repositoryPath);
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'repository-id',
+      repositoryPath,
+      managedSkillLayout: {
+        packages: {
+          [storePackage]: {
+            packageName: 'review',
+            storePath: storePackage,
+            contentHash: 'deployed-package-hash',
+            source: repositoryPath,
+          },
+        },
+        projections: {},
+      },
+    });
+
+    const report = await inspectStatus(context);
+
+    expect(report.postDeployLocalState).toMatchObject({
+      unchanged: 0,
+      drift: 1,
+      contentDrift: 1,
+      topologyDrift: 0,
+      missing: 0,
+      contentDrifts: [expect.objectContaining({
+        kind: 'canonical-skill-package',
+        packageName: 'review',
+        storePath: storePackage,
+        state: 'drift',
+      })],
+    });
+  });
+
+  it('reports a managed Store package replaced by a same-content link as topology Drift', async () => {
+    createRepository(repositoryPath);
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    const externalPackage = path.join(homeDir, 'external-skills', 'review');
+    fs.mkdirSync(storePackage, { recursive: true });
+    fs.writeFileSync(path.join(storePackage, 'SKILL.md'), '# Review\n');
+    const contentHash = hashSkillPackageContent(storePackage);
+    const topologyHash = hashDeviceTopologyNode(storePackage);
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'repository-id',
+      repositoryPath,
+      managedSkillLayout: {
+        packages: {
+          [storePackage]: {
+            packageName: 'review',
+            storePath: storePackage,
+            contentHash,
+            topologyHash,
+            source: repositoryPath,
+          },
+        },
+        projections: {},
+      },
+    });
+    fs.mkdirSync(externalPackage, { recursive: true });
+    fs.writeFileSync(path.join(externalPackage, 'SKILL.md'), '# Review\n');
+    fs.rmSync(storePackage, { recursive: true });
+    fs.symlinkSync(externalPackage, storePackage, process.platform === 'win32' ? 'junction' : 'dir');
+
+    const report = await inspectStatus(context);
+
+    expect(report.postDeployLocalState).toMatchObject({
+      unchanged: 0,
+      drift: 1,
+      contentDrift: 0,
+      topologyDrift: 1,
+      missing: 0,
+      topologyDrifts: [expect.objectContaining({
+        kind: 'canonical-skill-package',
+        packageName: 'review',
+        storePath: storePackage,
+        reason: 'replaced',
+      })],
+    });
+  });
+
+  it('reports Gemini Skill changes under one IDE and distinct Surfaces', async () => {
+    createRepository(repositoryPath, false);
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('  gemini:\n    enabled: false', '  gemini:\n    enabled: true'),
+    );
+    const skillPath = path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md');
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, '# Review\n');
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'repository-id',
+      repositoryPath,
+    });
+
+    const report = await inspectStatus(context);
+    const skillChanges = report.changes.filter((change) => change.capability === 'skills');
+
+    expect(skillChanges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ide: 'gemini', surface: 'gemini-cli' }),
+      expect.objectContaining({ ide: 'gemini', surface: 'antigravity' }),
+    ]));
+    expect(JSON.stringify(skillChanges)).not.toContain('"ide":"gemini-cli"');
+    expect(JSON.stringify(skillChanges)).not.toContain('"ide":"antigravity"');
   });
 });
 

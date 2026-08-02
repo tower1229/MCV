@@ -2,6 +2,8 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { CaptureFile, DeviceContext } from '../adapters/types.js';
+import { hashDeviceTopologyNode } from './canonical-skill-device-layout.js';
+import type { ManagedSkillProjectionRecord } from './managed-skill-layout.js';
 import { isSensitiveFile, scanTextForSecrets } from '../utils/sanitize.js';
 
 export interface SkillSource {
@@ -62,21 +64,11 @@ export function getSkillSources(
 
 export function collectSkills(
   sources: SkillSource[],
-  options: { storeRoot?: string } = {},
+  options: { managedProjections?: Record<string, ManagedSkillProjectionRecord> } = {},
 ): SkillCollection {
   const packages = new Map<string, SkillPackage[]>();
   const warnings: string[] = [];
   let excludedFileCount = 0;
-  let storeRoot: string | undefined;
-  if (options.storeRoot) {
-    try {
-      storeRoot = fs.existsSync(options.storeRoot)
-        ? fs.realpathSync(options.storeRoot)
-        : path.resolve(options.storeRoot);
-    } catch {
-      storeRoot = path.resolve(options.storeRoot);
-    }
-  }
 
   for (const source of sources) {
     if (!fs.existsSync(source.root)) continue;
@@ -121,7 +113,12 @@ export function collectSkills(
         hash.update(file.relativePath.replace(/\\/g, '/'));
         hash.update(file.content);
       }
-      const ownership = classifyProjectionOwnership(physicalDirectory, isLink, storeRoot);
+      const ownership = classifyProjectionOwnership(
+        projectionPath,
+        physicalDirectory,
+        isLink,
+        options.managedProjections,
+      );
       const projection: SkillProjection = {
         ide: source.ide,
         surface: source.surface,
@@ -163,19 +160,24 @@ export function skillPackageToCaptureFiles(skill: SkillPackage): CaptureFile[] {
 }
 
 function classifyProjectionOwnership(
+  projectionPath: string,
   physicalDirectory: string,
   isLink: boolean,
-  storeRoot: string | undefined,
+  managedProjections: Record<string, ManagedSkillProjectionRecord> | undefined,
 ): SkillProjectionOwnership {
   if (!isLink) return 'physical';
-  if (!storeRoot) return 'external';
-  let physicalParent: string;
+  const resolvedProjectionPath = path.resolve(projectionPath);
+  const managed = managedProjections?.[projectionPath]
+    ?? managedProjections?.[resolvedProjectionPath];
+  if (!managed || path.resolve(managed.projectionPath) !== resolvedProjectionPath) return 'external';
+  let expectedPhysical: string;
   try {
-    physicalParent = fs.realpathSync(path.dirname(physicalDirectory));
+    expectedPhysical = fs.realpathSync(managed.expectedLinkTarget);
   } catch {
-    physicalParent = path.resolve(path.dirname(physicalDirectory));
+    return 'external';
   }
-  return physicalParent === storeRoot ? 'managed' : 'external';
+  if (path.resolve(expectedPhysical) !== path.resolve(physicalDirectory)) return 'external';
+  return hashDeviceTopologyNode(projectionPath) === managed.topologyHash ? 'managed' : 'external';
 }
 
 function walkSkill(

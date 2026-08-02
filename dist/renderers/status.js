@@ -1,3 +1,4 @@
+import { displaySkillSurface } from '../core/skill-surfaces.js';
 import { styleText } from './color.js';
 export function renderStatusPlain(report) {
     const lines = [
@@ -14,14 +15,8 @@ export function renderStatusPlain(report) {
     lines.push(`Pending deployment: ${pending.total} ${plural(pending.total, 'change')} (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete)`);
     for (const outcome of report.linkOutcomes) {
         const surface = outcome.owner === 'canonical-store'
-            ? 'Canonical Device Skill Store'
-            : outcome.ide === 'claude-code'
-                ? 'Claude Code'
-                : outcome.ide === 'gemini-cli'
-                    ? 'Gemini CLI'
-                    : outcome.ide === 'antigravity'
-                        ? 'Antigravity'
-                        : outcome.ide.charAt(0).toUpperCase() + outcome.ide.slice(1);
+            ? displaySkillSurface('canonical-store')
+            : displaySkillSurface(outcome.surface);
         const state = outcome.status === 'satisfied-via-link'
             ? outcome.ownership === 'managed'
                 ? 'Already satisfied projection'
@@ -35,7 +30,9 @@ export function renderStatusPlain(report) {
         lines.push(`  Content Drift: Canonical Skill package ${entry.packageName}`);
     }
     for (const entry of local.topologyDrifts) {
-        lines.push(`  Topology Drift: ${entry.surface} · ${entry.packageName} · ${entry.reason}`);
+        lines.push(entry.kind === 'canonical-skill-package'
+            ? `  Topology Drift: Canonical Device Skill Store · ${entry.packageName} · ${entry.reason}`
+            : `  Topology Drift: ${displaySkillSurface(entry.surface)} · ${entry.packageName} · ${entry.reason}`);
     }
     lines.push(`Environment: ${report.environment.missingVariables.length} missing ${plural(report.environment.missingVariables.length, 'variable')}`);
     if (report.environment.missingVariables.length > 0) {

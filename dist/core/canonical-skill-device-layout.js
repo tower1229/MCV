@@ -49,7 +49,7 @@ export function hashDeviceTopologyNode(targetPath) {
     hash.update(relevantAncestorTopology(resolved));
     return hash.digest('hex');
 }
-export function planCanonicalSkillDeviceLayout({ files, context, useManagedLinks, projectionSurfaces = [], }) {
+export function planCanonicalSkillDeviceLayout({ files, context, useManagedLinks, projectionSurfaces = [], managedStorePaths = new Set(), }) {
     if (!useManagedLinks) {
         return {
             filesOutsideLayout: files,
@@ -58,15 +58,17 @@ export function planCanonicalSkillDeviceLayout({ files, context, useManagedLinks
             missingProjections: [],
             topologyMigrations: [],
             divergentPhysicalCopies: [],
+            unownedStorePackages: [],
+            externalStorePackages: [],
             conflicts: [],
         };
     }
     const storeRoot = canonicalDeviceSkillStoreRoot(context);
     const linkCapableSurfaces = projectionSurfaces.filter((surface) => surface.supportsManagedLinks);
-    const linkCapableIde = new Set(linkCapableSurfaces.map((surface) => surface.ide));
+    const linkCapableSurfaceIds = new Set(linkCapableSurfaces.map((surface) => surface.surface));
     const copyOnlySkillFile = (file) => file.capability === 'skills'
         && file.owner === 'ide'
-        && !linkCapableIde.has(file.ide)
+        && (file.surface === undefined || !linkCapableSurfaceIds.has(file.surface))
         && !isStoreSkillPath(file.targetPath, storeRoot);
     const filesOutsideLayout = files.filter((file) => file.capability !== 'skills' || copyOnlySkillFile(file));
     const materializationsByPath = new Map();
@@ -83,9 +85,30 @@ export function planCanonicalSkillDeviceLayout({ files, context, useManagedLinks
         }
         materializationsByPath.set(path.resolve(targetPath), { source: file, targetPath });
     }
-    const materializations = [...materializationsByPath.values()];
-    const packageNames = [...new Set(materializations
+    const candidateMaterializations = [...materializationsByPath.values()];
+    const unownedStorePackages = [];
+    const externalMatchingPackages = new Set();
+    const externalStorePackages = [];
+    const candidatePackageNames = [...new Set(candidateMaterializations
             .map(({ targetPath }) => canonicalSkillPackageName(targetPath)))].sort();
+    for (const packageName of candidatePackageNames) {
+        const storePath = path.join(storeRoot, packageName);
+        if (!deployPathExists(storePath) || managedStorePaths.has(path.resolve(storePath)))
+            continue;
+        const packageMaterializations = candidateMaterializations.filter((entry) => canonicalSkillPackageName(entry.targetPath) === packageName);
+        if (physicalSkillPackageMatchesCanonical(storePath, packageMaterializations, storeRoot, packageName) === 'match') {
+            externalMatchingPackages.add(packageName);
+            externalStorePackages.push({ packageName, storePath });
+            continue;
+        }
+        unownedStorePackages.push({ packageName, storePath });
+    }
+    const blockedPackageNames = new Set(unownedStorePackages.map((entry) => entry.packageName));
+    const materializations = candidateMaterializations.filter(({ targetPath }) => {
+        const packageName = canonicalSkillPackageName(targetPath);
+        return !blockedPackageNames.has(packageName) && !externalMatchingPackages.has(packageName);
+    });
+    const packageNames = candidatePackageNames.filter((packageName) => !blockedPackageNames.has(packageName));
     const missingProjections = [];
     const topologyMigrations = [];
     const divergentPhysicalCopies = [];
@@ -101,6 +124,7 @@ export function planCanonicalSkillDeviceLayout({ files, context, useManagedLinks
             const projection = {
                 owner: 'ide',
                 ide: surface.ide,
+                surface: surface.surface,
                 packageName,
                 targetPath,
                 physicalTargetPath,
@@ -123,6 +147,7 @@ export function planCanonicalSkillDeviceLayout({ files, context, useManagedLinks
             divergentPhysicalCopies.push({
                 owner: 'ide',
                 ide: surface.ide,
+                surface: surface.surface,
                 packageName,
                 targetPath,
             });
@@ -131,7 +156,8 @@ export function planCanonicalSkillDeviceLayout({ files, context, useManagedLinks
     const physicalFiles = materializations.map(({ source, targetPath }) => canonicalStoreFile(source, targetPath));
     const linkClassificationIdeFiles = files.filter((file) => file.capability === 'skills'
         && file.owner === 'ide'
-        && linkCapableIde.has(file.ide));
+        && file.surface !== undefined
+        && linkCapableSurfaceIds.has(file.surface));
     return {
         filesOutsideLayout,
         materializations,
@@ -143,6 +169,8 @@ export function planCanonicalSkillDeviceLayout({ files, context, useManagedLinks
         missingProjections,
         topologyMigrations,
         divergentPhysicalCopies,
+        unownedStorePackages,
+        externalStorePackages,
         conflicts,
     };
 }
@@ -154,12 +182,12 @@ function physicalSkillPackageKind(targetPath) {
 function physicalSkillPackageMatchesCanonical(packagePath, packageMaterializations, storeRoot, packageName) {
     let stats;
     try {
-        stats = fs.lstatSync(packagePath);
+        stats = fs.statSync(packagePath);
     }
     catch {
         return 'divergent';
     }
-    if (!stats.isDirectory() || stats.isSymbolicLink())
+    if (!stats.isDirectory())
         return 'divergent';
     const desiredByRelative = new Map();
     for (const { source, targetPath } of packageMaterializations) {
@@ -245,7 +273,7 @@ export function classifyCanonicalSkillLinks(desired, isManagedLink) {
         if (!linkPath)
             continue;
         const skillRoot = skillRootPath(file.targetPath);
-        const withinSkillRoot = skillRoot !== undefined && isPathWithin(skillRoot, linkPath);
+        const withinSkillRoot = skillRoot !== undefined && isPathWithinRoot(skillRoot, linkPath);
         const sharedRoot = withinSkillRoot && path.resolve(linkPath) === path.resolve(skillRoot);
         const groupingPath = sharedRoot
             ? linkPath
@@ -271,7 +299,7 @@ export function classifyCanonicalSkillLinks(desired, isManagedLink) {
         const baseOutcome = {
             ownership: managed ? 'managed' : 'external',
             scope,
-            ...canonicalSkillTarget(first),
+            ...canonicalSkillLinkTarget(first),
             linkPath: linkPaths[0],
             linkPaths,
             packageNames,
@@ -349,9 +377,9 @@ function toBuffer(value) {
     return Buffer.isBuffer(value) ? value : Buffer.from(value);
 }
 function canonicalStoreFile(source, targetPath) {
-    const { ide: _ide, ...withoutIde } = source;
+    const { ide: _ide, surface: _surface, ...withoutTarget } = source;
     return {
-        ...withoutIde,
+        ...withoutTarget,
         owner: 'canonical-store',
         targetPath,
     };
@@ -359,10 +387,21 @@ function canonicalStoreFile(source, targetPath) {
 function canonicalSkillTarget(value) {
     return value.owner === 'canonical-store'
         ? { owner: 'canonical-store' }
-        : { owner: 'ide', ide: value.ide };
+        : { owner: 'ide', ide: value.ide, ...(value.surface ? { surface: value.surface } : {}) };
 }
-function canonicalSkillTargetKey(value) {
-    return value.owner === 'canonical-store' ? 'canonical-store' : value.ide;
+function canonicalSkillLinkTarget(value) {
+    if (value.owner === 'canonical-store')
+        return { owner: 'canonical-store' };
+    if (!value.surface)
+        throw new Error(`Skill link outcome for ${value.ide} is missing its Surface.`);
+    return { owner: 'ide', ide: value.ide, surface: value.surface };
+}
+export function canonicalSkillTargetKey(value) {
+    return value.owner === 'canonical-store'
+        ? 'canonical-store'
+        : value.surface
+            ? `${value.ide}:${value.surface}`
+            : value.ide;
 }
 function skillRootPath(targetPath) {
     const resolvedTarget = path.resolve(targetPath);
@@ -380,9 +419,9 @@ function skillPackageRoot(targetPath) {
 }
 function isLinkWithinSkillRoot(targetPath, linkPath) {
     const skillRoot = skillRootPath(targetPath);
-    return skillRoot !== undefined && isPathWithin(skillRoot, linkPath);
+    return skillRoot !== undefined && isPathWithinRoot(skillRoot, linkPath);
 }
-function isPathWithin(root, candidate) {
+export function isPathWithinRoot(root, candidate) {
     const relative = path.relative(path.resolve(root), path.resolve(candidate));
     return relative === ''
         || (relative !== '..'

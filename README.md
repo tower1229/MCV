@@ -146,11 +146,13 @@ mcv restore    TTY 中 deep-link 到 Restore Latest Deployment；--dry-run/--yes
 
 删除默认不执行。只有 `mcv deploy --prune-managed` 经交互确认后，才会删除本机 state 中已记录为 MCV managed、但仓库已不再生成的文件，以及与本次 Canonical 部署逐文件完全一致的旧 `$CODEX_HOME/skills` Skill 副本；`--yes` 永远拒绝删除与 topology migration。普通 deploy 检测到后一种重复时会提示，不会自动删除；内容不同或包含链接的 legacy Skill 会保留。
 
-对于 managed Skill layout：禁用某一个 IDE 只会把该 IDE 的 projection 列为 Advanced Cleanup 候选，不会在其他已启用 projection 仍引用同一 Canonical Device Skill Store package 时删除物理 package。当 Skill 已从仓库移除且所有 projection 都不再需要时，最终物理 package 会作为单独的 Advanced Cleanup 候选（`physical-materialization`，默认不选中），且仅当该 package 完全由 MCV 拥有（记录在 managed Skill layout）时才会出现；外部链接与外部拥有的物理 package 永远不会成为 Restore 写入目标或 cleanup 删除候选。
+对于 managed Skill layout：禁用某一个 IDE 只会把该 IDE 的 projection 列为 Advanced Cleanup 候选，不会在其他已启用 projection 仍引用同一 Canonical Device Skill Store package 时删除物理 package。当 Skill 已从仓库移除且所有 projection 都不再需要时，最终物理 package 会作为单独的 Advanced Cleanup 候选（`physical-materialization`，默认不选中），且仅当该 package 完全由 MCV 拥有（记录在 managed Skill layout）时才会出现；外部链接与外部拥有的物理 package 永远不会成为 Restore 写入目标或 cleanup 删除候选。Store 中未登记但与 Canonical 完全一致的 package 会原样复用，只有 MCV 新建的 projection link 会进入 managed state；未登记且内容不同、含额外文件、链接不可验证或拓扑不安全的 package 会阻断 Deploy，不会被覆盖、认领或生成整包 cleanup。
 
 Deploy 不会穿过已有 symlink/junction 写文件。对于已有的 Canonical Skill package 链接，Plan 会按 Skill package 或共享 link root 识别其有效内容：与期望内容一致时显示一个 `Satisfied via link` 外部所有权 outcome，不产生该链接路径的写入候选，也不进入 Pending Deployment Change 或 managed cleanup；若同一物理事实路径本轮有等价的正常 Deploy 候选，只写该事实路径。内容 divergent、dangling、cycle、物理目标冲突等情况会合并为一个带 affected-file count 的 blocking outcome。其他未分类链接仍不会被遍历、替换、写入或删除，包括 copy layout 和 Advanced Cleanup。
 
 在 macOS 将 `deploy.useSymlinks` 设为 `true` 后，MCV 会把每个选中的 Canonical Skill package 物理材料化一次到 Canonical Device Skill Store（当前解析为生态约定的 `~/.agents/skills/`），再为已有 loader 证据的 Surface 创建 per-Skill managed link：Claude Code 使用 `~/.claude/skills/<skill>`，Gemini CLI 使用 `~/.gemini/skills/<skill>`。Antigravity 在单独证据记录前继续复制到 `~/.gemini/config/skills/`，不会因为与 Gemini CLI 共享部分 `.gemini` 层级而共用整个 Skills root 或继承链接策略。Store 属于 MCV 的 Canonical Skill 设备布局，不属于 Codex；即使 Codex 未启用，只要任一已验证 Surface 仍需要该 Skill，Store 仍会被规划和维护。MCV 永远不会链接整个 IDE Skills root，也不会吸收未拥有或 IDE-exclusive 的 Skills。材料化内容写入并验证成功后，per-Skill 投影才会生效；备份和回滚覆盖本轮尝试的内容与链接，Restore 会按 backup 中的拓扑元数据恢复目录、文件或符号链接，而不会留下悬空 projection 或错配副本。若 Surface 上已有与 Canonical 完全一致的物理 Skill 目录，Plan 会将其列为默认不选中的 topology migration 候选，需显式交互确认后才会替换为 managed link；内容 divergent 的物理副本与外部链接会被保留，`--yes` 也不会执行 topology migration。Windows、未验证支持目录链接的 Surface，以及 `useSymlinks: false` 继续使用 copy projection；已经正确的链接会保留，不会被目录覆盖。平台与 Surface 兼容矩阵见 `docs/compatibility/canonical-skill-loader-evidence.md`；`deploy.useSymlinks` 默认仍为 `false`。
+
+Deploy 的 Skill JSON 中 `ide` 始终是 `codex | claude-code | gemini`，`surface` 标识具体的 `codex | claude-code | gemini-cli | antigravity`；Canonical Store change 使用 `owner: "canonical-store"`，不携带这两个字段。
 
 命令不支持按参数临时选择 IDE。需要启用或禁用目标时，编辑 `mcv.yaml`：
 

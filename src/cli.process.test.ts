@@ -586,6 +586,8 @@ describe('packaged mcv CLI', () => {
           status: 'satisfied-via-link',
           ownership: 'external',
           scope: 'shared-link-root',
+          ide: 'claude-code',
+          surface: 'claude-code',
           linkPath: linkedRoot,
           resolvedPath: externalRoot,
           packageNames: ['review'],
@@ -661,6 +663,8 @@ describe('packaged mcv CLI', () => {
           }),
           expect.objectContaining({
             targetPath: projection,
+            ide: 'claude-code',
+            surface: 'claude-code',
             deploymentKind: 'managed-link-projection',
           }),
         ]));
@@ -697,6 +701,8 @@ describe('packaged mcv CLI', () => {
           linkOutcomes: [expect.objectContaining({
             status: 'satisfied-via-link',
             ownership: 'managed',
+            ide: 'claude-code',
+            surface: 'claude-code',
             linkPath: projection,
           })],
         });

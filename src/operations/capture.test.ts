@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceContext } from '../adapters/types.js';
+import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
 import { readState, writeState } from '../utils/state.js';
 import { applyCapturePlan, createCapturePlan } from './capture.js';
 
@@ -225,6 +226,32 @@ describe('Capture operations', () => {
     fs.writeFileSync(path.join(storePackage, 'assets', 'icon.bin'), Buffer.from([9, 8, 7]));
     fs.symlinkSync(storePackage, claudeProjection, 'dir');
     fs.symlinkSync(storePackage, geminiProjection, 'dir');
+    writeState(context, {
+      ...readState(context),
+      managedSkillLayout: {
+        packages: {},
+        projections: {
+          [claudeProjection]: {
+            packageName: 'shared-demo',
+            projectionPath: claudeProjection,
+            ide: 'claude-code',
+            surface: 'claude-code',
+            expectedLinkTarget: storePackage,
+            topologyHash: hashDeviceTopologyNode(claudeProjection),
+            source: repositoryPath,
+          },
+          [geminiProjection]: {
+            packageName: 'shared-demo',
+            projectionPath: geminiProjection,
+            ide: 'gemini',
+            surface: 'gemini-cli',
+            expectedLinkTarget: storePackage,
+            topologyHash: hashDeviceTopologyNode(geminiProjection),
+            source: repositoryPath,
+          },
+        },
+      },
+    });
 
     const plan = await createCapturePlan(context);
     const skillChanges = plan.changes.filter((change) => change.name === 'shared-demo');
@@ -261,7 +288,44 @@ describe('Capture operations', () => {
     )).toContain('# Shared');
     expect(fs.lstatSync(path.join(repositoryPath, 'common', 'skills', 'shared-demo')).isSymbolicLink())
       .toBe(false);
-    expect(readState(context).managedSkillLayout).toBeUndefined();
+    expect(readState(context).managedSkillLayout?.projections).toEqual(expect.objectContaining({
+      [claudeProjection]: expect.objectContaining({ surface: 'claude-code' }),
+      [geminiProjection]: expect.objectContaining({ surface: 'gemini-cli' }),
+    }));
+  });
+
+  it('keeps a hand-created alias into the Store externally owned during Capture', async () => {
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 2',
+      'repositoryId: capture-operation-test',
+      'initializedAt: 2026-07-22T00:00:00.000Z',
+      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: true }',
+      'targets:',
+      '  codex:',
+      '    enabled: true',
+      '  claudeCode:',
+      '    enabled: true',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'manual');
+    const claudeProjection = path.join(homeDir, '.claude', 'skills', 'manual');
+    fs.mkdirSync(storePackage, { recursive: true });
+    fs.mkdirSync(path.dirname(claudeProjection), { recursive: true });
+    fs.writeFileSync(path.join(storePackage, 'SKILL.md'), '---\nname: manual\n---\n# Manual\n');
+    fs.symlinkSync(storePackage, claudeProjection, process.platform === 'win32' ? 'junction' : 'dir');
+
+    const plan = await createCapturePlan(context);
+    expect(plan).toMatchObject({ status: 'planned', issues: [] });
+    expect(plan.changes.map((change) => change.name)).toContain('manual');
+    const skill = plan.changes.find((change) => change.name === 'manual');
+
+    expect(skill?.contributingProjections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ surface: 'codex', ownership: 'physical' }),
+      expect.objectContaining({ surface: 'claude-code', ownership: 'external' }),
+    ]));
   });
 
   it('invalidates Capture Plan when Skill projection topology changes before Apply', async () => {

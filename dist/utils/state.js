@@ -15,13 +15,25 @@ export function readState(context) {
     if (fs.existsSync(statePath)) {
         try {
             const content = fs.readFileSync(statePath, 'utf-8');
-            return JSON.parse(content);
+            return normalizeLegacyState(JSON.parse(content));
         }
         catch {
             return {};
         }
     }
     return {};
+}
+function normalizeLegacyState(state) {
+    const projections = state.managedSkillLayout?.projections;
+    if (!projections)
+        return state;
+    for (const projection of Object.values(projections)) {
+        if (projection.ide === 'gemini-cli' || projection.ide === 'antigravity') {
+            projection.surface = projection.ide;
+            projection.ide = 'gemini';
+        }
+    }
+    return state;
 }
 export function writeState(context, state) {
     const statePath = getStateFilePath(context);

@@ -7,6 +7,9 @@ export interface DeviceContext {
   variables?: Record<string, string>;
 }
 
+export type IdeId = 'codex' | 'claude-code' | 'gemini';
+export type SkillSurfaceId = 'codex' | 'claude-code' | 'gemini-cli' | 'antigravity';
+
 export interface DetectedIde {
   id: string;
   name: string;
@@ -68,7 +71,7 @@ export interface IdeAdapter {
 }
 
 export interface SkillDeploymentSurface {
-  id: string;
+  id: SkillSurfaceId;
   destinationRoot(context: DeviceContext): string;
   supportsManagedDirectoryLinks(platform: NodeJS.Platform): boolean;
 }

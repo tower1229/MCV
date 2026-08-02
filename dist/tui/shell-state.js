@@ -913,10 +913,7 @@ function initialDeploySelection(plan, lastSelection) {
             return change.defaultSelected;
         if (!lastSelection)
             return change.defaultSelected;
-        const selectionIde = change.ide === 'gemini-cli' || change.ide === 'antigravity'
-            ? 'gemini'
-            : change.ide;
-        return lastSelection[selectionIde]?.includes(change.capability) === true;
+        return lastSelection[change.ide]?.includes(change.capability) === true;
     })
         .map((change) => change.id);
 }

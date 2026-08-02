@@ -50,6 +50,34 @@ describe('Deploy selection tree', () => {
       [capability.id, packageNode.id],
     )).toHaveLength(4);
   });
+
+  it('groups Gemini CLI and Antigravity as distinct Surfaces of the Gemini IDE', () => {
+    const plan = skillPlan();
+    const base = plan.changes[0] as DeployPlan['changes'][number] & {
+      owner: 'ide'; capability: 'skills'; surface: 'codex';
+    };
+    plan.changes = [
+      {
+        ...base,
+        id: 'gemini-cli-skill',
+        ide: 'gemini',
+        surface: 'gemini-cli',
+        targetPath: '/tmp/.gemini/skills/hatch-pet/SKILL.md',
+      },
+      {
+        ...base,
+        id: 'antigravity-skill',
+        ide: 'gemini',
+        surface: 'antigravity',
+        targetPath: '/tmp/.gemini/config/skills/hatch-pet/SKILL.md',
+      },
+    ];
+
+    expect(buildDeploySelectionTree(plan).map((node) => node.label)).toEqual([
+      'Gemini CLI / Skills',
+      'Antigravity / Skills',
+    ]);
+  });
 });
 
 function skillPlan(): DeployPlan {
@@ -61,6 +89,7 @@ function skillPlan(): DeployPlan {
     id,
     owner: 'ide' as const,
     ide: 'codex' as const,
+    surface: 'codex' as const,
     capability: 'skills' as const,
     name: 'hatch-pet',
     targetPath,

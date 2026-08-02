@@ -309,15 +309,15 @@ describe('Deploy operations', () => {
   });
 
   it('does not restore a selected target whose write was never attempted', async () => {
-    const rulesPath = path.join(homeDir, '.claude', 'CLAUDE.md');
-    const skillPath = path.join(homeDir, '.claude', 'skills', 'review', 'SKILL.md');
-    const laterPath = path.join(homeDir, '.claude', 'settings.json');
     const plan = await createDeployPlan(context);
-    const selected = [rulesPath, skillPath, laterPath].map((targetPath) => {
-      const change = plan.changes.find((candidate) => candidate.targetPath === targetPath);
-      if (!change) throw new Error(`expected change for ${targetPath}`);
-      return change;
-    });
+    const selected = plan.changes.filter((change, index, changes) =>
+      change.defaultSelected
+      && changes.findIndex((candidate) => candidate.targetPath === change.targetPath) === index)
+      .slice(0, 3);
+    if (selected.length !== 3) throw new Error('expected at least three selected writes');
+    const firstPath = selected[0].targetPath;
+    const unattemptedPath = selected[2].targetPath;
+    const firstBefore = fs.existsSync(firstPath) ? fs.readFileSync(firstPath) : undefined;
     let writeCount = 0;
 
     const result = await applyDeployPlan(
@@ -329,7 +329,8 @@ describe('Deploy operations', () => {
           writeCount += 1;
           if (writeCount === 1) {
             atomicWriteFile(targetPath, content);
-            fs.writeFileSync(laterPath, '{"external":true}\n');
+            fs.mkdirSync(path.dirname(unattemptedPath), { recursive: true });
+            fs.writeFileSync(unattemptedPath, '{"external":true}\n');
             return;
           }
           throw new Error('stop before later target');
@@ -338,9 +339,9 @@ describe('Deploy operations', () => {
     );
 
     expect(result).toMatchObject({ status: 'failed', error: { code: 'deploy.transactionFailed' } });
-    expect(fs.readFileSync(rulesPath, 'utf8')).toBe('# Device rules\n');
-    expect(fs.existsSync(skillPath)).toBe(false);
-    expect(fs.readFileSync(laterPath, 'utf8')).toBe('{"external":true}\n');
+    if (firstBefore) expect(fs.readFileSync(firstPath)).toEqual(firstBefore);
+    else expect(fs.existsSync(firstPath)).toBe(false);
+    expect(fs.readFileSync(unattemptedPath, 'utf8')).toBe('{"external":true}\n');
   });
 
   it('preserves the verified backup path when automatic rollback is incomplete', async () => {
@@ -442,6 +443,7 @@ describe('Deploy operations', () => {
       scope: 'shared-link-root',
       owner: 'ide',
       ide: 'claude-code',
+      surface: 'claude-code',
       linkPath: skillsRoot,
       linkPaths: [skillsRoot],
       resolvedPath: externalRoot,
@@ -451,7 +453,7 @@ describe('Deploy operations', () => {
     }]);
     expect(plan.issues).toContainEqual(expect.objectContaining({
       severity: 'notice',
-      code: 'deploy.skillsLinked.satisfied.claude-code',
+      code: 'deploy.skillsLinked.satisfied.claude-code:claude-code',
       message: expect.stringContaining('Satisfied via link'),
     }));
     expect(plan.changes.some((change) =>
@@ -1179,6 +1181,195 @@ describe('Deploy operations', () => {
     }));
   });
 
+  it('blocks an unowned divergent Store package without overwriting or projecting it', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    const storeFile = path.join(storePackage, 'SKILL.md');
+    const extraFile = path.join(storePackage, 'local-notes.md');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(storePackage, { recursive: true });
+    fs.writeFileSync(storeFile, '# Local review changes\n');
+    fs.writeFileSync(extraFile, '# Keep me\n');
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.readyToApply).toBe(false);
+    expect(plan.issues).toContainEqual(expect.objectContaining({
+      severity: 'error',
+      code: 'deploy.skillsLayout.unownedStorePackage',
+    }));
+    expect(plan.changes.some((change) =>
+      change.targetPath === storeFile || change.targetPath === projectionPath)).toBe(false);
+    expect(fs.readFileSync(storeFile, 'utf8')).toBe('# Local review changes\n');
+    expect(fs.readFileSync(extraFile, 'utf8')).toBe('# Keep me\n');
+    expect(readState(context).managedSkillLayout).toBeUndefined();
+  });
+
+  it('reuses an exact unowned Store package without claiming it or offering package cleanup', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    const storeFile = path.join(storePackage, 'SKILL.md');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(storePackage, { recursive: true });
+    fs.writeFileSync(storeFile, '# Review\n');
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.readyToApply).toBe(true);
+    expect(plan.changes.some((change) =>
+      change.deploymentKind === 'physical-materialization'
+      && change.targetPath.startsWith(storePackage))).toBe(false);
+    expect(plan.changes).toContainEqual(expect.objectContaining({
+      targetPath: projectionPath,
+      deploymentKind: 'managed-link-projection',
+    }));
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      { changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id) },
+      { createSymbolicLink: createDirectoryLink },
+    );
+    expect(result.status).toBe('succeeded');
+    expect(readState(context).managedSkillLayout?.packages).toEqual({});
+    expect(readState(context).managedSkillLayout?.projections).toHaveProperty(projectionPath);
+
+    fs.rmSync(path.join(repositoryPath, 'common', 'skills', 'review'), { recursive: true, force: true });
+    const cleanupPlan = await createDeployPlan(context);
+    expect(cleanupPlan.changes.some((change) =>
+      change.deploymentKind === 'physical-materialization'
+      && change.change === 'delete'
+      && change.targetPath === storePackage)).toBe(false);
+    expect(fs.readFileSync(storeFile, 'utf8')).toBe('# Review\n');
+  });
+
+  it('preserves an exact external Store link without taking package ownership', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const externalPackage = path.join(homeDir, 'external-skills', 'review');
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(externalPackage, { recursive: true });
+    fs.mkdirSync(path.dirname(storePackage), { recursive: true });
+    fs.writeFileSync(path.join(externalPackage, 'SKILL.md'), '# Review\n');
+    createDirectoryLink(externalPackage, storePackage);
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.readyToApply).toBe(true);
+    expect(plan.changes.some((change) =>
+      change.deploymentKind === 'physical-materialization')).toBe(false);
+    expect(plan.changes).toContainEqual(expect.objectContaining({
+      targetPath: projectionPath,
+      deploymentKind: 'managed-link-projection',
+    }));
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      { changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id) },
+      { createSymbolicLink: createDirectoryLink },
+    );
+    expect(result.status).toBe('succeeded');
+    expect(readState(context).managedSkillLayout?.packages).toEqual({});
+    expect(fs.realpathSync(storePackage)).toBe(fs.realpathSync(externalPackage));
+  });
+
+  it('invalidates Deploy when an exact external Store package changes after Plan review', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    const storeFile = path.join(storePackage, 'SKILL.md');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(storePackage, { recursive: true });
+    fs.writeFileSync(storeFile, '# Review\n');
+    const plan = await createDeployPlan(context);
+    fs.writeFileSync(storeFile, '# Changed after review\n');
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      { changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id) },
+      { createSymbolicLink: createDirectoryLink },
+    );
+
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'operation.stalePlan' } });
+    expect(fs.existsSync(projectionPath)).toBe(false);
+    expect(fs.readFileSync(storeFile, 'utf8')).toBe('# Changed after review\n');
+    expect(readState(context).managedSkillLayout).toBeUndefined();
+  });
+
+  it('invalidates Deploy when an exact external Store directory becomes a same-content link', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    const storeFile = path.join(storePackage, 'SKILL.md');
+    const externalPackage = path.join(homeDir, 'external-skills', 'review');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(storePackage, { recursive: true });
+    fs.writeFileSync(storeFile, '# Review\n');
+    const plan = await createDeployPlan(context);
+
+    fs.mkdirSync(externalPackage, { recursive: true });
+    fs.writeFileSync(path.join(externalPackage, 'SKILL.md'), '# Review\n');
+    fs.rmSync(storePackage, { recursive: true });
+    createDirectoryLink(externalPackage, storePackage);
+
+    const result = await applyDeployPlan(
+      context,
+      plan,
+      { changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id) },
+      { createSymbolicLink: createDirectoryLink },
+    );
+
+    expect(result).toMatchObject({ status: 'failed', error: { code: 'operation.stalePlan' } });
+    expect(fs.existsSync(projectionPath)).toBe(false);
+    expect(fs.realpathSync(storePackage)).toBe(fs.realpathSync(externalPackage));
+    expect(readState(context).managedSkillLayout).toBeUndefined();
+  });
+
+  it('blocks a dangling unowned Store package link without creating projections', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
+    );
+    const externalPackage = path.join(homeDir, 'external-skills', 'review');
+    const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
+    const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(externalPackage, { recursive: true });
+    fs.mkdirSync(path.dirname(storePackage), { recursive: true });
+    fs.writeFileSync(path.join(externalPackage, 'SKILL.md'), '# Review\n');
+    createDirectoryLink(externalPackage, storePackage);
+    fs.rmSync(externalPackage, { recursive: true, force: true });
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.readyToApply).toBe(false);
+    expect(plan.issues).toContainEqual(expect.objectContaining({
+      code: 'deploy.skillsLayout.unownedStorePackage',
+      severity: 'error',
+    }));
+    expect(plan.changes.some((change) => change.targetPath === projectionPath)).toBe(false);
+    expect(fs.lstatSync(storePackage).isSymbolicLink()).toBe(true);
+  });
+
   it('disabling one IDE cleans up only its projection while retaining the Store package', async () => {
     const manifestPath = path.join(repositoryPath, 'mcv.yaml');
     fs.writeFileSync(
@@ -1400,6 +1591,20 @@ describe('Deploy operations', () => {
     const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
     fs.mkdirSync(path.dirname(storeFile), { recursive: true });
     fs.writeFileSync(storeFile, '# Previous review\n');
+    writeState(context, {
+      ...readState(context),
+      managedSkillLayout: {
+        packages: {
+          [path.dirname(storeFile)]: {
+            packageName: 'review',
+            storePath: path.dirname(storeFile),
+            contentHash: 'managed-before-test',
+            source: repositoryPath,
+          },
+        },
+        projections: {},
+      },
+    });
     const plan = await createDeployPlan(context);
     const selected = plan.changes.filter((change) => change.defaultSelected);
 
@@ -1569,6 +1774,20 @@ describe('Deploy operations', () => {
     const storeFile = path.join(storeRoot, 'skills', 'review', 'SKILL.md');
     fs.mkdirSync(path.dirname(storeFile), { recursive: true });
     fs.writeFileSync(storeFile, '# Previous review\n');
+    writeState(context, {
+      ...readState(context),
+      managedSkillLayout: {
+        packages: {
+          [path.dirname(storeFile)]: {
+            packageName: 'review',
+            storePath: path.dirname(storeFile),
+            contentHash: 'managed-before-test',
+            source: repositoryPath,
+          },
+        },
+        projections: {},
+      },
+    });
     const plan = await createDeployPlan(context);
     fs.renameSync(storeRoot, path.join(homeDir, '.agents-before-retarget'));
     fs.mkdirSync(path.dirname(storeFile), { recursive: true });
@@ -1608,6 +1827,7 @@ describe('Deploy operations', () => {
     expect(plan.changes.some((change) =>
       change.deploymentKind === 'managed-link-projection'
       || change.deploymentKind === 'physical-materialization')).toBe(false);
+
   });
 
   it('uses the Store as Codex conventional Skills location without creating a Claude projection', async () => {
@@ -1666,16 +1886,19 @@ describe('Deploy operations', () => {
         }),
         expect.objectContaining({
           ide: 'claude-code',
+          surface: 'claude-code',
           targetPath: claudeProjection,
           deploymentKind: 'managed-link-projection',
         }),
         expect.objectContaining({
-          ide: 'gemini-cli',
+          ide: 'gemini',
+          surface: 'gemini-cli',
           targetPath: geminiCliProjection,
           deploymentKind: 'managed-link-projection',
         }),
         expect.objectContaining({
-          ide: 'antigravity',
+          ide: 'gemini',
+          surface: 'antigravity',
           targetPath: antigravityCopy,
           deploymentKind: 'copy-projection',
         }),
@@ -1730,16 +1953,19 @@ describe('Deploy operations', () => {
     expect(plan.changes).toEqual(expect.arrayContaining([
       expect.objectContaining({
         ide: 'claude-code',
+        surface: 'claude-code',
         targetPath: path.join(homeDir, '.claude', 'skills', 'review', 'SKILL.md'),
         deploymentKind: 'copy-projection',
       }),
       expect.objectContaining({
-        ide: 'gemini-cli',
+        ide: 'gemini',
+        surface: 'gemini-cli',
         targetPath: path.join(homeDir, '.gemini', 'skills', 'review', 'SKILL.md'),
         deploymentKind: 'copy-projection',
       }),
       expect.objectContaining({
-        ide: 'antigravity',
+        ide: 'gemini',
+        surface: 'antigravity',
         targetPath: path.join(homeDir, '.gemini', 'config', 'skills', 'review', 'SKILL.md'),
         deploymentKind: 'copy-projection',
       }),
@@ -1747,6 +1973,24 @@ describe('Deploy operations', () => {
     expect(plan.changes.some((change) =>
       change.deploymentKind === 'managed-link-projection'
       || change.deploymentKind === 'physical-materialization')).toBe(false);
+
+    const result = await applyDeployPlan(context, plan, {
+      changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+    });
+    expect(result.status).toBe('succeeded');
+    const json = JSON.parse(JSON.stringify(result)) as typeof result;
+    expect(json.changes).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        ide: 'gemini',
+        surface: 'gemini-cli',
+        targetPath: path.join(homeDir, '.gemini', 'skills', 'review', 'SKILL.md'),
+      }),
+      expect.objectContaining({
+        ide: 'gemini',
+        surface: 'antigravity',
+        targetPath: path.join(homeDir, '.gemini', 'config', 'skills', 'review', 'SKILL.md'),
+      }),
+    ]));
   });
 
   it('applies only selected capabilities and updates only their device state scope', async () => {

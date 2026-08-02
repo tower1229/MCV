@@ -1,6 +1,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { hashDeviceTopologyNode } from './canonical-skill-device-layout.js';
 import { isSensitiveFile, scanTextForSecrets } from '../utils/sanitize.js';
 export function getSkillSources(context, enabled) {
     const env = context.env;
@@ -25,17 +26,6 @@ export function collectSkills(sources, options = {}) {
     const packages = new Map();
     const warnings = [];
     let excludedFileCount = 0;
-    let storeRoot;
-    if (options.storeRoot) {
-        try {
-            storeRoot = fs.existsSync(options.storeRoot)
-                ? fs.realpathSync(options.storeRoot)
-                : path.resolve(options.storeRoot);
-        }
-        catch {
-            storeRoot = path.resolve(options.storeRoot);
-        }
-    }
     for (const source of sources) {
         if (!fs.existsSync(source.root))
             continue;
@@ -82,7 +72,7 @@ export function collectSkills(sources, options = {}) {
                 hash.update(file.relativePath.replace(/\\/g, '/'));
                 hash.update(file.content);
             }
-            const ownership = classifyProjectionOwnership(physicalDirectory, isLink, storeRoot);
+            const ownership = classifyProjectionOwnership(projectionPath, physicalDirectory, isLink, options.managedProjections);
             const projection = {
                 ide: source.ide,
                 surface: source.surface,
@@ -119,19 +109,24 @@ export function skillPackageToCaptureFiles(skill) {
         ownership: 'managed',
     }));
 }
-function classifyProjectionOwnership(physicalDirectory, isLink, storeRoot) {
+function classifyProjectionOwnership(projectionPath, physicalDirectory, isLink, managedProjections) {
     if (!isLink)
         return 'physical';
-    if (!storeRoot)
+    const resolvedProjectionPath = path.resolve(projectionPath);
+    const managed = managedProjections?.[projectionPath]
+        ?? managedProjections?.[resolvedProjectionPath];
+    if (!managed || path.resolve(managed.projectionPath) !== resolvedProjectionPath)
         return 'external';
-    let physicalParent;
+    let expectedPhysical;
     try {
-        physicalParent = fs.realpathSync(path.dirname(physicalDirectory));
+        expectedPhysical = fs.realpathSync(managed.expectedLinkTarget);
     }
     catch {
-        physicalParent = path.resolve(path.dirname(physicalDirectory));
+        return 'external';
     }
-    return physicalParent === storeRoot ? 'managed' : 'external';
+    if (path.resolve(expectedPhysical) !== path.resolve(physicalDirectory))
+        return 'external';
+    return hashDeviceTopologyNode(projectionPath) === managed.topologyHash ? 'managed' : 'external';
 }
 function walkSkill(root, directory, files, warnings, excluded) {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {

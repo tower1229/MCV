@@ -1,14 +1,14 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { DeviceContext } from '../adapters/types.js';
+import type { DeviceContext, IdeId, SkillSurfaceId } from '../adapters/types.js';
 import { findSymbolicLinkAncestor, hashFile } from '../utils/files.js';
 import { isRecord } from '../utils/objects.js';
 
-export type CanonicalSkillIde = 'codex' | 'claude-code' | 'gemini' | 'gemini-cli' | 'antigravity';
+export type CanonicalSkillIde = IdeId;
 export type CanonicalSkillTarget =
-  | { owner: 'canonical-store'; ide?: never }
-  | { owner: 'ide'; ide: CanonicalSkillIde };
+  | { owner: 'canonical-store'; ide?: never; surface?: never }
+  | { owner: 'ide'; ide: CanonicalSkillIde; surface?: SkillSurfaceId };
 
 export type CanonicalSkillLayoutFile = {
   capability: 'rules' | 'skills' | 'mcp' | 'native';
@@ -24,6 +24,7 @@ export interface CanonicalSkillMaterialization<T extends CanonicalSkillLayoutFil
 export interface CanonicalSkillProjection {
   owner: 'ide';
   ide: CanonicalSkillIde;
+  surface: SkillSurfaceId;
   packageName: string;
   targetPath: string;
   physicalTargetPath: string;
@@ -37,12 +38,24 @@ export interface CanonicalSkillTopologyMigration extends CanonicalSkillProjectio
 export interface CanonicalSkillDivergentPhysicalCopy {
   owner: 'ide';
   ide: CanonicalSkillIde;
+  surface: SkillSurfaceId;
   packageName: string;
   targetPath: string;
 }
 
+export interface CanonicalSkillUnownedStorePackage {
+  packageName: string;
+  storePath: string;
+}
+
+export interface CanonicalSkillExternalStorePackage {
+  packageName: string;
+  storePath: string;
+}
+
 export interface CanonicalSkillProjectionSurface {
   ide: CanonicalSkillIde;
+  surface: SkillSurfaceId;
   root: string;
   supportsManagedLinks: boolean;
 }
@@ -54,10 +67,12 @@ export interface CanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFile> 
   missingProjections: CanonicalSkillProjection[];
   topologyMigrations: CanonicalSkillTopologyMigration[];
   divergentPhysicalCopies: CanonicalSkillDivergentPhysicalCopy[];
+  unownedStorePackages: CanonicalSkillUnownedStorePackage[];
+  externalStorePackages: CanonicalSkillExternalStorePackage[];
   conflicts: string[];
 }
 
-export type CanonicalSkillLinkOutcome = {
+type CanonicalSkillLinkOutcomeBase = {
   status: 'satisfied-via-link' | 'blocked';
   ownership: 'external' | 'managed';
   scope: 'skill-package' | 'shared-link-root';
@@ -68,7 +83,17 @@ export type CanonicalSkillLinkOutcome = {
   packageNames: string[];
   affectedFileCount: number;
   reason?: 'divergent' | 'dangling' | 'cycle' | 'physical-target-conflict' | 'unclassified';
-} & CanonicalSkillTarget;
+};
+
+type CanonicalSkillLinkTarget =
+  | { owner: 'canonical-store'; ide?: never; surface?: never }
+  | { owner: 'ide'; ide: IdeId; surface: SkillSurfaceId };
+
+type CanonicalSkillLinkOutcomeDetails = Omit<CanonicalSkillLinkOutcomeBase, 'status' | 'reason'>
+  & CanonicalSkillLinkTarget;
+
+export type CanonicalSkillLinkOutcome = CanonicalSkillLinkOutcomeBase
+  & CanonicalSkillLinkTarget;
 
 export interface CanonicalSkillLayoutIssue {
   severity: 'notice' | 'error';
@@ -128,11 +153,13 @@ export function planCanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFil
   context,
   useManagedLinks,
   projectionSurfaces = [],
+  managedStorePaths = new Set<string>(),
 }: {
   files: T[];
   context: DeviceContext;
   useManagedLinks: boolean;
   projectionSurfaces?: CanonicalSkillProjectionSurface[];
+  managedStorePaths?: ReadonlySet<string>;
 }): CanonicalSkillDeviceLayout<T> {
   if (!useManagedLinks) {
     return {
@@ -142,17 +169,19 @@ export function planCanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFil
       missingProjections: [],
       topologyMigrations: [],
       divergentPhysicalCopies: [],
+      unownedStorePackages: [],
+      externalStorePackages: [],
       conflicts: [],
     };
   }
 
   const storeRoot = canonicalDeviceSkillStoreRoot(context);
   const linkCapableSurfaces = projectionSurfaces.filter((surface) => surface.supportsManagedLinks);
-  const linkCapableIde = new Set(linkCapableSurfaces.map((surface) => surface.ide));
+  const linkCapableSurfaceIds = new Set(linkCapableSurfaces.map((surface) => surface.surface));
   const copyOnlySkillFile = (file: T): boolean =>
     file.capability === 'skills'
     && file.owner === 'ide'
-    && !linkCapableIde.has(file.ide)
+    && (file.surface === undefined || !linkCapableSurfaceIds.has(file.surface))
     && !isStoreSkillPath(file.targetPath, storeRoot);
   const filesOutsideLayout = files.filter((file) =>
     file.capability !== 'skills' || copyOnlySkillFile(file));
@@ -171,9 +200,36 @@ export function planCanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFil
     materializationsByPath.set(path.resolve(targetPath), { source: file, targetPath });
   }
 
-  const materializations = [...materializationsByPath.values()];
-  const packageNames = [...new Set(materializations
+  const candidateMaterializations = [...materializationsByPath.values()];
+  const unownedStorePackages: CanonicalSkillUnownedStorePackage[] = [];
+  const externalMatchingPackages = new Set<string>();
+  const externalStorePackages: CanonicalSkillExternalStorePackage[] = [];
+  const candidatePackageNames = [...new Set(candidateMaterializations
     .map(({ targetPath }) => canonicalSkillPackageName(targetPath)))].sort();
+  for (const packageName of candidatePackageNames) {
+    const storePath = path.join(storeRoot, packageName);
+    if (!deployPathExists(storePath) || managedStorePaths.has(path.resolve(storePath))) continue;
+    const packageMaterializations = candidateMaterializations.filter((entry) =>
+      canonicalSkillPackageName(entry.targetPath) === packageName);
+    if (physicalSkillPackageMatchesCanonical(
+      storePath,
+      packageMaterializations,
+      storeRoot,
+      packageName,
+    ) === 'match') {
+      externalMatchingPackages.add(packageName);
+      externalStorePackages.push({ packageName, storePath });
+      continue;
+    }
+    unownedStorePackages.push({ packageName, storePath });
+  }
+  const blockedPackageNames = new Set(unownedStorePackages.map((entry) => entry.packageName));
+  const materializations = candidateMaterializations.filter(({ targetPath }) => {
+    const packageName = canonicalSkillPackageName(targetPath);
+    return !blockedPackageNames.has(packageName) && !externalMatchingPackages.has(packageName);
+  });
+  const packageNames = candidatePackageNames.filter((packageName) =>
+    !blockedPackageNames.has(packageName));
   const missingProjections: CanonicalSkillProjection[] = [];
   const topologyMigrations: CanonicalSkillTopologyMigration[] = [];
   const divergentPhysicalCopies: CanonicalSkillDivergentPhysicalCopy[] = [];
@@ -189,6 +245,7 @@ export function planCanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFil
       const projection = {
         owner: 'ide' as const,
         ide: surface.ide,
+        surface: surface.surface,
         packageName,
         targetPath,
         physicalTargetPath,
@@ -215,6 +272,7 @@ export function planCanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFil
       divergentPhysicalCopies.push({
         owner: 'ide',
         ide: surface.ide,
+        surface: surface.surface,
         packageName,
         targetPath,
       });
@@ -225,7 +283,8 @@ export function planCanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFil
   const linkClassificationIdeFiles = files.filter((file) =>
     file.capability === 'skills'
     && file.owner === 'ide'
-    && linkCapableIde.has(file.ide));
+    && file.surface !== undefined
+    && linkCapableSurfaceIds.has(file.surface));
   return {
     filesOutsideLayout,
     materializations,
@@ -237,6 +296,8 @@ export function planCanonicalSkillDeviceLayout<T extends CanonicalSkillLayoutFil
     missingProjections,
     topologyMigrations,
     divergentPhysicalCopies,
+    unownedStorePackages,
+    externalStorePackages,
     conflicts,
   };
 }
@@ -256,11 +317,11 @@ function physicalSkillPackageMatchesCanonical<T extends CanonicalSkillLayoutFile
 ): 'match' | 'divergent' {
   let stats: fs.Stats;
   try {
-    stats = fs.lstatSync(packagePath);
+    stats = fs.statSync(packagePath);
   } catch {
     return 'divergent';
   }
-  if (!stats.isDirectory() || stats.isSymbolicLink()) return 'divergent';
+  if (!stats.isDirectory()) return 'divergent';
 
   const desiredByRelative = new Map<string, Buffer>();
   for (const { source, targetPath } of packageMaterializations) {
@@ -355,7 +416,7 @@ export function classifyCanonicalSkillLinks<T extends CanonicalSkillLayoutFile>(
     const linkPath = findSymbolicLinkAncestor(file.targetPath);
     if (!linkPath) continue;
     const skillRoot = skillRootPath(file.targetPath);
-    const withinSkillRoot = skillRoot !== undefined && isPathWithin(skillRoot, linkPath);
+    const withinSkillRoot = skillRoot !== undefined && isPathWithinRoot(skillRoot, linkPath);
     const sharedRoot = withinSkillRoot && path.resolve(linkPath) === path.resolve(skillRoot);
     const groupingPath = sharedRoot
       ? linkPath
@@ -380,10 +441,10 @@ export function classifyCanonicalSkillLinks<T extends CanonicalSkillLayoutFile>(
     const packageNames = [...new Set(files.map(({ file }) =>
       canonicalSkillPackageName(file.targetPath)))].sort();
     const managed = linkPaths.every(isManagedLink);
-    const baseOutcome = {
+    const baseOutcome: CanonicalSkillLinkOutcomeDetails = {
       ownership: managed ? 'managed' as const : 'external' as const,
       scope,
-      ...canonicalSkillTarget(first),
+      ...canonicalSkillLinkTarget(first),
       linkPath: linkPaths[0],
       linkPaths,
       packageNames,
@@ -479,9 +540,9 @@ function canonicalStoreFile<T extends CanonicalSkillLayoutFile>(
   source: T,
   targetPath: string,
 ): CanonicalSkillLayoutFile {
-  const { ide: _ide, ...withoutIde } = source;
+  const { ide: _ide, surface: _surface, ...withoutTarget } = source;
   return {
-    ...withoutIde,
+    ...withoutTarget,
     owner: 'canonical-store',
     targetPath,
   };
@@ -492,11 +553,23 @@ function canonicalSkillTarget(
 ): CanonicalSkillTarget {
   return value.owner === 'canonical-store'
     ? { owner: 'canonical-store' }
-    : { owner: 'ide', ide: value.ide };
+    : { owner: 'ide', ide: value.ide, ...(value.surface ? { surface: value.surface } : {}) };
 }
 
-function canonicalSkillTargetKey(value: CanonicalSkillTarget): string {
-  return value.owner === 'canonical-store' ? 'canonical-store' : value.ide;
+function canonicalSkillLinkTarget(
+  value: CanonicalSkillTarget,
+): CanonicalSkillLinkTarget {
+  if (value.owner === 'canonical-store') return { owner: 'canonical-store' };
+  if (!value.surface) throw new Error(`Skill link outcome for ${value.ide} is missing its Surface.`);
+  return { owner: 'ide', ide: value.ide, surface: value.surface };
+}
+
+export function canonicalSkillTargetKey(value: CanonicalSkillTarget): string {
+  return value.owner === 'canonical-store'
+    ? 'canonical-store'
+    : value.surface
+      ? `${value.ide}:${value.surface}`
+      : value.ide;
 }
 
 function skillRootPath(targetPath: string): string | undefined {
@@ -517,10 +590,10 @@ function skillPackageRoot(targetPath: string): string {
 
 function isLinkWithinSkillRoot(targetPath: string, linkPath: string): boolean {
   const skillRoot = skillRootPath(targetPath);
-  return skillRoot !== undefined && isPathWithin(skillRoot, linkPath);
+  return skillRoot !== undefined && isPathWithinRoot(skillRoot, linkPath);
 }
 
-function isPathWithin(root: string, candidate: string): boolean {
+export function isPathWithinRoot(root: string, candidate: string): boolean {
   const relative = path.relative(path.resolve(root), path.resolve(candidate));
   return relative === ''
     || (relative !== '..'
@@ -575,7 +648,7 @@ function linkedFilesMatchPhysicalDesired<T extends CanonicalSkillLayoutFile>(
 }
 
 function linkedSkillIssue(
-  outcome: Omit<CanonicalSkillLinkOutcome, 'status' | 'reason'>,
+  outcome: CanonicalSkillLinkOutcomeDetails,
   target: CanonicalSkillTarget,
   reason: NonNullable<CanonicalSkillLinkOutcome['reason']>,
 ): CanonicalSkillLayoutIssue {

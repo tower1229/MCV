@@ -5,6 +5,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceContext } from '../adapters/types.js';
 import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
+import { hashDirectoryTree } from '../utils/files.js';
 import { readState, writeState } from '../utils/state.js';
 import { applyRestorePlan, createRestorePlan } from './restore.js';
 
@@ -718,29 +719,6 @@ describe('Restore operations', () => {
 
 function hash(value: string): string {
   return crypto.createHash('sha256').update(value).digest('hex');
-}
-
-function hashDirectoryTree(root: string): string {
-  const hashValue = crypto.createHash('sha256');
-  const visit = (directory: string): void => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })
-      .sort((left, right) => left.name.localeCompare(right.name))) {
-      const current = path.join(directory, entry.name);
-      hashValue.update(`${path.relative(root, current)}\0`);
-      if (entry.isSymbolicLink()) {
-        hashValue.update(`symlink\0${fs.readlinkSync(current)}\0`);
-        continue;
-      }
-      if (entry.isDirectory()) {
-        hashValue.update('directory\0');
-        visit(current);
-        continue;
-      }
-      hashValue.update(fs.readFileSync(current));
-    }
-  };
-  visit(root);
-  return hashValue.digest('hex');
 }
 
 function hashDirectory(root: string): string {

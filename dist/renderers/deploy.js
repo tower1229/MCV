@@ -1,3 +1,4 @@
+import { displaySkillSurface } from '../core/skill-surfaces.js';
 import { renderIssuePlain } from './color.js';
 export function renderDeployPlanPlain(plan) {
     const lines = [`Deploy Plan: ${plan.repositoryPath ?? 'not bound'}`];
@@ -116,16 +117,12 @@ function deploymentLabel(kind) {
 function displayIde(ide) {
     if (ide === 'claude-code')
         return 'Claude Code';
-    if (ide === 'gemini-cli')
-        return 'Gemini CLI';
-    if (ide === 'antigravity')
-        return 'Antigravity';
     return ide.charAt(0).toUpperCase() + ide.slice(1);
 }
 function displayDeployTarget(target) {
     return target.owner === 'canonical-store'
-        ? 'Canonical Device Skill Store'
-        : displayIde(target.ide);
+        ? displaySkillSurface('canonical-store')
+        : target.surface ? displaySkillSurface(target.surface) : displayIde(target.ide);
 }
 function formatSurfaceList(changes) {
     const surfaces = [...new Set(changes.map((change) => displayDeployTarget(change)))].sort();

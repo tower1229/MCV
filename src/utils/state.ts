@@ -37,12 +37,27 @@ export function readState(context: DeviceContext): McvState {
   if (fs.existsSync(statePath)) {
     try {
       const content = fs.readFileSync(statePath, 'utf-8');
-      return JSON.parse(content) as McvState;
+      return normalizeLegacyState(JSON.parse(content) as McvState);
     } catch {
       return {};
     }
   }
   return {};
+}
+
+function normalizeLegacyState(state: McvState): McvState {
+  const projections = state.managedSkillLayout?.projections;
+  if (!projections) return state;
+  for (const projection of Object.values(projections) as Array<{
+    ide: string;
+    surface: string;
+  }>) {
+    if (projection.ide === 'gemini-cli' || projection.ide === 'antigravity') {
+      projection.surface = projection.ide;
+      projection.ide = 'gemini';
+    }
+  }
+  return state;
 }
 
 export function writeState(context: DeviceContext, state: McvState): void {

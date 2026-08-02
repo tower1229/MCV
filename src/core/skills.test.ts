@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { hashDeviceTopologyNode } from './canonical-skill-device-layout.js';
 import { collectSkills } from './skills.js';
 
 describe('Skill package collection', () => {
@@ -64,7 +65,26 @@ describe('Skill package collection', () => {
       { ide: 'codex', surface: 'codex', root: storeRoot },
       { ide: 'claude-code', surface: 'claude-code', root: claudeRoot },
       { ide: 'gemini', surface: 'gemini-cli', root: geminiRoot },
-    ], { storeRoot });
+    ], { managedProjections: {
+      [path.join(claudeRoot, 'demo')]: {
+        packageName: 'demo',
+        projectionPath: path.join(claudeRoot, 'demo'),
+        ide: 'claude-code',
+        surface: 'claude-code',
+        expectedLinkTarget: physical,
+        topologyHash: hashDeviceTopologyNode(path.join(claudeRoot, 'demo')),
+        source: root,
+      },
+      [path.join(geminiRoot, 'demo')]: {
+        packageName: 'demo',
+        projectionPath: path.join(geminiRoot, 'demo'),
+        ide: 'gemini',
+        surface: 'gemini-cli',
+        expectedLinkTarget: physical,
+        topologyHash: hashDeviceTopologyNode(path.join(geminiRoot, 'demo')),
+        source: root,
+      },
+    } });
 
     const copies = result.packages.get('demo');
     expect(copies).toHaveLength(1);
@@ -96,7 +116,6 @@ describe('Skill package collection', () => {
   });
 
   it('does not grant managed ownership to external aliases', () => {
-    if (process.platform === 'win32') return;
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-skills-external-')); roots.push(root);
     const storeRoot = path.join(root, 'agents', 'skills');
     const claudeRoot = path.join(root, 'claude', 'skills');
@@ -105,12 +124,16 @@ describe('Skill package collection', () => {
     fs.mkdirSync(claudeRoot, { recursive: true });
     fs.mkdirSync(externalPackage, { recursive: true });
     fs.writeFileSync(path.join(externalPackage, 'SKILL.md'), '---\nname: demo\n---\n# External\n');
-    fs.symlinkSync(externalPackage, path.join(claudeRoot, 'demo'), 'dir');
+    fs.symlinkSync(
+      externalPackage,
+      path.join(claudeRoot, 'demo'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
 
     const result = collectSkills([
       { ide: 'codex', surface: 'codex', root: storeRoot },
       { ide: 'claude-code', surface: 'claude-code', root: claudeRoot },
-    ], { storeRoot });
+    ]);
 
     const copies = result.packages.get('demo');
     expect(copies).toHaveLength(1);
@@ -120,6 +143,42 @@ describe('Skill package collection', () => {
         projectionPath: path.join(claudeRoot, 'demo'),
         ownership: 'external',
       }),
+    ]);
+  });
+
+  it('does not trust a stale managed projection record after the link is retargeted', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-skills-stale-record-')); roots.push(root);
+    const storePackage = path.join(root, 'agents', 'skills', 'demo');
+    const externalPackage = path.join(root, 'external', 'demo');
+    const claudeRoot = path.join(root, 'claude', 'skills');
+    const projectionPath = path.join(claudeRoot, 'demo');
+    fs.mkdirSync(storePackage, { recursive: true });
+    fs.mkdirSync(externalPackage, { recursive: true });
+    fs.mkdirSync(claudeRoot, { recursive: true });
+    fs.writeFileSync(path.join(storePackage, 'SKILL.md'), '---\nname: demo\n---\n# Store\n');
+    fs.writeFileSync(path.join(externalPackage, 'SKILL.md'), '---\nname: demo\n---\n# External\n');
+    fs.symlinkSync(
+      externalPackage,
+      projectionPath,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+
+    const result = collectSkills([
+      { ide: 'claude-code', surface: 'claude-code', root: claudeRoot },
+    ], { managedProjections: {
+      [projectionPath]: {
+        packageName: 'demo',
+        projectionPath,
+        ide: 'claude-code',
+        surface: 'claude-code',
+        expectedLinkTarget: storePackage,
+        topologyHash: hashDeviceTopologyNode(projectionPath),
+        source: root,
+      },
+    } });
+
+    expect(result.packages.get('demo')?.[0].projections).toEqual([
+      expect.objectContaining({ ownership: 'external' }),
     ]);
   });
 });

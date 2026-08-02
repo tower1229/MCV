@@ -1,7 +1,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { CanonicalSkillIde } from './canonical-skill-device-layout.js';
+import type { IdeId, SkillSurfaceId } from '../adapters/types.js';
 import {
   canonicalSkillPackageName,
   deployPathExists,
@@ -12,14 +12,15 @@ export interface ManagedSkillPackageRecord {
   packageName: string;
   storePath: string;
   contentHash: string;
+  topologyHash?: string;
   source: string;
 }
 
 export interface ManagedSkillProjectionRecord {
   packageName: string;
   projectionPath: string;
-  ide: CanonicalSkillIde;
-  surface: string;
+  ide: IdeId;
+  surface: SkillSurfaceId;
   expectedLinkTarget: string;
   topologyHash: string;
   source: string;
@@ -39,14 +40,23 @@ export interface ContentDriftEntry {
   state: 'drift';
 }
 
-export interface TopologyDriftEntry {
+export interface ProjectionTopologyDriftEntry {
   kind: 'skill-projection';
   packageName: string;
   projectionPath: string;
-  ide: CanonicalSkillIde;
-  surface: string;
+  ide: IdeId;
+  surface: SkillSurfaceId;
   reason: TopologyDriftReason;
 }
+
+export interface PackageTopologyDriftEntry {
+  kind: 'canonical-skill-package';
+  packageName: string;
+  storePath: string;
+  reason: 'replaced';
+}
+
+export type TopologyDriftEntry = ProjectionTopologyDriftEntry | PackageTopologyDriftEntry;
 
 export function hashSkillPackageContent(packageDirectory: string): string {
   const hash = crypto.createHash('sha256');
@@ -109,13 +119,32 @@ export function inspectManagedSkillDrift(layout: ManagedSkillLayout | undefined)
 
   for (const pkg of Object.values(layout.packages)) {
     coverPathTree(pkg.storePath, coveredPaths);
-    if (!deployPathExists(pkg.storePath)) continue;
+    if (!deployPathExists(pkg.storePath)) {
+      contentDrifts.push({
+        kind: 'canonical-skill-package',
+        packageName: pkg.packageName,
+        storePath: pkg.storePath,
+        state: 'drift',
+      });
+      continue;
+    }
     if (hashSkillPackageContent(pkg.storePath) === pkg.contentHash) continue;
     contentDrifts.push({
       kind: 'canonical-skill-package',
       packageName: pkg.packageName,
       storePath: pkg.storePath,
       state: 'drift',
+    });
+  }
+
+  for (const pkg of Object.values(layout.packages)) {
+    if (!deployPathExists(pkg.storePath) || !pkg.topologyHash) continue;
+    if (hashDeviceTopologyNode(pkg.storePath) === pkg.topologyHash) continue;
+    topologyDrifts.push({
+      kind: 'canonical-skill-package',
+      packageName: pkg.packageName,
+      storePath: pkg.storePath,
+      reason: 'replaced',
     });
   }
 

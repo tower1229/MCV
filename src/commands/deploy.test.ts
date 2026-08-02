@@ -155,6 +155,7 @@ describe('mcv deploy', () => {
       ownership: 'external',
       scope: 'shared-link-root',
       ide: 'claude-code',
+      surface: 'claude-code',
       linkPath: linkedRoot,
       resolvedPath: externalRoot,
       packageNames: ['review'],

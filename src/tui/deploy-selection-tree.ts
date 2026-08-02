@@ -2,7 +2,10 @@ import type {
   DeployChange,
   DeployPlan,
 } from '../operations/deploy.js';
-import type { CanonicalSkillIde } from '../core/canonical-skill-device-layout.js';
+import type { IdeId, SkillSurfaceId } from '../adapters/types.js';
+import { displaySkillSurface, isSkillSurfaceId } from '../core/skill-surfaces.js';
+
+type DeployTargetKey = 'canonical-store' | IdeId | SkillSurfaceId;
 
 export interface DeploySelectionNode {
   id: string;
@@ -92,7 +95,7 @@ function buildCapabilityNodes(
     .sort(([left], [right]) => compareGroupKeys(left, right))
     .map(([key, items]): DeploySelectionNode => {
       const [target, capability] = key.split('/') as [
-        'canonical-store' | CanonicalSkillIde,
+        DeployTargetKey,
         DeployChange['capability'],
       ];
       return {
@@ -159,11 +162,11 @@ function displayFilePath(change: DeployChange): string {
 
 function compareGroupKeys(left: string, right: string): number {
   const [leftTarget, leftCapability] = left.split('/') as [
-    'canonical-store' | CanonicalSkillIde,
+    DeployTargetKey,
     DeployChange['capability'],
   ];
   const [rightTarget, rightCapability] = right.split('/') as [
-    'canonical-store' | CanonicalSkillIde,
+    DeployTargetKey,
     DeployChange['capability'],
   ];
   const targetDelta = targetOrder.indexOf(leftTarget) - targetOrder.indexOf(rightTarget);
@@ -172,15 +175,12 @@ function compareGroupKeys(left: string, right: string): number {
     - capabilityOrder.indexOf(rightCapability);
 }
 
-function targetKey(change: DeployChange): 'canonical-store' | CanonicalSkillIde {
-  return change.owner === 'canonical-store' ? 'canonical-store' : change.ide;
+function targetKey(change: DeployChange): DeployTargetKey {
+  return change.owner === 'canonical-store' ? 'canonical-store' : change.surface ?? change.ide;
 }
 
-function displayTarget(target: 'canonical-store' | CanonicalSkillIde): string {
-  if (target === 'canonical-store') return 'Canonical Device Skill Store';
-  if (target === 'claude-code') return 'Claude Code';
-  if (target === 'gemini-cli') return 'Gemini CLI';
-  if (target === 'antigravity') return 'Antigravity';
+function displayTarget(target: DeployTargetKey): string {
+  if (target === 'canonical-store' || isSkillSurfaceId(target)) return displaySkillSurface(target);
   return target.charAt(0).toUpperCase() + target.slice(1);
 }
 

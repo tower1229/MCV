@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import type { DeviceContext } from '../adapters/types.js';
-import { atomicWriteFile, hashFile } from '../utils/files.js';
+import { atomicWriteFile, hashDirectoryTree, hashFile } from '../utils/files.js';
 import { isRecord } from '../utils/objects.js';
 import { readManifest } from '../utils/repository.js';
 import { getStateFilePath, readState, writeState, type McvState } from '../utils/state.js';
@@ -789,29 +789,6 @@ function resolveVerifiedBackupSymlink(
     return undefined;
   }
   return sourcePath;
-}
-
-function hashDirectoryTree(root: string): string {
-  const hash = crypto.createHash('sha256');
-  const visit = (directory: string): void => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })
-      .sort((left, right) => left.name.localeCompare(right.name))) {
-      const current = path.join(directory, entry.name);
-      hash.update(`${path.relative(root, current)}\0`);
-      if (entry.isSymbolicLink()) {
-        hash.update(`symlink\0${fs.readlinkSync(current)}\0`);
-        continue;
-      }
-      if (entry.isDirectory()) {
-        hash.update('directory\0');
-        visit(current);
-        continue;
-      }
-      hash.update(fs.readFileSync(current));
-    }
-  };
-  visit(root);
-  return hash.digest('hex');
 }
 
 function resolveVerifiedBackupFile(directory: string, backupPath: string): string | undefined {

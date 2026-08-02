@@ -1,5 +1,6 @@
 import { Fragment as _Fragment, jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { Box, Text, useWindowSize } from 'ink';
+import { displaySkillSurface } from '../core/skill-surfaces.js';
 import { formatContributingProjections } from '../renderers/capture.js';
 import { restoreLayoutLabel } from '../renderers/restore-layout.js';
 import { buildDeploySelectionTree, flattenDeploySelectionTree, } from './deploy-selection-tree.js';
@@ -189,13 +190,9 @@ function scrollablePageLines(state) {
             const satisfied = result.linkOutcomes?.filter((outcome) => outcome.status === 'satisfied-via-link' && outcome.ownership === 'managed') ?? [];
             const surfaceLabel = (target) => {
                 if (target.owner === 'canonical-store')
-                    return 'Canonical Device Skill Store';
-                if (target.ide === 'claude-code')
-                    return 'Claude Code';
-                if (target.ide === 'gemini-cli')
-                    return 'Gemini CLI';
-                if (target.ide === 'antigravity')
-                    return 'Antigravity';
+                    return displaySkillSurface('canonical-store');
+                if (target.surface)
+                    return displaySkillSurface(target.surface);
                 return target.ide
                     ? target.ide.charAt(0).toUpperCase() + target.ide.slice(1)
                     : 'Unknown';
@@ -606,11 +603,13 @@ function createOverviewStatusViewModel(report) {
             details: 'Canonical Skill package',
         })),
         topologyDrifts: local.topologyDrifts.map((entry) => ({
-            key: `topology-drift:${entry.projectionPath}`,
+            key: `topology-drift:${entry.kind === 'canonical-skill-package' ? entry.storePath : entry.projectionPath}`,
             tone: 'warning',
             label: 'Topology Drift',
             state: entry.reason,
-            details: `${displaySkillSurface(entry.surface)} · ${entry.packageName}`,
+            details: `${entry.kind === 'canonical-skill-package'
+                ? displaySkillSurface('canonical-store')
+                : displaySkillSurface(entry.surface)} · ${entry.packageName}`,
         })),
         environment: {
             key: 'environment',
@@ -664,7 +663,7 @@ function createOverviewStatusViewModel(report) {
 function summarizeLinkOutcomes(outcomes) {
     const groups = new Map();
     for (const outcome of outcomes) {
-        const surface = outcome.owner === 'canonical-store' ? 'canonical-store' : outcome.ide;
+        const surface = linkOutcomeSurface(outcome);
         const key = `${outcome.ownership}:${outcome.status}:${surface}`;
         const matching = groups.get(key) ?? [];
         matching.push(outcome);
@@ -688,16 +687,10 @@ function summarizeLinkOutcomes(outcomes) {
         };
     });
 }
-function displaySkillSurface(surface) {
-    if (surface === 'canonical-store')
-        return 'Canonical Device Skill Store';
-    if (surface === 'claude-code')
-        return 'Claude Code';
-    if (surface === 'gemini-cli')
-        return 'Gemini CLI';
-    if (surface === 'antigravity')
-        return 'Antigravity';
-    return surface.charAt(0).toUpperCase() + surface.slice(1);
+function linkOutcomeSurface(outcome) {
+    if (outcome.owner === 'canonical-store')
+        return 'canonical-store';
+    return outcome.surface;
 }
 function statusItemText(item, includeDetails = true) {
     return includeDetails && item.details

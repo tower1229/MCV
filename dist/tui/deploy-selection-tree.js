@@ -1,3 +1,4 @@
+import { displaySkillSurface, isSkillSurfaceId } from '../core/skill-surfaces.js';
 const targetOrder = [
     'canonical-store',
     'codex',
@@ -112,17 +113,11 @@ function compareGroupKeys(left, right) {
         - capabilityOrder.indexOf(rightCapability);
 }
 function targetKey(change) {
-    return change.owner === 'canonical-store' ? 'canonical-store' : change.ide;
+    return change.owner === 'canonical-store' ? 'canonical-store' : change.surface ?? change.ide;
 }
 function displayTarget(target) {
-    if (target === 'canonical-store')
-        return 'Canonical Device Skill Store';
-    if (target === 'claude-code')
-        return 'Claude Code';
-    if (target === 'gemini-cli')
-        return 'Gemini CLI';
-    if (target === 'antigravity')
-        return 'Antigravity';
+    if (target === 'canonical-store' || isSkillSurfaceId(target))
+        return displaySkillSurface(target);
     return target.charAt(0).toUpperCase() + target.slice(1);
 }
 function displayCapability(capability) {

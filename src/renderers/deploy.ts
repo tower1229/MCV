@@ -1,5 +1,6 @@
 import type { DeployPlan, DeployResult } from '../operations/deploy.js';
 import type { CanonicalSkillTarget } from '../core/canonical-skill-device-layout.js';
+import { displaySkillSurface } from '../core/skill-surfaces.js';
 import { renderIssuePlain } from './color.js';
 
 export function renderDeployPlanPlain(plan: DeployPlan): string[] {
@@ -129,15 +130,13 @@ function deploymentLabel(kind: DeployPlan['changes'][number]['deploymentKind']):
 
 function displayIde(ide: string): string {
   if (ide === 'claude-code') return 'Claude Code';
-  if (ide === 'gemini-cli') return 'Gemini CLI';
-  if (ide === 'antigravity') return 'Antigravity';
   return ide.charAt(0).toUpperCase() + ide.slice(1);
 }
 
 function displayDeployTarget(target: CanonicalSkillTarget): string {
   return target.owner === 'canonical-store'
-    ? 'Canonical Device Skill Store'
-    : displayIde(target.ide);
+    ? displaySkillSurface('canonical-store')
+    : target.surface ? displaySkillSurface(target.surface) : displayIde(target.ide);
 }
 
 function formatSurfaceList(

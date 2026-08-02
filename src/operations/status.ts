@@ -1,3 +1,4 @@
+import * as path from 'path';
 import type { DeviceContext } from '../adapters/types.js';
 import {
   deployPathExists,
@@ -171,12 +172,22 @@ function summarizePostDeployLocalState(state: McvState): PostDeployLocalStateSum
 
   const ordinaryDrift = files.filter((file) => file.state === 'drift').length;
   const missing = files.filter((file) => file.state === 'missing').length;
+  const driftedPackagePaths = new Set([
+    ...contentDrifts.map((entry) => path.resolve(entry.storePath)),
+    ...topologyDrifts
+      .filter((entry) => entry.kind === 'canonical-skill-package')
+      .map((entry) => path.resolve(entry.storePath)),
+  ]);
+  const driftedProjectionPaths = new Set(topologyDrifts
+    .filter((entry) => entry.kind === 'skill-projection')
+    .map((entry) => path.resolve(entry.projectionPath)));
   const unchanged = files.filter((file) => file.state === 'unchanged').length
     + (state.managedSkillLayout
-      ? Object.values(state.managedSkillLayout.packages).length
-        - contentDrifts.length
-        + Object.values(state.managedSkillLayout.projections).length
-        - topologyDrifts.length
+      ? Object.values(state.managedSkillLayout.packages)
+        .filter((pkg) => !driftedPackagePaths.has(path.resolve(pkg.storePath))).length
+        + Object.values(state.managedSkillLayout.projections)
+          .filter((projection) =>
+            !driftedProjectionPaths.has(path.resolve(projection.projectionPath))).length
       : 0);
   const contentDrift = contentDrifts.length;
   const topologyDrift = topologyDrifts.length;

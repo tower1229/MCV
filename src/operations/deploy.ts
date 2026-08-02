@@ -9,8 +9,19 @@ import {
   CODEX_MCP_PATH,
   GEMINI_MCP_PATH,
 } from '../adapters/overlay-policies.js';
-import type { ConfigurationCapability, DeployFile, DeviceContext } from '../adapters/types.js';
-import { atomicWriteFile, findSymbolicLinkAncestor, hashFile } from '../utils/files.js';
+import type {
+  ConfigurationCapability,
+  DeployFile,
+  DeviceContext,
+  IdeId,
+  SkillSurfaceId,
+} from '../adapters/types.js';
+import {
+  atomicWriteFile,
+  findSymbolicLinkAncestor,
+  hashDirectoryTree,
+  hashFile,
+} from '../utils/files.js';
 import { isRecord } from '../utils/objects.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
 import { scanTextForSecrets } from '../utils/sanitize.js';
@@ -28,15 +39,18 @@ import { resolveVariableDefinitions } from '../utils/variables.js';
 import { findLegacyCodexSkillDuplicates } from '../utils/deploy-skills.js';
 import {
   classifyCanonicalSkillLinks,
+  canonicalSkillTargetKey,
   canonicalSkillPackageName,
   deployPathExists,
   hashDeviceTopologyNode,
+  isPathWithinRoot,
   planCanonicalSkillDeviceLayout,
   type CanonicalSkillIde,
   type CanonicalSkillLayoutFile,
   type CanonicalSkillLinkOutcome,
   type CanonicalSkillTarget,
 } from '../core/canonical-skill-device-layout.js';
+import { ideForSkillSurface } from '../core/skill-surfaces.js';
 import {
   OPERATION_SCHEMA_VERSION,
   type Issue,
@@ -80,9 +94,8 @@ export type DeployDeploymentKind =
 
 export type DeployIde = CanonicalSkillIde;
 
-export type DeployChange = {
+type DeployChangeBase = {
   id: string;
-  capability: ConfigurationCapability;
   name: string;
   targetPath: string;
   change: DeployChangeKind;
@@ -92,7 +105,19 @@ export type DeployChange = {
   deploymentKind?: DeployDeploymentKind;
   dependsOnChangeIds?: string[];
   preview: DeployPreview;
-} & CanonicalSkillTarget;
+};
+
+type DeployChangeTarget =
+  | { owner: 'canonical-store'; capability: 'skills'; ide?: never; surface?: never }
+  | { owner: 'ide'; capability: 'skills'; ide: IdeId; surface: SkillSurfaceId }
+  | {
+    owner: 'ide';
+    capability: Exclude<ConfigurationCapability, 'skills'>;
+    ide: IdeId;
+    surface?: never;
+  };
+
+export type DeployChange = DeployChangeBase & DeployChangeTarget;
 
 export type DeployLinkOutcome = CanonicalSkillLinkOutcome;
 
@@ -301,7 +326,7 @@ async function buildDeployPlan(
     if (previous?.equals(next)) return [];
     const filePreview = preview(
       file.targetPath,
-      canonicalTargetKey(file),
+      canonicalSkillTargetKey(file),
       file.capability,
       next,
       previous,
@@ -309,12 +334,12 @@ async function buildDeployPlan(
     );
     if (filePreview.kind === 'text' && filePreview.diff.length === 0) return [];
     const change = previous === undefined ? 'add' as const : 'modify' as const;
-    const id = selectionId(canonicalTargetKey(file), file.capability, file.targetPath);
+    const id = selectionId(canonicalSkillTargetKey(file), file.capability, file.targetPath);
     mutations.set(id, { content: next });
+    const changeTarget = deployChangeTarget(file, file.capability);
     return [{
       id,
-      ...canonicalTarget(file),
-      capability: file.capability,
+      ...changeTarget,
       name: displayName(file.targetPath, file.capability),
       targetPath: file.targetPath,
       change,
@@ -343,6 +368,7 @@ async function buildDeployPlan(
         id: selectionId('codex', 'skills', targetPath),
         owner: 'ide',
         ide: 'codex',
+        surface: 'codex',
         capability: 'skills',
         name: displayName(targetPath, 'skills'),
         targetPath,
@@ -385,7 +411,7 @@ async function buildDeployPlan(
     if (isSelfSymlink && !isManagedProjection) continue;
     const target = inferDeployTarget(targetPath, context);
     if (!target) continue;
-    const targetKey = canonicalTargetKey(target);
+    const targetKey = canonicalSkillTargetKey(target);
     const semantics = target.owner === 'canonical-store'
       ? { capabilities: ['skills'] as ConfigurationCapability[], strategy: 'replace-entire-file' as const }
       : inferDeploymentSemantics(targetPath, targetIdForIde(target.ide), repositoryPath, context);
@@ -396,10 +422,10 @@ async function buildDeployPlan(
       : target.owner === 'canonical-store'
         ? 'physical-materialization'
         : capability === 'skills' ? 'copy-projection' : 'ordinary-file';
+    const changeTarget = deployChangeTarget(target, capability);
     const deletion: DeployChange = {
       id: selectionId(targetKey, capability, targetPath),
-      ...canonicalTarget(target),
-      capability,
+      ...changeTarget,
       name: projection?.packageName ?? displayName(targetPath, capability),
       targetPath,
       change: 'delete',
@@ -476,7 +502,10 @@ async function buildDeployPlan(
       [`source:${change.id}`, sourcePreconditions.get(change.id) ?? repositorySourceHash],
       [`target:${change.id}`, hashDeviceTopologyNode(change.targetPath)],
     ];
-  }));
+  }).concat(layout.externalStorePackages.map(({ storePath }) => [
+    `external-store:${path.resolve(storePath)}`,
+    hashExternalStorePackage(storePath),
+  ])));
   const blocked = issues.some((issue) =>
     issue.severity === 'decisionRequired' || issue.severity === 'error');
   return {
@@ -507,19 +536,25 @@ function planCanonicalSkillLayout(
   desired: SourcedDeployFile[];
   desiredForLinkClassification: CanonicalSkillLayoutFile[];
   projectionChanges: DeployChange[];
+  externalStorePackages: Array<{ packageName: string; storePath: string }>;
 } {
   const projectionSurfaces = definitions.flatMap(({ adapter }) =>
     adapter.skillSurfaces.map((surface) => ({
-      ide: skillSurfaceIde(surface.id),
+      ide: ideForSkillSurface(surface.id),
+      surface: surface.id,
       root: surface.destinationRoot(context),
       supportsManagedLinks: surface.supportsManagedDirectoryLinks(context.platform),
     })));
+  const managedStorePaths = new Set(Object.values(
+    readState(context).managedSkillLayout?.packages ?? {},
+  ).map((pkg) => path.resolve(pkg.storePath)));
   const managedLayout = planCanonicalSkillDeviceLayout({
     files: desired.map((file) => annotateSkillSurface(file, projectionSurfaces)),
     context,
     useManagedLinks: useSymlinks
       && projectionSurfaces.some((surface) => surface.supportsManagedLinks),
     projectionSurfaces,
+    managedStorePaths,
   });
   for (const relative of managedLayout.conflicts) {
     issues.push({
@@ -528,13 +563,22 @@ function planCanonicalSkillLayout(
       message: `Canonical Skill projections disagree about ${relative}.`,
     });
   }
+  for (const unowned of managedLayout.unownedStorePackages) {
+    issues.push({
+      severity: 'error',
+      code: 'deploy.skillsLayout.unownedStorePackage',
+      message: `Unowned Canonical Device Skill Store package requires resolution: ${unowned.packageName}.`,
+      details: `${unowned.storePath} differs from the complete Canonical package or has unsafe topology. Capture or otherwise resolve it before Deploy; MCV will not overwrite or claim it.`,
+    });
+  }
   const projectionChanges: DeployChange[] = [];
   for (const projection of managedLayout.missingProjections) {
-    const id = selectionId(projection.ide, 'skills', projection.targetPath);
+    const id = selectionId(canonicalSkillTargetKey(projection), 'skills', projection.targetPath);
     projectionChanges.push({
       id,
       owner: 'ide',
       ide: projection.ide,
+      surface: projection.surface,
       capability: 'skills',
       name: projection.packageName,
       targetPath: projection.targetPath,
@@ -554,11 +598,12 @@ function planCanonicalSkillLayout(
     mutations.set(id, { linkTarget: projection.physicalTargetPath });
   }
   for (const migration of managedLayout.topologyMigrations) {
-    const id = selectionId(migration.ide, 'skills', migration.targetPath);
+    const id = selectionId(canonicalSkillTargetKey(migration), 'skills', migration.targetPath);
     projectionChanges.push({
       id,
       owner: 'ide',
       ide: migration.ide,
+      surface: migration.surface,
       capability: 'skills',
       name: migration.packageName,
       targetPath: migration.targetPath,
@@ -592,9 +637,9 @@ function planCanonicalSkillLayout(
     });
   }
   const materialized = managedLayout.materializations.map(({ source, targetPath }) => {
-    const { ide: _ide, ...withoutIde } = source;
+    const { ide: _ide, surface: _surface, ...withoutTarget } = source;
     return {
-      ...withoutIde,
+      ...withoutTarget,
       owner: 'canonical-store' as const,
       targetPath,
       deploymentKind: 'physical-materialization' as const,
@@ -604,34 +649,17 @@ function planCanonicalSkillLayout(
     desired: [...managedLayout.filesOutsideLayout, ...materialized],
     desiredForLinkClassification: managedLayout.filesForLinkClassification,
     projectionChanges,
+    externalStorePackages: managedLayout.externalStorePackages,
   };
-}
-
-function skillSurfaceIde(surfaceId: string): CanonicalSkillIde {
-  if (surfaceId === 'claude-code'
-    || surfaceId === 'codex'
-    || surfaceId === 'gemini-cli'
-    || surfaceId === 'antigravity') {
-    return surfaceId;
-  }
-  throw new Error(`Unsupported Skill Surface id: ${surfaceId}`);
 }
 
 function annotateSkillSurface(
   file: SourcedDeployFile,
-  surfaces: Array<{ ide: CanonicalSkillIde; root: string }>,
+  surfaces: Array<{ ide: CanonicalSkillIde; surface: SkillSurfaceId; root: string }>,
 ): SourcedDeployFile {
   if (file.capability !== 'skills' || file.owner !== 'ide') return file;
   const match = surfaces.find((surface) => isPathWithinRoot(surface.root, file.targetPath));
-  return match ? { ...file, ide: match.ide } : file;
-}
-
-function isPathWithinRoot(root: string, candidate: string): boolean {
-  const relative = path.relative(path.resolve(root), path.resolve(candidate));
-  return relative === ''
-    || (relative !== '..'
-      && !relative.startsWith(`..${path.sep}`)
-      && !path.isAbsolute(relative));
+  return match ? { ...file, ide: match.ide, surface: match.surface } : file;
 }
 
  function registerDeployPlan(
@@ -1014,6 +1042,13 @@ function assertSelectedPreconditions(
   plan: DeployPlan,
   changes: DeployChange[],
 ): void {
+  for (const [key, expected] of Object.entries(plan.preconditions)) {
+    if (!key.startsWith('external-store:')) continue;
+    const storePath = key.slice('external-store:'.length);
+    if (hashExternalStorePackage(storePath) !== expected) {
+      throw new StaleDeployPlanError('An external Store package changed after the Plan was reviewed.');
+    }
+  }
   const repositoryHash = plan.repositoryPath ? hashRepositoryInputs(plan.repositoryPath) : undefined;
   const inventory = readState(context).managedInventory ?? {};
   for (const change of changes) {
@@ -1025,6 +1060,18 @@ function assertSelectedPreconditions(
       || sourceHash !== plan.preconditions[`source:${change.id}`]) {
       throw new StaleDeployPlanError('Deploy source or target state changed after the Plan was reviewed.');
     }
+  }
+}
+
+function hashExternalStorePackage(storePath: string): string {
+  if (!deployPathExists(storePath)) return hashText('<missing-external-store>');
+  try {
+    return hashText(stableValue([
+      hashDeviceTopologyNode(storePath),
+      hashDirectoryTree(storePath),
+    ]));
+  } catch {
+    return hashText('<unreadable-external-store>');
   }
 }
 
@@ -1191,29 +1238,6 @@ function backupDeployNode(
   };
 }
 
-function hashDirectoryTree(root: string): string {
-  const hash = crypto.createHash('sha256');
-  const visit = (directory: string): void => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })
-      .sort((left, right) => left.name.localeCompare(right.name))) {
-      const current = path.join(directory, entry.name);
-      hash.update(`${path.relative(root, current)}\0`);
-      if (entry.isSymbolicLink()) {
-        hash.update(`symlink\0${fs.readlinkSync(current)}\0`);
-        continue;
-      }
-      if (entry.isDirectory()) {
-        hash.update('directory\0');
-        visit(current);
-        continue;
-      }
-      hash.update(fs.readFileSync(current));
-    }
-  };
-  visit(root);
-  return hash.digest('hex');
-}
-
 function markDeployBackupFailed(backupPath: string, error: unknown): void {
   try {
     const manifest = readDeployBackupManifest(backupPath);
@@ -1279,7 +1303,7 @@ function updateDeployState(
           packageName: change.name,
           projectionPath: change.targetPath,
           ide: change.ide,
-          surface: change.ide,
+          surface: change.surface!,
           expectedLinkTarget: change.preview.linkTarget,
           topologyHash: hash,
           source: repositoryPath,
@@ -1296,6 +1320,7 @@ function updateDeployState(
       packageName: canonicalSkillPackageName(storePath),
       storePath,
       contentHash: hashSkillPackageContent(storePath),
+      topologyHash: hashDeviceTopologyNode(storePath),
       source: repositoryPath,
     };
   }
@@ -1604,14 +1629,21 @@ function selectionId(ide: string, capability: string, targetPath: string): strin
   return `deploy-${hashText(`${ide}\0${capability}\0${path.resolve(targetPath)}`).slice(0, 16)}`;
 }
 
-function canonicalTargetKey(target: CanonicalSkillTarget): string {
-  return target.owner === 'canonical-store' ? 'canonical-store' : target.ide;
-}
-
-function canonicalTarget(target: CanonicalSkillTarget): CanonicalSkillTarget {
-  return target.owner === 'canonical-store'
-    ? { owner: 'canonical-store' }
-    : { owner: 'ide', ide: target.ide };
+function deployChangeTarget(
+  target: CanonicalSkillTarget,
+  capability: ConfigurationCapability,
+): DeployChangeTarget {
+  if (target.owner === 'canonical-store') {
+    if (capability !== 'skills') {
+      throw new Error('Canonical Store changes must use the Skills capability.');
+    }
+    return { owner: 'canonical-store', capability: 'skills' };
+  }
+  if (capability === 'skills') {
+    if (!target.surface) throw new Error(`Skill change for ${target.ide} is missing its Surface.`);
+    return { owner: 'ide', ide: target.ide, surface: target.surface, capability: 'skills' };
+  }
+  return { owner: 'ide', ide: target.ide, capability };
 }
 
 function verifyManagedProjection(linkPath: string, expectedTarget: string): void {
@@ -1646,30 +1678,27 @@ function compareChanges(left: DeployChange, right: DeployChange): number {
     rules: 0, skills: 1, mcp: 2, native: 3,
   };
   return groupOrder[left.group] - groupOrder[right.group]
-    || canonicalTargetKey(left).localeCompare(canonicalTargetKey(right))
+    || canonicalSkillTargetKey(left).localeCompare(canonicalSkillTargetKey(right))
     || capabilityOrder[left.capability] - capabilityOrder[right.capability]
     || left.targetPath.localeCompare(right.targetPath);
 }
 
-function ideName(targetId: TargetId): DeployIde {
+function ideName(targetId: TargetId): IdeId {
   if (targetId === 'claudeCode') return 'claude-code';
   return targetId;
 }
 
 function targetIdForIde(
-  ide: DeployIde,
+  ide: IdeId,
 ): TargetId {
   if (ide === 'claude-code') return 'claudeCode';
-  if (ide === 'gemini-cli' || ide === 'antigravity' || ide === 'gemini') return 'gemini';
   return ide;
 }
 
 function deploySelectionIde(
-  ide: DeployIde,
-): 'codex' | 'claude-code' | 'gemini' {
-  if (ide === 'claude-code') return 'claude-code';
-  if (ide === 'gemini' || ide === 'gemini-cli' || ide === 'antigravity') return 'gemini';
-  return 'codex';
+  ide: IdeId,
+): IdeId {
+  return ide;
 }
 
 function inferDeployTarget(
@@ -1678,12 +1707,14 @@ function inferDeployTarget(
 ): CanonicalSkillTarget | undefined {
   const resolved = path.resolve(targetPath);
   const roots: Array<[CanonicalSkillTarget, string]> = [
+    [{ owner: 'ide', ide: 'codex', surface: 'codex' }, path.resolve(context.env.CODEX_HOME || path.join(context.homeDir, '.codex'), 'skills')],
     [{ owner: 'ide', ide: 'codex' }, path.resolve(context.env.CODEX_HOME || path.join(context.homeDir, '.codex'))],
     [{ owner: 'canonical-store' }, path.resolve(context.homeDir, '.agents', 'skills')],
+    [{ owner: 'ide', ide: 'claude-code', surface: 'claude-code' }, path.resolve(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'skills')],
     [{ owner: 'ide', ide: 'claude-code' }, path.resolve(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'))],
     [{ owner: 'ide', ide: 'claude-code' }, path.resolve(context.homeDir, '.claude.json')],
-    [{ owner: 'ide', ide: 'gemini-cli' }, path.resolve(context.homeDir, '.gemini', 'skills')],
-    [{ owner: 'ide', ide: 'antigravity' }, path.resolve(context.homeDir, '.gemini', 'config', 'skills')],
+    [{ owner: 'ide', ide: 'gemini', surface: 'gemini-cli' }, path.resolve(context.homeDir, '.gemini', 'skills')],
+    [{ owner: 'ide', ide: 'gemini', surface: 'antigravity' }, path.resolve(context.homeDir, '.gemini', 'config', 'skills')],
     [{ owner: 'ide', ide: 'gemini' }, path.resolve(context.homeDir, '.gemini')],
   ];
   return roots.find(([, root]) => resolved === root || resolved.startsWith(`${root}${path.sep}`))?.[0];

@@ -16,13 +16,11 @@ import {
   type SkillPackage,
   type SkillProjection,
 } from '../core/skills.js';
-import {
-  canonicalDeviceSkillStoreRoot,
-  hashDeviceTopologyNode,
-} from '../core/canonical-skill-device-layout.js';
+import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
 import { isRecord, mergeRecords } from '../utils/objects.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
 import { scanTextForSecrets } from '../utils/sanitize.js';
+import { readState } from '../utils/state.js';
 import {
   deleteObjectPath,
   parseStructuredObject,
@@ -235,7 +233,7 @@ async function buildCapturePlan(
     codex: manifest.targets.codex?.enabled === true,
     claudeCode: manifest.targets.claudeCode?.enabled === true,
     gemini: manifest.targets.gemini?.enabled === true,
-  }), { storeRoot: canonicalDeviceSkillStoreRoot(captureContext) });
+  }), { managedProjections: readState(captureContext).managedSkillLayout?.projections });
   for (let index = 0; index < skills.warnings.length; index += 1) {
     issues.push({
       severity: 'warning',

@@ -60,8 +60,15 @@ export function inspectManagedSkillDrift(layout) {
         return { contentDrifts, topologyDrifts, coveredPaths };
     for (const pkg of Object.values(layout.packages)) {
         coverPathTree(pkg.storePath, coveredPaths);
-        if (!deployPathExists(pkg.storePath))
+        if (!deployPathExists(pkg.storePath)) {
+            contentDrifts.push({
+                kind: 'canonical-skill-package',
+                packageName: pkg.packageName,
+                storePath: pkg.storePath,
+                state: 'drift',
+            });
             continue;
+        }
         if (hashSkillPackageContent(pkg.storePath) === pkg.contentHash)
             continue;
         contentDrifts.push({
@@ -69,6 +76,18 @@ export function inspectManagedSkillDrift(layout) {
             packageName: pkg.packageName,
             storePath: pkg.storePath,
             state: 'drift',
+        });
+    }
+    for (const pkg of Object.values(layout.packages)) {
+        if (!deployPathExists(pkg.storePath) || !pkg.topologyHash)
+            continue;
+        if (hashDeviceTopologyNode(pkg.storePath) === pkg.topologyHash)
+            continue;
+        topologyDrifts.push({
+            kind: 'canonical-skill-package',
+            packageName: pkg.packageName,
+            storePath: pkg.storePath,
+            reason: 'replaced',
         });
     }
     for (const projection of Object.values(layout.projections)) {

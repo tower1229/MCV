@@ -6,10 +6,11 @@ import { v4 as uuidv4 } from 'uuid';
 import * as yaml from 'yaml';
 import { createAdapterDefinitions } from '../adapters/index.js';
 import { collectSkills, getSkillSources, } from '../core/skills.js';
-import { canonicalDeviceSkillStoreRoot, hashDeviceTopologyNode, } from '../core/canonical-skill-device-layout.js';
+import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
 import { isRecord, mergeRecords } from '../utils/objects.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
 import { scanTextForSecrets } from '../utils/sanitize.js';
+import { readState } from '../utils/state.js';
 import { deleteObjectPath, parseStructuredObject, stringifyStructuredObject, } from '../utils/structured-config.js';
 import { OPERATION_SCHEMA_VERSION, } from './contracts.js';
 const activeCapturePlans = new WeakMap();
@@ -98,7 +99,7 @@ async function buildCapturePlan(context, repositoryPath, operationId, mutations)
         codex: manifest.targets.codex?.enabled === true,
         claudeCode: manifest.targets.claudeCode?.enabled === true,
         gemini: manifest.targets.gemini?.enabled === true,
-    }), { storeRoot: canonicalDeviceSkillStoreRoot(captureContext) });
+    }), { managedProjections: readState(captureContext).managedSkillLayout?.projections });
     for (let index = 0; index < skills.warnings.length; index += 1) {
         issues.push({
             severity: 'warning',
