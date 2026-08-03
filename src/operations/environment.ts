@@ -86,14 +86,18 @@ function findMissingVariables(
     ...Object.keys(context.variables ?? {}),
     ...availableManifestVariableNames(manifest.variables, context.platform),
   ]);
-  visitRepositoryTextFiles(repositoryPath, (content) => {
-    for (const match of content.matchAll(/\$\{env:([A-Z][A-Z0-9_]*)\}/g)) {
-      if (!context.env[match[1]]) missing.add(match[1]);
-    }
-    for (const match of content.matchAll(/\$\{([A-Z][A-Z0-9_]*)\}/g)) {
-      if (!availablePortable.has(match[1])) missing.add(match[1]);
-    }
-  });
+  visitRepositoryTextFiles(
+    repositoryPath,
+    new Set([path.resolve(repositoryPath, 'common', 'skills')]),
+    (content) => {
+      for (const match of content.matchAll(/\$\{env:([A-Z][A-Z0-9_]*)\}/g)) {
+        if (!context.env[match[1]]) missing.add(match[1]);
+      }
+      for (const match of content.matchAll(/\$\{([A-Z][A-Z0-9_]*)\}/g)) {
+        if (!availablePortable.has(match[1])) missing.add(match[1]);
+      }
+    },
+  );
   return [...missing].sort();
 }
 
@@ -114,12 +118,17 @@ function availableManifestVariableNames(
 
 function visitRepositoryTextFiles(
   directory: string,
+  excludedDirectories: ReadonlySet<string>,
   visit: (content: string) => void,
 ): void {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     if (entry.name === '.git' || entry.name === 'node_modules') continue;
     const entryPath = path.join(directory, entry.name);
-    if (entry.isDirectory()) visitRepositoryTextFiles(entryPath, visit);
+    if (entry.isDirectory()) {
+      if (!excludedDirectories.has(path.resolve(entryPath))) {
+        visitRepositoryTextFiles(entryPath, excludedDirectories, visit);
+      }
+    }
     else if (entry.isFile() && /\.(?:json|ya?ml|toml|md)$/i.test(entry.name)) {
       visit(fs.readFileSync(entryPath, 'utf8'));
     }

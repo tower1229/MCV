@@ -1151,12 +1151,12 @@ function createOverviewStatusViewModel(
     },
     linkedSkills: summarizeLinkOutcomes(report.linkOutcomes).map((summary) => ({
       key: `linked-skills:${summary.key}`,
-      tone: summary.status === 'satisfied-via-link' ? 'info' : 'error',
+      tone: summary.status === 'satisfied-via-link' ? 'info' : 'warning',
       label: 'Linked Skills',
       state: summary.outcomeCount === 1
         ? summary.state
         : `${summary.outcomeCount} ${summary.state.toLowerCase()} outcomes`,
-      details: `${displaySkillSurface(summary.surface)} · ${summary.ownership === 'managed' ? 'Managed' : 'External'} · ${summary.packageCount} ${summary.packageCount === 1 ? 'package' : 'packages'} · ${summary.affectedFileCount} affected ${summary.affectedFileCount === 1 ? 'file' : 'files'}`,
+      details: `${summary.surfaceLabel} · ${summary.ownership === 'managed' ? 'Managed' : 'External'} · ${summary.packageCount} ${summary.packageCount === 1 ? 'package' : 'packages'} · ${summary.affectedFileCount} affected ${summary.affectedFileCount === 1 ? 'file' : 'files'}`,
     })),
     drift: {
       key: 'drift',
@@ -1203,7 +1203,7 @@ function createOverviewStatusViewModel(
         tone: report.lastOperation.success ? 'success' : 'error',
         label: 'Last operation',
         state: report.lastOperation.success ? 'Succeeded' : 'Failed',
-        details: report.lastOperation.kind,
+        details: `${report.lastOperation.kind} on this device`,
       }
       : {
         key: 'last-operation',
@@ -1212,7 +1212,7 @@ function createOverviewStatusViewModel(
         state: 'None',
       },
     issues: report.issues
-      .filter((issue) => !issue.code.startsWith('deploy.skillsLinked.'))
+      .filter((issue) => !isAdvancedDeployIssue(issue.code))
       .map((issue) => ({
       key: issue.code,
       tone: issue.severity === 'error'
@@ -1231,12 +1231,18 @@ function createOverviewStatusViewModel(
   };
 }
 
+function isAdvancedDeployIssue(code: string): boolean {
+  return code.startsWith('deploy.skillsLinked.')
+    || code.startsWith('deploy.unsafeDiffWithheld.')
+    || code === 'deploy.legacyCodexSkillDuplicates';
+}
+
 interface LinkOutcomeSummary {
   key: string;
   status: DeployLinkOutcome['status'];
   ownership: DeployLinkOutcome['ownership'];
-  surface: SkillSurfaceId | 'canonical-store';
-  state: 'Satisfied via link' | 'Already satisfied projection' | 'Blocked';
+  surfaceLabel: string;
+  state: 'Satisfied via link' | 'Already satisfied projection' | 'Needs decision';
   outcomeCount: number;
   packageCount: number;
   affectedFileCount: number;
@@ -1248,38 +1254,54 @@ function summarizeLinkOutcomes(
   const groups = new Map<string, DeployLinkOutcome[]>();
   for (const outcome of outcomes) {
     const surface = linkOutcomeSurface(outcome);
-    const key = `${outcome.ownership}:${outcome.status}:${surface}`;
+    const key = outcome.status === 'blocked'
+      ? [
+          outcome.ownership,
+          outcome.status,
+          outcome.reason,
+          [...outcome.packageNames].sort().join(','),
+          [...(outcome.resolvedPaths ?? outcome.linkPaths)].sort().join(','),
+        ].join(':')
+      : `${outcome.ownership}:${outcome.status}:${surface}`;
     const matching = groups.get(key) ?? [];
     matching.push(outcome);
     groups.set(key, matching);
   }
-  return [...groups.entries()].map(([key, matching]) => {
-    const [ownership, status, surface] = key.split(':') as [
-      DeployLinkOutcome['ownership'],
-      DeployLinkOutcome['status'],
-      SkillSurfaceId | 'canonical-store',
-    ];
+  const physicalFacts = [...groups.entries()].map(([key, matching]): LinkOutcomeSummary => {
+    const { ownership, status } = matching[0];
+    const surfaces = [...new Set(matching.map(linkOutcomeSurface))];
+    const packageNames = new Set(matching.flatMap((outcome) => outcome.packageNames));
     return {
       key,
       status,
       ownership,
-      surface,
+      surfaceLabel: surfaces.map(displaySkillSurface).join(' + '),
       state: status === 'blocked'
-        ? 'Blocked' as const
+        ? 'Needs decision' as const
         : ownership === 'managed'
           ? 'Already satisfied projection' as const
           : 'Satisfied via link' as const,
-      outcomeCount: matching.length,
-      packageCount: matching.reduce(
-        (total, outcome) => total + outcome.packageNames.length,
-        0,
-      ),
-      affectedFileCount: matching.reduce(
-        (total, outcome) => total + outcome.affectedFileCount,
-        0,
-      ),
+      outcomeCount: status === 'blocked' ? 1 : matching.length,
+      packageCount: packageNames.size,
+      affectedFileCount: status === 'blocked'
+        ? Math.max(...matching.map((outcome) => outcome.affectedFileCount))
+        : matching.reduce((total, outcome) => total + outcome.affectedFileCount, 0),
     };
   });
+  const summaries = new Map<string, LinkOutcomeSummary>();
+  for (const fact of physicalFacts) {
+    const key = `${fact.ownership}:${fact.status}:${fact.surfaceLabel}`;
+    const current = summaries.get(key);
+    summaries.set(key, current
+      ? {
+          ...current,
+          outcomeCount: current.outcomeCount + fact.outcomeCount,
+          packageCount: current.packageCount + fact.packageCount,
+          affectedFileCount: current.affectedFileCount + fact.affectedFileCount,
+        }
+      : { ...fact, key });
+  }
+  return [...summaries.values()];
 }
 
 function linkOutcomeSurface(outcome: DeployLinkOutcome): SkillSurfaceId | 'canonical-store' {
@@ -1748,7 +1770,7 @@ function DeploySelection({
       ))}
       {workflow.plan.linkOutcomes.length > 1 && linkOutcomeSummaries.map((summary) => (
         <Text key={summary.key} wrap="truncate-middle">
-          {displaySkillSurface(summary.surface)} · {summary.outcomeCount} {summary.ownership}{' '}
+          {summary.surfaceLabel} · {summary.outcomeCount} {summary.ownership}{' '}
           {summary.state.toLowerCase()} outcomes ·{' '}
           {summary.packageCount} Skill {summary.packageCount === 1 ? 'package' : 'packages'} ·{' '}
           {summary.affectedFileCount} affected{' '}

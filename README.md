@@ -124,7 +124,7 @@ mcv restore --dry-run
 mcv restore
 ```
 
-- `status --plain` 从同一份只读 Overview Report 汇总 Repository、可选 Git 状态、Pending Deployment Change、相对 Baseline Snapshot 的 unchanged/Drift/missing、IDE/Surface、缺失变量和最近操作；`status --json` 输出该 Report 的机器可读形式。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
+- `status --plain` 从同一份只读 Overview Report 汇总 Repository、限定在 MCV Repository 路径内的可选 Git 状态、Pending Deployment Change、相对 Baseline Snapshot 的 unchanged/Drift/missing、IDE/Surface、实际配置缺失变量和本设备最近操作。Pending 对同一 Surface 的多文件 Skill projection 按 package 聚合，且不计入默认未选中的 Advanced Cleanup；Skill 文档中的示例变量不属于设备配置检查。`status --json` 输出摘要并省略逐文件 Diff，完整候选由 `deploy --dry-run --json` 提供。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
 - `restore --dry-run` 只选择最近一次完整且内容可验证的 Deploy backup，展示备份时间、将恢复或删除的路径，并区分 ordinary file、managed-link projection、copy projection 与 physical package；内容或拓扑（链接重定向、目录/链接互换等）在部署后发生变化时，以独立的 Restore Conflict 阻止覆盖。
 - `restore` 默认在终端确认完整 Plan；自动化场景可在审阅后使用 `restore --yes`，并可组合 `--json` 取得结构化 Result。为避免无监督删除，包含删除的 Plan 必须交互确认，`--yes` 会在写入前阻断。Apply 会重验 operation ID、完整 selection、backup 来源、当前节点类型、链接目标和物理身份；事务开始时先创建并验证当前状态 backup（含目录与符号链接拓扑）。事务前按 Ctrl+C 以 130 退出；写入、删除或本机状态提交失败时仅回滚已尝试路径，backup/commit/rollback 期间忽略普通取消；不完整回滚会保留并报告 recovery backup。成功 Restore 会清除 Baseline Snapshot、managed inventory 与 managed Skill layout，需重新 Deploy 或 Capture 建立事实基线。
 - Restore TTY workflow 展示最近完整 backup 的时间、投影与物理 package 区分后的 write/delete 影响和 Restore Conflict 路径；按 `↑` / `↓` 浏览影响，按 `→` 打开焦点详情，按 `←` 关闭详情或返回 Overview，最终 Apply 仍只能由 `Enter` 启动。冲突或无可用 backup 时 Apply 被禁用，且不提供 force restore。Plan 过期会自动重新生成并要求重新审阅；成功或失败结果页按 `Enter` 或 `←` 返回刷新后的 Overview，按 `q` 退出。
@@ -148,7 +148,7 @@ mcv restore    TTY 中 deep-link 到 Restore Latest Deployment；--dry-run/--yes
 
 对于 managed Skill layout：禁用某一个 IDE 只会把该 IDE 的 projection 列为 Advanced Cleanup 候选，不会在其他已启用 projection 仍引用同一 Canonical Device Skill Store package 时删除物理 package。当 Skill 已从仓库移除且所有 projection 都不再需要时，最终物理 package 会作为单独的 Advanced Cleanup 候选（`physical-materialization`，默认不选中），且仅当该 package 完全由 MCV 拥有（记录在 managed Skill layout）时才会出现；外部链接与外部拥有的物理 package 永远不会成为 Restore 写入目标或 cleanup 删除候选。Store 中未登记但与 Canonical 完全一致的 package 会原样复用，只有 MCV 新建的 projection link 会进入 managed state；未登记且内容不同、含额外文件、链接不可验证或拓扑不安全的 package 会阻断 Deploy，不会被覆盖、认领或生成整包 cleanup。
 
-Deploy 不会穿过已有 symlink/junction 写文件。对于已有的 Canonical Skill package 链接，Plan 会按 Skill package 或共享 link root 识别其有效内容：与期望内容一致时显示一个 `Satisfied via link` 外部所有权 outcome，不产生该链接路径的写入候选，也不进入 Pending Deployment Change 或 managed cleanup；若同一物理事实路径本轮有等价的正常 Deploy 候选，只写该事实路径。内容 divergent、dangling、cycle、物理目标冲突等情况会合并为一个带 affected-file count 的 blocking outcome。其他未分类链接仍不会被遍历、替换、写入或删除，包括 copy layout 和 Advanced Cleanup。
+Deploy 不会穿过已有 symlink/junction 写文件。对于已有的 Canonical Skill package 链接，Plan 会按 Skill package 或共享 link root 识别其有效内容：与期望内容一致时显示一个 `Satisfied via link` 外部所有权 outcome，不产生该链接路径的写入候选，也不进入 Pending Deployment Change 或 managed cleanup；若同一物理事实路径本轮有等价的正常 Deploy 候选，只写该事实路径。内容 divergent、dangling、cycle、物理目标冲突等情况会合并为一个带 affected-file count 的 blocking outcome；同一物理 package 被多个 IDE Surface 引用时，Overview 只显示一个 `Needs decision` 事实。divergent 是需要用户保留本机版本或采用 Repository 版本的决策，不表示 MCV 运行失败；dangling、cycle 等不可安全分类的拓扑仍作为错误。其他未分类链接仍不会被遍历、替换、写入或删除，包括 copy layout 和 Advanced Cleanup。
 
 在 macOS 将 `deploy.useSymlinks` 设为 `true` 后，MCV 会把每个选中的 Canonical Skill package 物理材料化一次到 Canonical Device Skill Store（当前解析为生态约定的 `~/.agents/skills/`），再为已有 loader 证据的 Surface 创建 per-Skill managed link：Claude Code 使用 `~/.claude/skills/<skill>`，Gemini CLI 使用 `~/.gemini/skills/<skill>`。Antigravity 在单独证据记录前继续复制到 `~/.gemini/config/skills/`，不会因为与 Gemini CLI 共享部分 `.gemini` 层级而共用整个 Skills root 或继承链接策略。Store 属于 MCV 的 Canonical Skill 设备布局，不属于 Codex；即使 Codex 未启用，只要任一已验证 Surface 仍需要该 Skill，Store 仍会被规划和维护。MCV 永远不会链接整个 IDE Skills root，也不会吸收未拥有或 IDE-exclusive 的 Skills。材料化内容写入并验证成功后，per-Skill 投影才会生效；备份和回滚覆盖本轮尝试的内容与链接，Restore 会按 backup 中的拓扑元数据恢复目录、文件或符号链接，而不会留下悬空 projection 或错配副本。若 Surface 上已有与 Canonical 完全一致的物理 Skill 目录，Plan 会将其列为默认不选中的 topology migration 候选，需显式交互确认后才会替换为 managed link；内容 divergent 的物理副本与外部链接会被保留，`--yes` 也不会执行 topology migration。Windows、未验证支持目录链接的 Surface，以及 `useSymlinks: false` 继续使用 copy projection；已经正确的链接会保留，不会被目录覆盖。平台与 Surface 兼容矩阵见 `docs/compatibility/canonical-skill-loader-evidence.md`；`deploy.useSymlinks` 默认仍为 `false`。
 
@@ -208,6 +208,7 @@ variables:
 MCV 的脱敏是防误提交保护，不是凭据保险库。
 
 - 扫描敏感文件名、结构化敏感字段和高置信密钥格式；环境变量名称不会被误当作秘密值。
+- Deploy Diff 若包含已有本机密钥，只隐藏预览并报告 notice，不会把预览脱敏本身当作部署错误；Repository/Capture 中发现明文密钥仍会阻断写入。
 - 凭据、OAuth token、Cookie 和会话状态不在同步范围内。
 - Capture 之前仍应人工检查预览，并只使用私人仓库。
 - Deploy 会覆盖 managed 字段；未知 Native 和 Local 字段会按 Overlay 规则保留。

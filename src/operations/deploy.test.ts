@@ -144,6 +144,36 @@ describe('Deploy operations', () => {
     expect(readState(context)).toEqual(stateBefore);
   });
 
+  it('redacts an existing local secret from the preview without blocking a safe replacement', async () => {
+    const settingsSource = path.join(
+      repositoryPath,
+      'ide',
+      'claude-code',
+      'native',
+      'settings.json',
+    );
+    const settingsTarget = path.join(homeDir, '.claude', 'settings.json');
+    fs.writeFileSync(
+      settingsSource,
+      `${JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: '${env:ANTHROPIC_AUTH_TOKEN}' } }, null, 2)}\n`,
+    );
+    fs.writeFileSync(
+      settingsTarget,
+      `${JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: `sk-${'a'.repeat(24)}` } }, null, 2)}\n`,
+    );
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.readyToApply).toBe(true);
+    expect(plan.issues).toContainEqual(expect.objectContaining({
+      severity: 'notice',
+      code: expect.stringMatching(/^deploy\.unsafeDiffWithheld\./),
+    }));
+    expect(plan.changes.find((change) => change.targetPath === settingsTarget)?.preview)
+      .toMatchObject({ kind: 'text', diff: '[unsafe text withheld]' });
+    expect(JSON.stringify(plan)).not.toContain(`sk-${'a'.repeat(24)}`);
+  });
+
   it('keeps source and target preconditions independent', async () => {
     const settingsTarget = path.join(homeDir, '.claude', 'settings.json');
     const first = await createDeployPlan(context);
@@ -474,6 +504,40 @@ describe('Deploy operations', () => {
     expect(readState(context).managedInventory).not.toHaveProperty(externalSkill);
   });
 
+  it('keeps rule-named files inside a linked Skill package in the Skill capability', async () => {
+    const skillsRoot = path.join(homeDir, '.claude', 'skills');
+    const sourceReference = path.join(
+      repositoryPath,
+      'common',
+      'skills',
+      'review',
+      'references',
+      'CLAUDE.md',
+    );
+    const externalRoot = path.join(testRoot, 'external-skills');
+    const externalSkill = path.join(externalRoot, 'review', 'SKILL.md');
+    const externalReference = path.join(externalRoot, 'review', 'references', 'CLAUDE.md');
+    fs.rmSync(skillsRoot, { recursive: true });
+    fs.mkdirSync(path.dirname(sourceReference), { recursive: true });
+    fs.mkdirSync(path.dirname(externalReference), { recursive: true });
+    fs.writeFileSync(sourceReference, '# Skill-specific Claude reference\n');
+    fs.writeFileSync(externalSkill, '# Review\n');
+    fs.writeFileSync(externalReference, '# Skill-specific Claude reference\n');
+    createDirectoryLink(externalRoot, skillsRoot);
+
+    const plan = await createDeployPlan(context);
+
+    expect(plan.linkOutcomes).toEqual([expect.objectContaining({
+      status: 'satisfied-via-link',
+      packageNames: ['review'],
+      affectedFileCount: 2,
+    })]);
+    expect(plan.issues.some((issue) =>
+      issue.code.startsWith('deploy.symbolicLinkSkipped.'))).toBe(false);
+    expect(plan.changes.some((change) =>
+      change.targetPath === path.join(skillsRoot, 'review', 'references', 'CLAUDE.md'))).toBe(false);
+  });
+
   it('aggregates multiple nested links inside one Skill package into one outcome', async () => {
     const sourceReference = path.join(
       repositoryPath,
@@ -551,7 +615,7 @@ describe('Deploy operations', () => {
     expect(plan.issues.filter((issue) =>
       issue.code.startsWith('deploy.skillsLinked.blocked.'))).toEqual([
       expect.objectContaining({
-        severity: 'error',
+        severity: 'decisionRequired',
         message: expect.stringContaining('2 affected file(s)'),
       }),
     ]);
@@ -1575,9 +1639,22 @@ describe('Deploy operations', () => {
     expect(projections.length).toBe(1);
 
     const status = await inspectStatus(context);
-    expect(status.pendingDeployment.total).toBe(
-      status.changes.length - (materializations.length - 1),
-    );
+    expect(status.pendingDeployment.total).toBe(6);
+  });
+
+  it('counts a multi-file copy projection as one pending Skill package action', async () => {
+    const packageRoot = path.join(repositoryPath, 'common', 'skills', 'review');
+    fs.mkdirSync(path.join(packageRoot, 'references'), { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, 'references', 'guide.md'), '# Guide\n');
+    const plan = await createDeployPlan(context);
+    const selectedChanges = plan.changes.filter((change) => change.defaultSelected);
+    const reviewFiles = selectedChanges.filter((change) =>
+      change.capability === 'skills' && change.name === 'review');
+    expect(reviewFiles).toHaveLength(2);
+
+    const status = await inspectStatus(context);
+
+    expect(status.pendingDeployment.total).toBe(selectedChanges.length - 1);
   });
 
 

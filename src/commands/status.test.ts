@@ -85,7 +85,7 @@ describe('mcv status', () => {
       '  Gemini: disabled, not detected',
       '    gemini-cli: absent',
       '    antigravity: absent',
-      'Last operation: deploy · failure · 2026-07-19T01:00:00.000Z',
+      'Last operation on this device: deploy · failure · 2026-07-19T01:00:00.000Z',
     ]);
   });
 
@@ -120,6 +120,26 @@ describe('mcv status', () => {
       issues: [{ code: 'deploy.noEnabledTargets' }],
     });
     expect(String(vi.mocked(console.log).mock.calls[0]?.[0])).not.toMatch(/\u001b\[/);
+  });
+
+  it('keeps status JSON summary-sized when the Deploy Plan contains file previews', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('  codex:\n    enabled: false', '  codex:\n    enabled: true'),
+    );
+    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), `# Rules\n${'detail\n'.repeat(2_000)}`);
+    writeDeviceState({});
+
+    await program().parseAsync(['node', 'mcv', 'status', '--json']);
+
+    const output = String(vi.mocked(console.log).mock.calls.at(-1)?.[0]);
+    const report = JSON.parse(output);
+    expect(report.changes).toEqual([]);
+    expect(report.pendingDeployment.total).toBeGreaterThan(0);
+    expect(output).not.toContain('detail');
+    expect(output.length).toBeLessThan(20_000);
   });
 
   it('rejects conflicting plain and JSON output modes', async () => {

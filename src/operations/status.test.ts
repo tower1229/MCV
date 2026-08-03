@@ -86,7 +86,7 @@ describe('inspectStatus', () => {
         id: 'repository-id',
         schemaVersion: 2,
       },
-      pendingDeployment: { add: 1, modify: 1, delete: 1, total: 3 },
+      pendingDeployment: { add: 1, modify: 1, delete: 0, total: 2 },
       postDeployLocalState: {
         unchanged: 1,
         drift: 1,
@@ -96,7 +96,7 @@ describe('inspectStatus', () => {
         total: 3,
       },
       environment: {
-        missingVariables: ['MISSING_TOKEN'],
+        missingVariables: [],
         ideSupport: [
           expect.objectContaining({ id: 'codex', enabled: true, detected: true }),
           expect.objectContaining({ id: 'claude-code', enabled: false }),
@@ -141,6 +141,10 @@ describe('inspectStatus', () => {
     expect(clean.repository.git).toMatchObject({ clean: true, uncommittedChanges: 0 });
 
     fs.writeFileSync(path.join(testRoot, 'untracked.txt'), 'dirty');
+    const unrelated = await inspectStatus(context);
+    expect(unrelated.repository.git).toMatchObject({ clean: true, uncommittedChanges: 0 });
+
+    fs.writeFileSync(path.join(repositoryPath, 'untracked.txt'), 'dirty');
     const dirty = await inspectStatus(context);
     expect(dirty.repository.git).toMatchObject({ clean: false, uncommittedChanges: 1 });
   });
@@ -176,7 +180,9 @@ describe('inspectStatus', () => {
       affectedFileCount: 1,
     })]);
     expect(report.changes.some((change) => change.capability === 'skills')).toBe(false);
-    expect(report.pendingDeployment.total).toBe(report.changes.length);
+    expect(report.pendingDeployment.total).toBe(
+      report.changes.filter((change) => change.defaultSelected).length,
+    );
     expect(report.issues).toContainEqual(expect.objectContaining({
       severity: 'notice',
       message: expect.stringContaining('Satisfied via link'),

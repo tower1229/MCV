@@ -1096,7 +1096,7 @@ function preview(targetPath, ide, capability, next, previous, issues) {
     const diff = renderSafeDiff(targetPath, ide, capability, previous?.toString('utf8'), next.toString('utf8'));
     if (scanTextForSecrets(diff).length > 0) {
         issues.push({
-            severity: 'error',
+            severity: 'notice',
             code: `deploy.unsafeDiffWithheld.${issues.length + 1}`,
             message: 'Unsafe plaintext content was withheld from the Deploy preview.',
         });
@@ -1205,11 +1205,11 @@ function renderChangedLines(previous, next) {
 function inferDeploymentSemantics(targetPath, targetId, repositoryPath, context) {
     const normalized = targetPath.replace(/\\/g, '/');
     const base = path.basename(targetPath).toLowerCase();
-    if (base === 'agents.md' || base === 'claude.md' || base === 'gemini.md') {
-        return { capabilities: ['rules'], strategy: 'replace-entire-file' };
-    }
     if (normalized.includes('/skills/')) {
         return { capabilities: ['skills'], strategy: 'replace-entire-file' };
+    }
+    if (base === 'agents.md' || base === 'claude.md' || base === 'gemini.md') {
+        return { capabilities: ['rules'], strategy: 'replace-entire-file' };
     }
     if (base === 'keybindings.json') {
         return { capabilities: ['native'], strategy: 'replace-entire-file' };

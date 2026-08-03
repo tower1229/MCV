@@ -31,7 +31,8 @@ IDE support:
  detected
   ○ Gemini: Disabled · disabled, not
 detected
-× Last operation: Failed · deploy
+× Last operation: Failed · deploy on this
+device
 × Error: test.blocked · Deployment is
 blocked.
 
@@ -46,7 +47,7 @@ Status Overview
 ! Pending Deployment Changes: Review · 226542 changes (123456 add, 98765 modify, 4321 delete)
 ! Drift: Review · 0 content, 0 topology, 9876 changed, 543 missing  ! Environment: Warning · 2 missing variables
 IDE:  ✓ Codex: Ready  ○ Claude Code: Not detected  ○ Gemini: Disabled
-× Last operation: Failed · deploy  × Error: test.blocked
+× Last operation: Failed · deploy on this device  × Error: test.blocked
 ↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel
 Accelerators: c Capture   d Deploy   s Restore   r Repository   h Help",
   "wide": "MCV
@@ -64,7 +65,7 @@ Navigation                      Status Overview
                                   ✓ Codex: Ready · enabled, detected
                                   ○ Claude Code: Not detected · enabled, not detected
                                   ○ Gemini: Disabled · disabled, not detected
-                                × Last operation: Failed · deploy
+                                × Last operation: Failed · deploy on this device
                                 × Error: test.blocked · Deployment is blocked.
 
 ↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel

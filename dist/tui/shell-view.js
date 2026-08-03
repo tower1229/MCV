@@ -581,12 +581,12 @@ function createOverviewStatusViewModel(report) {
         },
         linkedSkills: summarizeLinkOutcomes(report.linkOutcomes).map((summary) => ({
             key: `linked-skills:${summary.key}`,
-            tone: summary.status === 'satisfied-via-link' ? 'info' : 'error',
+            tone: summary.status === 'satisfied-via-link' ? 'info' : 'warning',
             label: 'Linked Skills',
             state: summary.outcomeCount === 1
                 ? summary.state
                 : `${summary.outcomeCount} ${summary.state.toLowerCase()} outcomes`,
-            details: `${displaySkillSurface(summary.surface)} · ${summary.ownership === 'managed' ? 'Managed' : 'External'} · ${summary.packageCount} ${summary.packageCount === 1 ? 'package' : 'packages'} · ${summary.affectedFileCount} affected ${summary.affectedFileCount === 1 ? 'file' : 'files'}`,
+            details: `${summary.surfaceLabel} · ${summary.ownership === 'managed' ? 'Managed' : 'External'} · ${summary.packageCount} ${summary.packageCount === 1 ? 'package' : 'packages'} · ${summary.affectedFileCount} affected ${summary.affectedFileCount === 1 ? 'file' : 'files'}`,
         })),
         drift: {
             key: 'drift',
@@ -633,7 +633,7 @@ function createOverviewStatusViewModel(report) {
                 tone: report.lastOperation.success ? 'success' : 'error',
                 label: 'Last operation',
                 state: report.lastOperation.success ? 'Succeeded' : 'Failed',
-                details: report.lastOperation.kind,
+                details: `${report.lastOperation.kind} on this device`,
             }
             : {
                 key: 'last-operation',
@@ -642,7 +642,7 @@ function createOverviewStatusViewModel(report) {
                 state: 'None',
             },
         issues: report.issues
-            .filter((issue) => !issue.code.startsWith('deploy.skillsLinked.'))
+            .filter((issue) => !isAdvancedDeployIssue(issue.code))
             .map((issue) => ({
             key: issue.code,
             tone: issue.severity === 'error'
@@ -660,32 +660,63 @@ function createOverviewStatusViewModel(report) {
         })),
     };
 }
+function isAdvancedDeployIssue(code) {
+    return code.startsWith('deploy.skillsLinked.')
+        || code.startsWith('deploy.unsafeDiffWithheld.')
+        || code === 'deploy.legacyCodexSkillDuplicates';
+}
 function summarizeLinkOutcomes(outcomes) {
     const groups = new Map();
     for (const outcome of outcomes) {
         const surface = linkOutcomeSurface(outcome);
-        const key = `${outcome.ownership}:${outcome.status}:${surface}`;
+        const key = outcome.status === 'blocked'
+            ? [
+                outcome.ownership,
+                outcome.status,
+                outcome.reason,
+                [...outcome.packageNames].sort().join(','),
+                [...(outcome.resolvedPaths ?? outcome.linkPaths)].sort().join(','),
+            ].join(':')
+            : `${outcome.ownership}:${outcome.status}:${surface}`;
         const matching = groups.get(key) ?? [];
         matching.push(outcome);
         groups.set(key, matching);
     }
-    return [...groups.entries()].map(([key, matching]) => {
-        const [ownership, status, surface] = key.split(':');
+    const physicalFacts = [...groups.entries()].map(([key, matching]) => {
+        const { ownership, status } = matching[0];
+        const surfaces = [...new Set(matching.map(linkOutcomeSurface))];
+        const packageNames = new Set(matching.flatMap((outcome) => outcome.packageNames));
         return {
             key,
             status,
             ownership,
-            surface,
+            surfaceLabel: surfaces.map(displaySkillSurface).join(' + '),
             state: status === 'blocked'
-                ? 'Blocked'
+                ? 'Needs decision'
                 : ownership === 'managed'
                     ? 'Already satisfied projection'
                     : 'Satisfied via link',
-            outcomeCount: matching.length,
-            packageCount: matching.reduce((total, outcome) => total + outcome.packageNames.length, 0),
-            affectedFileCount: matching.reduce((total, outcome) => total + outcome.affectedFileCount, 0),
+            outcomeCount: status === 'blocked' ? 1 : matching.length,
+            packageCount: packageNames.size,
+            affectedFileCount: status === 'blocked'
+                ? Math.max(...matching.map((outcome) => outcome.affectedFileCount))
+                : matching.reduce((total, outcome) => total + outcome.affectedFileCount, 0),
         };
     });
+    const summaries = new Map();
+    for (const fact of physicalFacts) {
+        const key = `${fact.ownership}:${fact.status}:${fact.surfaceLabel}`;
+        const current = summaries.get(key);
+        summaries.set(key, current
+            ? {
+                ...current,
+                outcomeCount: current.outcomeCount + fact.outcomeCount,
+                packageCount: current.packageCount + fact.packageCount,
+                affectedFileCount: current.affectedFileCount + fact.affectedFileCount,
+            }
+            : { ...fact, key });
+    }
+    return [...summaries.values()];
 }
 function linkOutcomeSurface(outcome) {
     if (outcome.owner === 'canonical-store')
@@ -822,7 +853,7 @@ function DeploySelection({ workflow, terminalRows, }) {
                                 ? outcome.ownership === 'managed'
                                     ? 'Already satisfied projection'
                                     : 'Satisfied via link'
-                                : `Blocked · ${outcome.reason?.replaceAll('-', ' ') ?? 'unclassified'}`, ' ', "\u00B7 ", outcome.ownership === 'managed' ? 'Managed' : 'External', " \u00B7 ", outcome.packageNames.length, " Skill", ' ', outcome.packageNames.length === 1 ? 'package' : 'packages', " \u00B7", ' ', outcome.affectedFileCount, " affected", ' ', outcome.affectedFileCount === 1 ? 'file' : 'files', " \u00B7", ' ', outcome.linkPaths.length, " ", outcome.linkPaths.length === 1 ? 'link' : 'links'] }), _jsxs(Text, { wrap: "truncate-middle", children: ['  ', outcome.linkPath, outcome.resolvedPath ? ` → ${outcome.resolvedPath}` : ''] })] }, `${outcome.owner}:${outcome.owner === 'ide' ? outcome.ide : 'store'}:${outcome.linkPath}`))), workflow.plan.linkOutcomes.length > 1 && linkOutcomeSummaries.map((summary) => (_jsxs(Text, { wrap: "truncate-middle", children: [displaySkillSurface(summary.surface), " \u00B7 ", summary.outcomeCount, " ", summary.ownership, ' ', summary.state.toLowerCase(), " outcomes \u00B7", ' ', summary.packageCount, " Skill ", summary.packageCount === 1 ? 'package' : 'packages', " \u00B7", ' ', summary.affectedFileCount, " affected", ' ', summary.affectedFileCount === 1 ? 'file' : 'files'] }, summary.key))), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: { node, depth } }, index) => {
+                                : `Blocked · ${outcome.reason?.replaceAll('-', ' ') ?? 'unclassified'}`, ' ', "\u00B7 ", outcome.ownership === 'managed' ? 'Managed' : 'External', " \u00B7 ", outcome.packageNames.length, " Skill", ' ', outcome.packageNames.length === 1 ? 'package' : 'packages', " \u00B7", ' ', outcome.affectedFileCount, " affected", ' ', outcome.affectedFileCount === 1 ? 'file' : 'files', " \u00B7", ' ', outcome.linkPaths.length, " ", outcome.linkPaths.length === 1 ? 'link' : 'links'] }), _jsxs(Text, { wrap: "truncate-middle", children: ['  ', outcome.linkPath, outcome.resolvedPath ? ` → ${outcome.resolvedPath}` : ''] })] }, `${outcome.owner}:${outcome.owner === 'ide' ? outcome.ide : 'store'}:${outcome.linkPath}`))), workflow.plan.linkOutcomes.length > 1 && linkOutcomeSummaries.map((summary) => (_jsxs(Text, { wrap: "truncate-middle", children: [summary.surfaceLabel, " \u00B7 ", summary.outcomeCount, " ", summary.ownership, ' ', summary.state.toLowerCase(), " outcomes \u00B7", ' ', summary.packageCount, " Skill ", summary.packageCount === 1 ? 'package' : 'packages', " \u00B7", ' ', summary.affectedFileCount, " affected", ' ', summary.affectedFileCount === 1 ? 'file' : 'files'] }, summary.key))), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: { node, depth } }, index) => {
                 const visibleIndex = viewport.start + index;
                 const expanded = workflow.expandedNodeIds.includes(node.id);
                 const disclosure = node.children.length === 0

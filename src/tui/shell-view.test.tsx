@@ -153,7 +153,7 @@ describe('TUI Shell view', () => {
     expect(rendered).toContain('○ Pending Deployment Changes: None');
     expect(rendered).toContain('✓ Drift: None');
     expect(rendered).toContain('✓ Environment: Ready');
-    expect(rendered).toContain('✓ Last operation: Succeeded · deploy');
+    expect(rendered).toContain('✓ Last operation: Succeeded · deploy on this device');
   });
 
   it('renders Help inside the Shell with only the six primary destinations', () => {
@@ -413,7 +413,7 @@ describe('TUI Shell view', () => {
                                         ✓ Codex: Ready · enabled, detected
                                         ○ Claude Code: Not detected · enabled, not detected
                                         ○ Gemini: Disabled · disabled, not detected
-                                      × Last operation: Failed · deploy
+                                      × Last operation: Failed · deploy on this device
                                       × Error: test.redacted · Sensitive source content was excluded.
 
       ↑↓ Move   →/Enter Open   q Quit   Ctrl+C Cancel
@@ -447,7 +447,8 @@ describe('TUI Shell view', () => {
        detected
         ○ Gemini: Disabled · disabled, not
       detected
-      × Last operation: Failed · deploy
+      × Last operation: Failed · deploy on this
+      device
       × Error: test.redacted · Sensitive source
       content was excluded.
 
@@ -508,6 +509,73 @@ describe('TUI Shell view', () => {
       expect(normalized).toContain('Satisfied via link');
       expect(normalized).toContain('External · 1 package · 42 affected files');
     }
+  });
+
+  it('shows one blocked physical Skill conflict shared by multiple IDE Surfaces', () => {
+    const resolvedPath = '/Users/张涛/.codex/skills/grill-with-docs';
+    const common = {
+      status: 'blocked' as const,
+      ownership: 'external' as const,
+      scope: 'skill-package' as const,
+      owner: 'ide' as const,
+      packageNames: ['grill-with-docs'],
+      affectedFileCount: 4,
+      resolvedPath,
+      resolvedPaths: [resolvedPath],
+      reason: 'divergent' as const,
+    };
+    const state = overviewState([
+      {
+        ...common,
+        ide: 'codex',
+        surface: 'codex',
+        linkPath: '/Users/张涛/.agents/skills/grill-with-docs',
+        linkPaths: ['/Users/张涛/.agents/skills/grill-with-docs'],
+      },
+      {
+        ...common,
+        ide: 'claude-code',
+        surface: 'claude-code',
+        linkPath: '/Users/张涛/.claude/skills/grill-with-docs',
+        linkPaths: ['/Users/张涛/.claude/skills/grill-with-docs'],
+      },
+    ]);
+
+    const rendered = renderToString(
+      <ShellView state={state} terminalColumns={120} terminalRows={30} />,
+      { columns: 120 },
+    ).replace(/\s+/g, ' ');
+
+    expect(rendered.match(/Linked Skills: Needs decision/g)).toHaveLength(1);
+    expect(rendered).toContain('Codex + Claude Code · External · 1 package · 4 affected files');
+  });
+
+  it('keeps internal Deploy preview and cleanup notices out of the Overview', () => {
+    const state = overviewState();
+    if (state.page.route !== 'overview' || state.page.status !== 'ready') {
+      throw new Error('Expected a ready Overview fixture.');
+    }
+    state.page.report.issues = [
+      {
+        severity: 'notice',
+        code: 'deploy.unsafeDiffWithheld.1',
+        message: 'Unsafe plaintext content was withheld from the Deploy preview.',
+      },
+      {
+        severity: 'notice',
+        code: 'deploy.legacyCodexSkillDuplicates',
+        message: 'Review Advanced Cleanup candidates.',
+      },
+    ];
+
+    const rendered = renderToString(
+      <ShellView state={state} terminalColumns={120} terminalRows={30} />,
+      { columns: 120 },
+    );
+
+    expect(rendered).not.toContain('unsafeDiffWithheld');
+    expect(rendered).not.toContain('legacyCodexSkillDuplicates');
+    expect(rendered).not.toContain('Advanced Cleanup candidates');
   });
 
   it('snapshots grouped Capture selection at narrow width with Unicode and many changes', () => {
@@ -1102,7 +1170,7 @@ describe('TUI Shell view', () => {
 
     expect(deployRendered.split('\n').length).toBeLessThanOrEqual(24);
     expect(normalized).toContain('Claude Code · 18 external');
-    expect(normalized).toContain('Claude Code · 2 external blocked');
+    expect(normalized).toContain('Claude Code · 2 external needs decision');
     expect(normalized).toContain('180 affected files');
     expect(normalized).not.toContain('/Volumes/config/skills/skill-19');
   });

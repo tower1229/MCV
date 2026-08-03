@@ -42,6 +42,7 @@ _Avoid_: "conflict", "divergence"
 
 **Pending Deployment Change（待部署变化）**:
 A difference between the current Repository's desired managed state and the current device that would produce an add, modify, or delete candidate in a Deploy Plan. It is distinct from Drift, which is a local managed-field change measured against the Baseline Snapshot.
+Status summarizes a multi-file Skill projection as one package action per Surface and excludes unselected Advanced Cleanup candidates; the Deploy Plan retains file-level changes for review, preconditions, and Apply.
 _Avoid_: "sync status", "unsynced"
 
 **Restore Conflict（恢复冲突）**:

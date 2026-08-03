@@ -64,7 +64,7 @@ export function renderStatusPlain(report: StatusReport): string[] {
     }
   }
   if (report.lastOperation) {
-    lines.push(`Last operation: ${report.lastOperation.kind} · ${report.lastOperation.success
+    lines.push(`Last operation on this device: ${report.lastOperation.kind} · ${report.lastOperation.success
       ? styleText('success', 'green')
       : styleText('failure', 'red')} · ${report.lastOperation.time}`);
   } else {

@@ -1447,7 +1447,7 @@ function preview(
   );
   if (scanTextForSecrets(diff).length > 0) {
     issues.push({
-      severity: 'error',
+      severity: 'notice',
       code: `deploy.unsafeDiffWithheld.${issues.length + 1}`,
       message: 'Unsafe plaintext content was withheld from the Deploy preview.',
     });
@@ -1560,11 +1560,11 @@ function inferDeploymentSemantics(
 ): { capabilities: ConfigurationCapability[]; strategy: DeployStrategy } {
   const normalized = targetPath.replace(/\\/g, '/');
   const base = path.basename(targetPath).toLowerCase();
-  if (base === 'agents.md' || base === 'claude.md' || base === 'gemini.md') {
-    return { capabilities: ['rules'], strategy: 'replace-entire-file' };
-  }
   if (normalized.includes('/skills/')) {
     return { capabilities: ['skills'], strategy: 'replace-entire-file' };
+  }
+  if (base === 'agents.md' || base === 'claude.md' || base === 'gemini.md') {
+    return { capabilities: ['rules'], strategy: 'replace-entire-file' };
   }
   if (base === 'keybindings.json') {
     return { capabilities: ['native'], strategy: 'replace-entire-file' };

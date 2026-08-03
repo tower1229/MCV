@@ -96,7 +96,7 @@ export type CanonicalSkillLinkOutcome = CanonicalSkillLinkOutcomeBase
   & CanonicalSkillLinkTarget;
 
 export interface CanonicalSkillLayoutIssue {
-  severity: 'notice' | 'error';
+  severity: 'notice' | 'decisionRequired' | 'error';
   code: string;
   message: string;
   details?: string;
@@ -653,7 +653,7 @@ function linkedSkillIssue(
   reason: NonNullable<CanonicalSkillLinkOutcome['reason']>,
 ): CanonicalSkillLayoutIssue {
   return {
-    severity: 'error',
+    severity: reason === 'divergent' ? 'decisionRequired' : 'error',
     code: `deploy.skillsLinked.blocked.${canonicalSkillTargetKey(target)}`,
     message: `Linked external Skills are blocked: ${linkedSkillReason(reason)} (${outcome.affectedFileCount} affected file(s)).`,
     details: [

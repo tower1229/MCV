@@ -46,19 +46,33 @@ export async function inspectStatus(context) {
     };
 }
 function summarizePendingDeployment(changes) {
-    const materializationPackages = new Set();
     const summary = { add: 0, modify: 0, delete: 0, total: 0 };
+    const skillPackages = new Map();
     for (const change of changes) {
-        if (change.deploymentKind === 'physical-materialization') {
-            const packagePath = resolveSkillPackageStorePath(change.targetPath);
-            if (materializationPackages.has(packagePath))
-                continue;
-            materializationPackages.add(packagePath);
+        if (!change.defaultSelected)
+            continue;
+        if (change.capability === 'skills') {
+            const packageKey = change.deploymentKind === 'physical-materialization'
+                ? resolveSkillPackageStorePath(change.targetPath)
+                : [change.owner, change.ide, change.surface, change.name, change.deploymentKind].join(':');
+            skillPackages.set(packageKey, mergePendingChange(skillPackages.get(packageKey), change.change));
+            continue;
         }
         summary[change.change] += 1;
         summary.total += 1;
     }
+    for (const change of skillPackages.values()) {
+        summary[change] += 1;
+        summary.total += 1;
+    }
     return summary;
+}
+function mergePendingChange(current, next) {
+    if (current === 'modify' || next === 'modify')
+        return 'modify';
+    if (current === 'add' || next === 'add')
+        return 'add';
+    return 'delete';
 }
 function summarizePostDeployLocalState(state) {
     const baselineFiles = state.baselineSnapshot?.files ?? {};

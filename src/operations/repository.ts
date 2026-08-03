@@ -272,7 +272,7 @@ function inspectGitRepository(
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim() || null;
-    const status = execFileSync('git', ['status', '--porcelain'], {
+    const status = execFileSync('git', ['status', '--porcelain', '--', '.'], {
       cwd: repositoryPath,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],

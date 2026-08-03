@@ -467,7 +467,7 @@ function linkedFilesMatchPhysicalDesired(linkedFiles, resolvedByLink, desiredByP
 }
 function linkedSkillIssue(outcome, target, reason) {
     return {
-        severity: 'error',
+        severity: reason === 'divergent' ? 'decisionRequired' : 'error',
         code: `deploy.skillsLinked.blocked.${canonicalSkillTargetKey(target)}`,
         message: `Linked external Skills are blocked: ${linkedSkillReason(reason)} (${outcome.affectedFileCount} affected file(s)).`,
         details: [
