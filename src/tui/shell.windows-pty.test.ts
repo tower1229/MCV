@@ -274,10 +274,9 @@ function createDeployTreeRepository(testRoot: string): string {
   );
   fs.mkdirSync(skillPath, { recursive: true });
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 2',
+    'schemaVersion: 3',
     'repositoryId: deploy-tree-conpty',
     'initializedAt: 2026-07-27T00:00:00.000Z',
-    'security: { scanSecrets: true, allowPlaintextSecrets: false }',
     'capture: { preserveUnknownNativeFields: true }',
     'deploy: { backupBeforeWrite: true, useSymlinks: false }',
     'targets:',
@@ -318,10 +317,9 @@ function createRestoreRepository(
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   fs.mkdirSync(path.join(backupDirectory, 'files'), { recursive: true });
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 2',
+    'schemaVersion: 3',
     'repositoryId: restore-conpty',
     'initializedAt: 2026-07-29T00:00:00.000Z',
-    'security: { scanSecrets: true, allowPlaintextSecrets: false }',
     'capture: { preserveUnknownNativeFields: true }',
     'deploy: { backupBeforeWrite: true, useSymlinks: false }',
     'targets: {}',
@@ -366,7 +364,7 @@ function createRestoreApplyingFixture(testRoot: string): string {
   const repositoryPath = path.join(testRoot, 'restore-fixture-repository');
   const targetPath = path.join(testRoot, 'restore-fixture-target.json');
   const plan = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'restore',
     status: 'planned',
     readyToApply: true,
@@ -388,7 +386,7 @@ function createRestoreApplyingFixture(testRoot: string): string {
     nextActions: [],
   };
   const result = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'restore',
     status: 'succeeded',
     repositoryPath,
@@ -403,7 +401,7 @@ function createRestoreApplyingFixture(testRoot: string): string {
     },
   };
   const repositoryReport = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'repository',
     status: 'reported',
     ready: true,

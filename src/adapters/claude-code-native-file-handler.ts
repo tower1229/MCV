@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { isRecord } from '../utils/objects.js';
 import { atomicWriteFile } from '../utils/files.js';
-import { isSensitiveFile, sanitizeConfig } from '../utils/sanitize.js';
+import { parameterizeConfig } from '../utils/parameterize.js';
 import { deleteObjectPath } from '../utils/structured-config.js';
 import { resolvePortableValue } from '../utils/variables.js';
 import type {
@@ -95,24 +95,17 @@ export class ClaudeCodeNativeFileHandler implements NativeFileHandler {
     const managedFiles: CapturedManagedFile[] = [];
     const managedFields: CapturedManagedField[] = [];
     const warnings: string[] = [];
-    let sensitiveFieldCount = 0;
     let parameterizedPathCount = 0;
     let excludedFileCount = 0;
 
     for (const file of files.filter((candidate) => candidate.exists)) {
-      if (isSensitiveFile(file.path)) {
-        excludedFileCount += 1;
-        continue;
-      }
-
       if (file.id === 'user-instructions') {
-        const sanitized = sanitizeConfig(fs.readFileSync(file.path, 'utf8'), context);
-        sensitiveFieldCount += sanitized.sensitiveFieldCount;
-        parameterizedPathCount += sanitized.parameterizedPathCount;
+        const parameterized = parameterizeConfig(fs.readFileSync(file.path, 'utf8'), context);
+        parameterizedPathCount += parameterized.parameterizedPathCount;
         managedFiles.push({
           id: file.id,
           sourcePath: file.path,
-          content: sanitized.value,
+          content: parameterized.value,
         });
         continue;
       }
@@ -127,13 +120,12 @@ export class ClaudeCodeNativeFileHandler implements NativeFileHandler {
         if (policy.localPaths.has(objectPath)) continue;
 
         if (policy.managedPaths.has(objectPath)) {
-          const sanitized = sanitizeConfig({ [key]: value }, context);
-          sensitiveFieldCount += sanitized.sensitiveFieldCount;
-          parameterizedPathCount += sanitized.parameterizedPathCount;
+          const parameterized = parameterizeConfig({ [key]: value }, context);
+          parameterizedPathCount += parameterized.parameterizedPathCount;
           managedFields.push({
             sourcePath: file.path,
             path: objectPath,
-            value: sanitized.value[key],
+            value: parameterized.value[key],
           });
         } else {
           nativeFields[key] = value;
@@ -141,13 +133,12 @@ export class ClaudeCodeNativeFileHandler implements NativeFileHandler {
       }
 
       if (Object.keys(nativeFields).length > 0) {
-        const sanitized = sanitizeConfig(nativeFields, context);
-        sensitiveFieldCount += sanitized.sensitiveFieldCount;
-        parameterizedPathCount += sanitized.parameterizedPathCount;
+        const parameterized = parameterizeConfig(nativeFields, context);
+        parameterizedPathCount += parameterized.parameterizedPathCount;
         capturedFiles.push({
           sourcePath: file.path,
           repositoryPath: policy.repositoryPath,
-          content: `${JSON.stringify(sanitized.value, null, 2)}\n`,
+          content: `${JSON.stringify(parameterized.value, null, 2)}\n`,
           ownership: 'native',
           localPaths: [...policy.localPaths],
         });
@@ -160,7 +151,6 @@ export class ClaudeCodeNativeFileHandler implements NativeFileHandler {
       managedFields,
       summary: {
         fileCount: capturedFiles.length,
-        sensitiveFieldCount,
         parameterizedPathCount,
         excludedFileCount,
       },

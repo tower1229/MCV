@@ -287,7 +287,6 @@ export function classifyCanonicalSkillLinks(desired, isManagedLink) {
         linkedGroups.set(key, group);
     }
     const outcomes = [];
-    const issues = [];
     const desiredByPath = new Map(desired
         .filter((file) => !findSymbolicLinkAncestor(file.targetPath))
         .map((file) => [path.resolve(file.targetPath), toBuffer(file.content)]));
@@ -307,7 +306,6 @@ export function classifyCanonicalSkillLinks(desired, isManagedLink) {
         };
         if (files.some(({ file, linkPath }) => !isLinkWithinSkillRoot(file.targetPath, linkPath))) {
             outcomes.push({ ...baseOutcome, status: 'blocked', reason: 'unclassified' });
-            issues.push(linkedSkillIssue(baseOutcome, canonicalSkillTarget(first), 'unclassified'));
             continue;
         }
         const resolvedByLink = new Map();
@@ -322,7 +320,6 @@ export function classifyCanonicalSkillLinks(desired, isManagedLink) {
         }
         if (resolutionFailure) {
             outcomes.push({ ...baseOutcome, status: 'blocked', reason: resolutionFailure });
-            issues.push(linkedSkillIssue(baseOutcome, canonicalSkillTarget(first), resolutionFailure));
             continue;
         }
         const resolvedPaths = [...new Set(resolvedByLink.values())].sort();
@@ -341,23 +338,15 @@ export function classifyCanonicalSkillLinks(desired, isManagedLink) {
         const followsEquivalentPhysicalTarget = linkedFilesMatchPhysicalDesired(files, resolvedByLink, desiredByPath);
         if (!physicalTargetConflict && (matches || followsEquivalentPhysicalTarget)) {
             outcomes.push({ ...baseOutcome, ...resolution, status: 'satisfied-via-link' });
-            issues.push({
-                severity: 'notice',
-                code: `deploy.skillsLinked.satisfied.${canonicalSkillTargetKey(first)}`,
-                message: `Satisfied via link: ${packageSummary(packageNames)} (${files.length} affected file(s)).`,
-                details: managed
-                    ? `${linkPaths.length} managed projection(s) resolve to ${resolvedPaths.join(', ')}.`
-                    : `${linkPaths.length} external link(s) resolve to ${resolvedPaths.join(', ')}; MCV will not take ownership or write through them.`,
-            });
             continue;
         }
         const reason = physicalTargetConflict
             ? 'physical-target-conflict'
             : 'divergent';
         outcomes.push({ ...baseOutcome, ...resolution, status: 'blocked', reason });
-        issues.push(linkedSkillIssue({ ...baseOutcome, ...resolution }, canonicalSkillTarget(first), reason));
     }
-    return { outcomes, issues };
+    const facts = buildCanonicalSkillLinkFacts(outcomes);
+    return { outcomes, facts, issues: facts.map(linkedSkillFactIssue) };
 }
 function relativeSkillPath(targetPath) {
     const root = skillRootPath(targetPath);
@@ -465,17 +454,100 @@ function linkedFilesMatchPhysicalDesired(linkedFiles, resolvedByLink, desiredByP
         return desiredByPath.get(physicalPath)?.equals(toBuffer(file.content)) === true;
     });
 }
-function linkedSkillIssue(outcome, target, reason) {
+function buildCanonicalSkillLinkFacts(outcomes) {
+    const groups = new Map();
+    for (const outcome of outcomes) {
+        const key = [
+            outcome.ownership,
+            outcome.owner,
+            outcome.status,
+            outcome.reason,
+            outcome.scope,
+            [...outcome.packageNames].sort().join(','),
+            [...(outcome.resolvedPaths ?? outcome.linkPaths)].sort().join(','),
+        ].join(':');
+        groups.set(key, [...(groups.get(key) ?? []), outcome]);
+    }
+    return [...groups.entries()].map(([key, matching]) => {
+        const linkPaths = [...new Set(matching.flatMap((entry) => entry.linkPaths))].sort();
+        const resolvedPaths = [...new Set(matching.flatMap((entry) => entry.resolvedPaths ?? []))]
+            .sort();
+        const first = matching[0];
+        const id = `skill-link-fact-${crypto.createHash('sha256').update(key).digest('hex').slice(0, 16)}`;
+        for (const outcome of matching)
+            outcome.factId = id;
+        return {
+            id,
+            status: first.status,
+            severity: linkFactSeverity(first),
+            ownership: first.ownership,
+            scope: first.scope,
+            ...(first.reason ? { reason: first.reason } : {}),
+            packageNames: [...new Set(matching.flatMap((entry) => entry.packageNames))].sort(),
+            linkPaths,
+            ...(resolvedPaths.length > 0
+                ? { resolvedPaths }
+                : {}),
+            surfaces: [...new Map(matching.flatMap((entry) => entry.owner === 'ide'
+                    ? [[`${entry.ide}:${entry.surface}`, { ide: entry.ide, surface: entry.surface }]]
+                    : [])).values()],
+            affectedFileCount: first.status === 'blocked'
+                ? Math.max(...matching.map((entry) => entry.affectedFileCount))
+                : matching.reduce((total, entry) => total + entry.affectedFileCount, 0),
+        };
+    });
+}
+function linkFactSeverity(fact) {
+    if (fact.status === 'satisfied-via-link')
+        return 'notice';
+    if (fact.reason === 'divergent'
+        && fact.owner === 'ide'
+        && fact.ownership === 'external') {
+        return fact.scope === 'skill-package' ? 'decisionRequired' : 'warning';
+    }
+    return 'error';
+}
+function linkedSkillFactIssue(fact) {
+    if (fact.status === 'satisfied-via-link') {
+        return {
+            severity: 'notice',
+            code: 'deploy.skillsLinked.satisfied',
+            message: `Satisfied via link: ${packageSummary(fact.packageNames)} (${fact.affectedFileCount} affected file(s)).`,
+            details: `${fact.linkPaths.length} ${fact.ownership} link(s) resolve to ${(fact.resolvedPaths ?? []).join(', ')}.`,
+        };
+    }
+    const context = [
+        `Packages: ${packageSummary(fact.packageNames)}.`,
+        `Links: ${fact.linkPaths.join(', ')}.`,
+        ...(fact.resolvedPaths ? [`Resolved targets: ${fact.resolvedPaths.join(', ')}.`] : []),
+    ];
+    if (fact.severity === 'warning') {
+        return {
+            severity: 'warning',
+            code: `deploy.skillsLinked.${fact.reason ?? 'blocked'}`,
+            confirmationId: fact.id,
+            message: `External shared Skill root differs from the Repository and will be preserved (${fact.affectedFileCount} affected file(s)).`,
+            details: [...context,
+                'Preserve this shared root to continue; split it into per-package links outside MCV before replacing individual packages.',
+            ].join(' '),
+        };
+    }
+    if (fact.severity === 'decisionRequired') {
+        return {
+            severity: 'decisionRequired',
+            code: `deploy.skillsLinked.${fact.reason ?? 'blocked'}`,
+            decisionId: fact.id,
+            message: `External Skill package differs from the Repository and needs a Preserve or Replace decision (${fact.affectedFileCount} affected file(s)).`,
+            details: [...context,
+                'Preserve leaves the external link and target unchanged; Replace removes only the link node before creating the Repository projection.',
+            ].join(' '),
+        };
+    }
     return {
-        severity: reason === 'divergent' ? 'decisionRequired' : 'error',
-        code: `deploy.skillsLinked.blocked.${canonicalSkillTargetKey(target)}`,
-        message: `Linked external Skills are blocked: ${linkedSkillReason(reason)} (${outcome.affectedFileCount} affected file(s)).`,
-        details: [
-            `Packages: ${packageSummary(outcome.packageNames)}.`,
-            `Links: ${outcome.linkPaths.join(', ')}.`,
-            ...(outcome.resolvedPaths
-                ? [`Resolved targets: ${outcome.resolvedPaths.join(', ')}.`]
-                : []),
+        severity: 'error',
+        code: `deploy.skillsLinked.${fact.reason ?? 'blocked'}`,
+        message: `Linked Skills are blocked: ${linkedSkillReason(fact.reason ?? 'unclassified')} (${fact.affectedFileCount} affected file(s)).`,
+        details: [...context,
             'MCV will not write through, replace, or manage cleanup beneath this link.',
         ].join(' '),
     };

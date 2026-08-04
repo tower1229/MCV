@@ -355,6 +355,8 @@ export function shellReducer(state, action) {
             return updateDeployWorkflow(state, toggleDeployAdvanced);
         case 'deploy.openDiff':
             return updateDeployWorkflow(state, openDeployDiff);
+        case 'deploy.chooseDecision':
+            return updateDeployWorkflow(state, chooseDeployDecision);
         case 'deploy.toggleWarning':
             return updateDeployWorkflow(state, toggleDeployWarning);
         case 'deploy.continue':
@@ -762,7 +764,7 @@ function toggleCaptureWarning(workflow) {
         return workflow;
     return {
         ...workflow,
-        confirmedIssueCodes: toggleId(workflow.confirmedIssueCodes, warning.code),
+        confirmedIssueIds: toggleId(workflow.confirmedIssueIds, warning.confirmationId),
     };
 }
 function continueCaptureWorkflow(workflow) {
@@ -848,7 +850,7 @@ function beginCaptureApply(workflow) {
     if (workflow.status !== 'confirmation')
         return workflow;
     const warnings = captureWarnings(workflow.plan);
-    const allWarningsConfirmed = warnings.every((warning) => workflow.confirmedIssueCodes.includes(warning.code));
+    const allWarningsConfirmed = warnings.every((warning) => workflow.confirmedIssueIds.includes(warning.confirmationId));
     if (!allWarningsConfirmed)
         return workflow;
     if (workflow.plan.issues.some((issue) => issue.severity === 'error')) {
@@ -858,7 +860,7 @@ function beginCaptureApply(workflow) {
         status: 'applying',
         plan: workflow.plan,
         selectedIds: workflow.selectedIds,
-        confirmedIssueCodes: workflow.confirmedIssueCodes,
+        confirmedIssueIds: workflow.confirmedIssueIds,
     };
 }
 function createCaptureConfirmation(plan, selectedIds, selectionCursor) {
@@ -867,7 +869,7 @@ function createCaptureConfirmation(plan, selectedIds, selectionCursor) {
         plan,
         selectedIds,
         selectionCursor,
-        confirmedIssueCodes: [],
+        confirmedIssueIds: [],
         warningCursor: 0,
     };
 }
@@ -931,6 +933,9 @@ function moveDeployCursor(workflow, delta) {
             cursor: clampIndex(workflow.cursor + delta, visible.length),
         };
     }
+    if (workflow.status === 'decision') {
+        return { ...workflow, cursor: clampIndex(workflow.cursor + delta, 2) };
+    }
     if (workflow.status === 'confirmation') {
         return {
             ...workflow,
@@ -947,6 +952,9 @@ function focusDeployCursor(workflow, position) {
                 ? 0
                 : Math.max(0, deployVisibleNodes(workflow).length - 1),
         };
+    }
+    if (workflow.status === 'decision') {
+        return { ...workflow, cursor: position === 'first' ? 0 : 1 };
     }
     if (workflow.status === 'confirmation') {
         return {
@@ -1063,21 +1071,71 @@ function toggleDeployWarning(workflow) {
         return workflow;
     return {
         ...workflow,
-        confirmedIssueCodes: toggleId(workflow.confirmedIssueCodes, warning.code),
+        confirmedIssueIds: toggleId(workflow.confirmedIssueIds, warning.confirmationId),
+    };
+}
+function chooseDeployDecision(workflow) {
+    if (workflow.status !== 'decision')
+        return workflow;
+    const decision = workflow.plan.decisions[workflow.decisionIndex];
+    if (!decision)
+        return workflow;
+    const choice = decision.choices[workflow.cursor];
+    if (!choice)
+        return workflow;
+    const replacementIds = new Set(decision.replacementChangeIds);
+    return {
+        ...workflow,
+        decisions: { ...workflow.decisions, [decision.id]: choice },
+        selectedIds: choice === 'replace-with-repository'
+            ? [...new Set([...workflow.selectedIds, ...decision.replacementChangeIds])]
+            : workflow.selectedIds.filter((id) => !replacementIds.has(id)),
     };
 }
 function continueDeployWorkflow(workflow) {
-    if (workflow.status !== 'selection')
+    if (workflow.status === 'selection') {
+        if (workflow.plan.issues.some((issue) => issue.severity === 'error'))
+            return workflow;
+        if (workflow.plan.decisions.length > 0) {
+            return {
+                status: 'decision',
+                plan: workflow.plan,
+                selectedIds: workflow.selectedIds,
+                selectionCursor: workflow.cursor,
+                decisionIndex: 0,
+                cursor: 0,
+                decisions: {},
+                expandedNodeIds: workflow.expandedNodeIds,
+            };
+        }
+        if (workflow.plan.issues.some((issue) => issue.severity === 'decisionRequired'))
+            return workflow;
+        return {
+            status: 'confirmation',
+            plan: workflow.plan,
+            cursor: workflow.cursor,
+            selectedIds: workflow.selectedIds,
+            confirmedIssueIds: [],
+            decisions: {},
+            warningCursor: 0,
+            expandedNodeIds: workflow.expandedNodeIds,
+        };
+    }
+    if (workflow.status !== 'decision')
         return workflow;
-    if (workflow.plan.issues.some((issue) => issue.severity === 'decisionRequired' || issue.severity === 'error')) {
+    const current = workflow.plan.decisions[workflow.decisionIndex];
+    if (!current || !workflow.decisions[current.id])
         return workflow;
+    if (workflow.decisionIndex + 1 < workflow.plan.decisions.length) {
+        return { ...workflow, decisionIndex: workflow.decisionIndex + 1, cursor: 0 };
     }
     return {
         status: 'confirmation',
         plan: workflow.plan,
-        cursor: workflow.cursor,
+        cursor: workflow.selectionCursor,
         selectedIds: workflow.selectedIds,
-        confirmedIssueCodes: [],
+        confirmedIssueIds: [],
+        decisions: workflow.decisions,
         warningCursor: 0,
         expandedNodeIds: workflow.expandedNodeIds,
     };
@@ -1087,6 +1145,18 @@ function backDeployWorkflow(workflow) {
         return closeDeployDiff(workflow);
     if (workflow.status === 'selection')
         return collapseDeployNode(workflow);
+    if (workflow.status === 'decision') {
+        if (workflow.decisionIndex > 0) {
+            return { ...workflow, decisionIndex: workflow.decisionIndex - 1, cursor: 0 };
+        }
+        return {
+            status: 'selection',
+            plan: workflow.plan,
+            cursor: workflow.selectionCursor,
+            selectedIds: workflow.selectedIds,
+            expandedNodeIds: workflow.expandedNodeIds,
+        };
+    }
     if (workflow.status !== 'confirmation')
         return workflow;
     return {
@@ -1100,17 +1170,21 @@ function backDeployWorkflow(workflow) {
 function beginDeployApply(workflow) {
     if (workflow.status !== 'confirmation')
         return workflow;
-    if (workflow.plan.issues.some((issue) => issue.severity === 'decisionRequired' || issue.severity === 'error')) {
+    if (workflow.plan.issues.some((issue) => issue.severity === 'error')) {
         return workflow;
     }
-    if (!deployWarnings(workflow.plan).every((warning) => workflow.confirmedIssueCodes.includes(warning.code))) {
+    if (workflow.plan.decisions.some((decision) => !workflow.decisions[decision.id])) {
+        return workflow;
+    }
+    if (!deployWarnings(workflow.plan).every((warning) => workflow.confirmedIssueIds.includes(warning.confirmationId))) {
         return workflow;
     }
     return {
         status: 'applying',
         plan: workflow.plan,
         selectedIds: workflow.selectedIds,
-        confirmedIssueCodes: workflow.confirmedIssueCodes,
+        confirmedIssueIds: workflow.confirmedIssueIds,
+        decisions: workflow.decisions,
     };
 }
 function clampIndex(index, length) {

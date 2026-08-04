@@ -106,7 +106,7 @@ function skillPlan(): DeployPlan {
     },
   });
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'deploy',
     status: 'planned',
     readyToApply: true,
@@ -126,6 +126,8 @@ function skillPlan(): DeployPlan {
       ),
     ],
     linkOutcomes: [],
+    linkFacts: [],
+    decisions: [],
     issues: [],
     nextActions: [],
   };

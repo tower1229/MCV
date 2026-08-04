@@ -21,10 +21,9 @@ describe('Capture operations', () => {
     fs.mkdirSync(path.join(homeDir, '.claude'), { recursive: true });
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets:',
@@ -50,7 +49,7 @@ describe('Capture operations', () => {
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
 
-  it('returns a sanitized grouped Plan without changing Repository or device state', async () => {
+  it('returns a faithful grouped Plan without changing Repository or device state', async () => {
     fs.writeFileSync(
       path.join(homeDir, '.claude', 'settings.json'),
       JSON.stringify({ theme: 'dark', apiToken: 'must-not-leak' }),
@@ -62,7 +61,7 @@ describe('Capture operations', () => {
     const second = await createCapturePlan(context);
 
     expect(first).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'capture',
       status: 'planned',
       readyToApply: true,
@@ -72,7 +71,6 @@ describe('Capture operations', () => {
       issues: [],
       nextActions: [],
       summary: {
-        sensitiveFieldCount: 1,
         parameterizedPathCount: 0,
         excludedFileCount: 0,
       },
@@ -89,12 +87,13 @@ describe('Capture operations', () => {
         previews: [expect.objectContaining({ kind: 'text', diff: expect.any(String) })],
       }),
     ]);
+    expect(JSON.stringify(first)).toContain('must-not-leak');
     expect(second.changes.map((change) => change.id)).toEqual(
       first.changes.map((change) => change.id),
     );
     const serialized = JSON.stringify(first);
-    expect(serialized).toContain('${env:API_TOKEN}');
-    expect(serialized).not.toContain('must-not-leak');
+    expect(serialized).not.toContain('${env:API_TOKEN}');
+    expect(serialized).toContain('must-not-leak');
     expect(hashDirectory(repositoryPath)).toBe(repositoryBefore);
     expect(readState(context)).toEqual(stateBefore);
   });
@@ -149,10 +148,9 @@ describe('Capture operations', () => {
 
   it('captures Antigravity keybindings arrays by replacing the Repository file', async () => {
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets:',
@@ -201,10 +199,33 @@ describe('Capture operations', () => {
     expect(plan.issues).toEqual([
       expect.objectContaining({
         severity: 'warning',
-        code: 'capture.sourceSkipped.1.1',
+        code: 'capture.sourceSkipped',
       }),
     ]);
     expect(JSON.stringify(plan)).not.toContain('malformed-secret-must-not-leak');
+  });
+
+  it('assigns distinct confirmation IDs to warnings in the same category', async () => {
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), fs.readFileSync(
+      path.join(repositoryPath, 'mcv.yaml'),
+      'utf8',
+    ).replace(
+      'targets:\n  claudeCode:',
+      'targets:\n  codex:\n    enabled: true\n  claudeCode:',
+    ));
+    fs.mkdirSync(path.join(homeDir, '.codex'), { recursive: true });
+    fs.writeFileSync(path.join(homeDir, '.codex', 'config.toml'), '[broken');
+    fs.writeFileSync(path.join(homeDir, '.claude', 'settings.json'), '{broken');
+
+    const plan = await createCapturePlan(context);
+    const warnings = plan.issues.filter((issue) => issue.severity === 'warning');
+
+    expect(warnings).toHaveLength(2);
+    expect(warnings.map((warning) => warning.code)).toEqual([
+      'capture.sourceSkipped',
+      'capture.sourceSkipped',
+    ]);
+    expect(new Set(warnings.map((warning) => warning.confirmationId)).size).toBe(2);
   });
 
   it('changes source and target precondition hashes when either side changes', async () => {
@@ -236,10 +257,9 @@ describe('Capture operations', () => {
 
   it('reports ambiguous MCP core conflicts as decisionRequired', async () => {
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets:',
@@ -291,10 +311,9 @@ describe('Capture operations', () => {
   it('captures one Skill candidate from managed projection aliases of one physical package', async () => {
     if (process.platform === 'win32') return;
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: true }',
       'targets:',
@@ -387,10 +406,9 @@ describe('Capture operations', () => {
 
   it('keeps a hand-created alias into the Store externally owned during Capture', async () => {
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: true }',
       'targets:',
@@ -422,10 +440,9 @@ describe('Capture operations', () => {
   it('invalidates Capture Plan when Skill projection topology changes before Apply', async () => {
     if (process.platform === 'win32') return;
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: true }',
       'targets:',
@@ -483,10 +500,9 @@ describe('Capture operations', () => {
     const older = path.join(homeDir, '.codex', 'skills', 'review');
     const newer = path.join(homeDir, '.claude', 'skills', 'review');
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets:',
@@ -517,10 +533,9 @@ describe('Capture operations', () => {
 
   it('merges Repository-first Canonical Rules and chooses the newest complete Skill copy deterministically', async () => {
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets:',
@@ -603,25 +618,20 @@ describe('Capture operations', () => {
     });
   });
 
-  it('blocks readiness without exposing a secret found in a deletion preview', async () => {
+  it('shows plaintext configuration data in a deletion preview without a security Issue', async () => {
     const secret = 'sk-1234567890abcdefghijklmnop';
     fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), `Remove ${secret}\n`);
 
     const plan = await createCapturePlan(context);
 
-    expect(plan.readyToApply).toBe(false);
-    expect(plan.issues).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        severity: 'error',
-        code: 'capture.plaintextSecretBlocked',
-      }),
-    ]));
-    expect(JSON.stringify(plan)).not.toContain(secret);
+    expect(plan.readyToApply).toBe(true);
+    expect(plan.issues.map((issue) => issue.code)).not.toContain('capture.plaintextSecretBlocked');
+    expect(JSON.stringify(plan)).toContain(secret);
     expect(plan.changes.find((change) => change.name === 'Shared Rules')).toMatchObject({
       change: 'delete',
       defaultSelected: false,
-      previews: [expect.objectContaining({ diff: '[unsafe text withheld]' })],
+      previews: [expect.objectContaining({ diff: expect.stringContaining(secret) })],
     });
   });
 
@@ -729,7 +739,7 @@ describe('Capture operations', () => {
     ]));
   });
 
-  it('rejects a secret regression without exposing or writing it', async () => {
+  it('rejects a stale source change without echoing or writing the unreviewed value', async () => {
     const sourcePath = path.join(homeDir, '.claude', 'settings.json');
     const targetPath = path.join(repositoryPath, 'ide', 'claude-code', 'native', 'settings.json');
     fs.writeFileSync(sourcePath, JSON.stringify({ theme: 'dark' }));
@@ -744,7 +754,7 @@ describe('Capture operations', () => {
     expect(fs.existsSync(targetPath)).toBe(false);
   });
 
-  it('rejects raw secret changes even when sanitization produces the same preview', async () => {
+  it('rejects a stale credential-shaped value even when the field path is unchanged', async () => {
     const sourcePath = path.join(homeDir, '.claude', 'settings.json');
     const targetPath = path.join(repositoryPath, 'ide', 'claude-code', 'native', 'settings.json');
     const firstSecret = 'first-secret-value';
@@ -763,10 +773,9 @@ describe('Capture operations', () => {
 
   it('applies one selected MCP decision and blocks an unresolved error', async () => {
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets:',
@@ -801,14 +810,8 @@ describe('Capture operations', () => {
     const secret = 'sk-1234567890abcdefghijklmnop';
     fs.writeFileSync(path.join(homeDir, '.claude', 'CLAUDE.md'), `Never expose ${secret}\n`);
     const errorPlan = await createCapturePlan(context);
-    const blocked = await applyCapturePlan(context, errorPlan, { changeIds: [] });
-    expect(blocked).toMatchObject({
-      status: 'blocked',
-      issues: expect.arrayContaining([
-        expect.objectContaining({ severity: 'error', code: 'capture.plaintextSecretBlocked' }),
-      ]),
-    });
-    expect(JSON.stringify(blocked)).not.toContain(secret);
+    expect(JSON.stringify(errorPlan)).toContain(secret);
+    expect(errorPlan.issues.map((issue) => issue.code)).not.toContain('capture.plaintextSecretBlocked');
   });
 
   it('rolls back every Repository change when a later transaction write fails', async () => {

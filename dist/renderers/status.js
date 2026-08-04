@@ -12,17 +12,21 @@ export function renderStatusPlain(report) {
             : `Git: ${styleText(String(report.repository.git.uncommittedChanges), 'yellow')} uncommitted ${plural(report.repository.git.uncommittedChanges, 'change')}`);
     }
     const pending = report.pendingDeployment;
-    lines.push(`Pending deployment: ${pending.total} ${plural(pending.total, 'change')} (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete)`);
-    for (const outcome of report.linkOutcomes) {
-        const surface = outcome.owner === 'canonical-store'
+    lines.push(`Pending deployment: ${pending.total} ${plural(pending.total, 'change')} (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete; ${pending.recommended} recommended, ${pending.optional} optional; ${pending.advancedCleanupExcluded} Advanced Cleanup excluded)`);
+    for (const fact of report.linkFacts) {
+        const surface = fact.surfaces.length === 0
             ? displaySkillSurface('canonical-store')
-            : displaySkillSurface(outcome.surface);
-        const state = outcome.status === 'satisfied-via-link'
-            ? outcome.ownership === 'managed'
-                ? 'Already satisfied projection'
-                : 'Satisfied via link'
-            : 'Blocked';
-        lines.push(`Linked Skills: ${surface} · ${state} · ${outcome.ownership} · ${outcome.packageNames.length} ${plural(outcome.packageNames.length, 'package')} · ${outcome.affectedFileCount} affected ${plural(outcome.affectedFileCount, 'file')}`);
+            : fact.surfaces.map(({ surface: surfaceId }) => displaySkillSurface(surfaceId)).join(' + ');
+        const state = fact.severity === 'error'
+            ? 'Blocked'
+            : fact.severity === 'decisionRequired'
+                ? 'Needs decision'
+                : fact.severity === 'warning'
+                    ? 'Preserve external'
+                    : fact.ownership === 'managed'
+                        ? 'Already satisfied projection'
+                        : 'Satisfied via link';
+        lines.push(`Linked Skills: ${surface} · ${state} · ${fact.ownership} · ${fact.packageNames.length} ${plural(fact.packageNames.length, 'package')} · ${fact.affectedFileCount} affected ${plural(fact.affectedFileCount, 'file')}`);
     }
     const local = report.postDeployLocalState;
     lines.push(`Post-deploy local state: ${local.unchanged} unchanged, ${styleText(String(local.contentDrift), local.contentDrift > 0 ? 'yellow' : 'green')} content Drift, ${styleText(String(local.topologyDrift), local.topologyDrift > 0 ? 'yellow' : 'green')} topology Drift, ${styleText(String(local.drift), local.drift > 0 ? 'yellow' : 'green')} Drift, ${styleText(String(local.missing), local.missing > 0 ? 'red' : 'green')} missing`);

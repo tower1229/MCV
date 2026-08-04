@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { atomicWriteFile } from '../utils/files.js';
-import { sanitizeConfig } from '../utils/sanitize.js';
+import { parameterizeConfig } from '../utils/parameterize.js';
 import { deleteObjectPath, parseJsonc, parseStructuredObject, splitOwnedFields, stringifyStructuredObject } from '../utils/structured-config.js';
 import { resolvePortableValue } from '../utils/variables.js';
 import { mergeRecords } from '../utils/objects.js';
@@ -11,8 +11,7 @@ import type { CanonicalDeploySource, DetectedConfigDirectory, DetectedConfigFile
 
 const LOCAL_KEYS = new Set([
   '$.installationId', '$.installation_id', '$.recentProjects', '$.windowState', '$.telemetry',
-  '$.userEmail', '$.oauth', '$.credentials', '$.terminal.integrated.env.windows',
-  '$.claudeCode.environmentVariables', '$.antigravity.auth', '$.antigravity.account',
+  '$.userEmail', '$.antigravity.account',
 ]);
 
 interface Policy { repositoryPath: string; managed: boolean; }
@@ -50,11 +49,12 @@ export class GeminiNativeFileHandler implements NativeFileHandler {
   }
 
   async capture(files: DetectedConfigFile[], context: DeviceContext): Promise<NativeCaptureResult> {
-    const result: NativeCaptureResult = { files: [], managedFiles: [], managedFields: [], summary: { fileCount: 0, sensitiveFieldCount: 0, parameterizedPathCount: 0, excludedFileCount: 0 }, warnings: [] };
+    const result: NativeCaptureResult = { files: [], managedFiles: [], managedFields: [], summary: { fileCount: 0, parameterizedPathCount: 0, excludedFileCount: 0 }, warnings: [] };
     for (const file of files.filter((candidate) => candidate.exists)) {
       if (file.id === 'user-instructions') {
-        const sanitized = sanitizeConfig(fs.readFileSync(file.path, 'utf8'), context);
-        result.managedFiles.push({ id: file.id, sourcePath: file.path, content: sanitized.value });
+        const parameterized = parameterizeConfig(fs.readFileSync(file.path, 'utf8'), context);
+        result.summary.parameterizedPathCount += parameterized.parameterizedPathCount;
+        result.managedFiles.push({ id: file.id, sourcePath: file.path, content: parameterized.value });
         continue;
       }
       const policy = POLICIES[file.id];
@@ -64,7 +64,7 @@ export class GeminiNativeFileHandler implements NativeFileHandler {
         if (file.id === 'antigravity-keybindings') {
           const parsed = parseJsonc(content);
           if (!Array.isArray(parsed)) throw new Error(`${file.path} must contain a JSON array.`);
-          const native = sanitizeConfig(parsed, context);
+          const native = parameterizeConfig(parsed, context);
           result.files.push({
             sourcePath: file.path,
             repositoryPath: policy.repositoryPath,
@@ -72,7 +72,6 @@ export class GeminiNativeFileHandler implements NativeFileHandler {
             ownership: 'native',
             captureMerge: 'replace-entire-file',
           });
-          result.summary.sensitiveFieldCount += native.sensitiveFieldCount;
           result.summary.parameterizedPathCount += native.parameterizedPathCount;
           continue;
         }
@@ -80,15 +79,13 @@ export class GeminiNativeFileHandler implements NativeFileHandler {
         const flatLocalPaths = file.id === 'antigravity-ide-settings' ? getAntigravityIdeLocalPaths(parsed) : [];
         const filtered = file.id === 'antigravity-ide-settings' ? filterAntigravityIdeLocalFields(parsed) : parsed;
         const owned = splitOwnedFields(filtered, policy.managed ? GEMINI_MANAGED_PATHS : [], [...LOCAL_KEYS]);
-        const native = sanitizeConfig(owned.native, context);
-        result.summary.sensitiveFieldCount += native.sensitiveFieldCount;
+        const native = parameterizeConfig(owned.native, context);
         result.summary.parameterizedPathCount += native.parameterizedPathCount;
         if (Object.keys(native.value).length > 0) result.files.push({ sourcePath: file.path, repositoryPath: policy.repositoryPath, content: stringifyStructuredObject(native.value, 'json'), ownership: 'native', localPaths: [...LOCAL_KEYS, ...flatLocalPaths] });
         for (const field of owned.managed) {
-          const sanitized = sanitizeConfig(field.value, context);
-          result.managedFields.push({ sourcePath: file.path, path: field.path, value: sanitized.value });
-          result.summary.sensitiveFieldCount += sanitized.sensitiveFieldCount;
-          result.summary.parameterizedPathCount += sanitized.parameterizedPathCount;
+          const parameterized = parameterizeConfig(field.value, context);
+          result.managedFields.push({ sourcePath: file.path, path: field.path, value: parameterized.value });
+          result.summary.parameterizedPathCount += parameterized.parameterizedPathCount;
         }
       } catch (error) {
         result.warnings.push(`Skipped ${file.path}: ${error instanceof Error ? error.message : String(error)}`);
@@ -158,6 +155,6 @@ function filterAntigravityIdeLocalFields(value: Record<string, unknown>): Record
 }
 
 function getAntigravityIdeLocalPaths(value: Record<string, unknown>): string[] {
-  const localPattern = /(^window\.|environmentVariables|terminal\.integrated\.env\.|userEmail|LocalStoragePath|machineId|device|recent|workspace|telemetry|auth|credential|token|apiKey|secret|geminicodeassist\.project|remote\.SSH\.remotePlatform)/i;
+  const localPattern = /(^window\.|userEmail|LocalStoragePath|machineId|device|recent|workspace|telemetry|geminicodeassist\.project|remote\.SSH\.remotePlatform)/i;
   return Object.keys(value).filter((key) => localPattern.test(key)).map((key) => `$.${key}`);
 }

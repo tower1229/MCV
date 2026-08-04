@@ -97,7 +97,6 @@ export interface CaptureFile {
 
 export interface CaptureSummary {
   fileCount: number;
-  sensitiveFieldCount: number;
   parameterizedPathCount: number;
   excludedFileCount: number;
 }

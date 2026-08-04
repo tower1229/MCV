@@ -123,7 +123,7 @@ describe('TUI Shell reducer', () => {
     const environmentReady = shellReducer(environment, {
       type: 'environment.loaded',
       report: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'discover',
         status: 'reported',
         ready: true,
@@ -711,6 +711,7 @@ describe('TUI Shell reducer', () => {
     plan.issues.push(...Array.from({ length: 14 }, (_, index) => ({
       severity: 'warning' as const,
       code: `capture.warning.${index + 2}`,
+      confirmationId: `capture-warning-${index + 2}`,
       message: `Review warning ${index + 2}.`,
     })));
     let state = shellReducer(createInitialShellState('capture'), {
@@ -805,6 +806,10 @@ describe('TUI Shell reducer', () => {
         selectedIds: ['deploy-mcp', 'deploy-delete'],
       },
     });
+    expectDeployStatus(
+      shellReducer(cleanupSelected, { type: 'deploy.continue' }),
+      'confirmation',
+    );
   });
 
   it('toggles every immutable leaf ID from a capability node', () => {
@@ -886,6 +891,7 @@ describe('TUI Shell reducer', () => {
     plan.issues.push(...Array.from({ length: 14 }, (_, index) => ({
       severity: 'warning' as const,
       code: `deploy.warning.${index + 2}`,
+      confirmationId: `deploy-warning-${index + 2}`,
       message: `Review warning ${index + 2}.`,
     })));
     let state = shellReducer(createInitialShellState('deploy'), {
@@ -1193,7 +1199,7 @@ describe('TUI Shell reducer', () => {
         type: 'repository.applied',
         operation: 'bind',
         result: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           operation: 'bind',
           status: 'failed',
           repositoryPath: '/tmp/repository',
@@ -1263,7 +1269,7 @@ function deployPlan(
   override: Partial<DeployPlan> = {},
 ): DeployPlan {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'deploy',
     status: 'planned',
     readyToApply: true,
@@ -1325,6 +1331,9 @@ function deployPlan(
         },
       },
     ],
+    linkOutcomes: [],
+    linkFacts: [],
+    decisions: [],
     issues: [{
       severity: 'warning',
       code: 'deploy.warning',
@@ -1337,7 +1346,7 @@ function deployPlan(
 
 function deployResult(code: string): DeployResult {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'deploy',
     status: 'failed',
     repositoryPath: '/tmp/mcv',
@@ -1356,7 +1365,7 @@ function restorePlan(
   override: Partial<RestorePlan> = {},
 ): RestorePlan {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'restore',
     status: 'planned',
     readyToApply: true,
@@ -1395,7 +1404,7 @@ function restoreResult(
 ): RestoreResult {
   if (status === 'succeeded') {
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'restore',
       status: 'succeeded',
       repositoryPath: '/tmp/mcv',
@@ -1411,7 +1420,7 @@ function restoreResult(
     };
   }
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'restore',
     status: 'failed',
     repositoryPath: '/tmp/mcv',
@@ -1428,7 +1437,7 @@ function restoreResult(
 
 function capturePlan(): CapturePlan {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'capture',
     status: 'planned',
     readyToApply: false,
@@ -1510,13 +1519,13 @@ function capturePlan(): CapturePlan {
       },
       {
         severity: 'warning',
-        code: 'capture.sourceSkipped.1.1',
+        code: 'capture.sourceSkipped',
+        confirmationId: 'capture-warning-source-skipped',
         message: 'A source was skipped.',
       },
     ],
     nextActions: [],
     summary: {
-      sensitiveFieldCount: 1,
       parameterizedPathCount: 0,
       excludedFileCount: 1,
     },
@@ -1525,7 +1534,7 @@ function capturePlan(): CapturePlan {
 
 function staleResult(): CaptureResult {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'capture',
     status: 'failed',
     repositoryPath: '/tmp/mcv',
@@ -1546,7 +1555,7 @@ function staleResult(): CaptureResult {
 
 function statusReport(): StatusReport {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'status',
     status: 'reported',
     ready: true,
@@ -1554,14 +1563,16 @@ function statusReport(): StatusReport {
     repository: {
       path: '/tmp/mcv',
       id: 'repository-id',
-      schemaVersion: 2,
+      schemaVersion: 3,
     },
-    changes: [],
     pendingDeployment: {
       add: 0,
       modify: 0,
       delete: 0,
       total: 0,
+      recommended: 0,
+      optional: 0,
+      advancedCleanupExcluded: 0,
     },
     postDeployLocalState: {
       unchanged: 0,
@@ -1579,6 +1590,7 @@ function statusReport(): StatusReport {
       ideSupport: [],
     },
     linkOutcomes: [],
+    linkFacts: [],
     lastOperation: null,
     issues: [],
     nextActions: [],
@@ -1599,7 +1611,7 @@ function repositoryReport({
   issueCode?: string;
 }): RepositoryReport {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'repository',
     status: 'reported',
     ready: valid,
@@ -1617,7 +1629,7 @@ function repositoryReport({
 
 function initPlan(): InitPlan {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'init',
     status: 'planned',
     readyToApply: true,
@@ -1631,7 +1643,7 @@ function initPlan(): InitPlan {
       repositoryPath: '/tmp/empty',
       repositoryId: 'repository-id',
       initializedAt: '2026-07-27T00:00:00.000Z',
-      schemaVersion: 2,
+      schemaVersion: 3,
     }],
     issues: [],
     nextActions: [],
@@ -1640,7 +1652,7 @@ function initPlan(): InitPlan {
 
 function initResult(): InitResult {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'init',
     status: 'succeeded',
     repositoryPath: '/tmp/empty',
@@ -1649,7 +1661,7 @@ function initResult(): InitResult {
     nextActions: [],
     data: {
       repositoryId: 'repository-id',
-      repositorySchemaVersion: 2,
+      repositorySchemaVersion: 3,
     },
   };
 }
@@ -1679,7 +1691,7 @@ function repositoryManagementState(
 
 function bindPlan(): BindPlan {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'bind',
     status: 'planned',
     readyToApply: true,
@@ -1700,7 +1712,7 @@ function bindPlan(): BindPlan {
 
 function bindResult(): BindResult {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'bind',
     status: 'succeeded',
     repositoryPath: '/tmp/moved-repository',
@@ -1709,7 +1721,7 @@ function bindResult(): BindResult {
     nextActions: [],
     data: {
       repositoryId: 'repository-id',
-      repositorySchemaVersion: 2,
+      repositorySchemaVersion: 3,
       previousRepositoryPath: '/tmp/old-repository',
     },
   };
@@ -1717,7 +1729,7 @@ function bindResult(): BindResult {
 
 function failedBindResult(): BindResult {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'bind',
     status: 'failed',
     repositoryPath: '/tmp/moved-repository',
@@ -1734,7 +1746,7 @@ function failedBindResult(): BindResult {
 
 function migrationPlan(): MigrationPlan {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'migrate',
     status: 'planned',
     readyToApply: true,
@@ -1755,7 +1767,7 @@ function migrationPlan(): MigrationPlan {
 
 function migrationResult(): MigrationResult {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'migrate',
     status: 'succeeded',
     repositoryPath: '/tmp/repository',
@@ -1765,7 +1777,7 @@ function migrationResult(): MigrationResult {
     data: {
       repositoryId: 'repository-id',
       previousSchemaVersion: 1,
-      repositorySchemaVersion: 2,
+      repositorySchemaVersion: 3,
       backupPath: '/tmp/repository-backup',
       backupVerified: true,
     },
@@ -1774,7 +1786,7 @@ function migrationResult(): MigrationResult {
 
 function unbindPlan(): UnbindPlan {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'unbind',
     status: 'planned',
     readyToApply: true,
@@ -1795,7 +1807,7 @@ function unbindPlan(): UnbindPlan {
 
 function unbindResult(): UnbindResult {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'unbind',
     status: 'succeeded',
     repositoryPath: '/tmp/repository',

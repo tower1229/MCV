@@ -32,7 +32,7 @@ export function renderCapturePlanPlain(plan: CapturePlan): string[] {
     lines.push('No configuration changes to capture.');
   }
   lines.push(
-    `Summary: ${plan.changes.length} item(s), ${plan.summary.sensitiveFieldCount} sensitive field(s) replaced, ${plan.summary.parameterizedPathCount} path(s) parameterized, ${plan.summary.excludedFileCount} file(s) excluded.`,
+    `Summary: ${plan.changes.length} item(s), ${plan.summary.parameterizedPathCount} path(s) parameterized, ${plan.summary.excludedFileCount} file(s) excluded.`,
   );
   for (const issue of plan.issues) {
     lines.push(renderIssuePlain(issue));

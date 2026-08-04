@@ -58,11 +58,11 @@ export async function deployConfigurations(context, dependencies = {}, options =
             .map((change) => change.id);
     const result = await withInterruptsIgnored(() => applyDeployPlan(context, reviewPlan, {
         changeIds: selectedIds,
-        confirmedIssueCodes: options.yes
+        confirmedIssueIds: options.yes
             ? []
             : reviewPlan.issues
                 .filter((issue) => issue.severity === 'warning')
-                .map((issue) => issue.code),
+                .map((issue) => issue.confirmationId),
     }, { nonInteractive: options.yes }));
     if (result.status !== 'succeeded')
         process.exitCode = result.status === 'blocked' ? 3 : 1;

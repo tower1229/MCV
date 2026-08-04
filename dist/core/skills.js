@@ -2,7 +2,6 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { hashDeviceTopologyNode } from './canonical-skill-device-layout.js';
-import { isSensitiveFile, scanTextForSecrets } from '../utils/sanitize.js';
 export function getSkillSources(context, enabled) {
     const env = context.env;
     const codexHome = env.CODEX_HOME || path.join(context.homeDir, '.codex');
@@ -146,23 +145,7 @@ function walkSkill(root, directory, files, warnings, excluded) {
         }
         if (!entry.isFile())
             continue;
-        if (isSensitiveFile(current)) {
-            warnings.push(`Excluded sensitive Skill file: ${current}`);
-            excluded();
-            continue;
-        }
         const content = fs.readFileSync(current);
-        if (isText(content)) {
-            const findings = scanTextForSecrets(content.toString('utf8'));
-            if (findings.length > 0) {
-                warnings.push(`Blocked Skill file with suspected plaintext secret: ${current} (${findings.join(', ')})`);
-                excluded();
-                continue;
-            }
-        }
         files.push({ relativePath: path.relative(root, current), content });
     }
-}
-function isText(content) {
-    return !content.subarray(0, Math.min(content.length, 8_192)).includes(0);
 }

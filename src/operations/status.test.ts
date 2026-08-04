@@ -77,14 +77,14 @@ describe('inspectStatus', () => {
     const report = await inspectStatus(context);
 
     expect(report).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'status',
       status: 'reported',
       ready: true,
       repositoryPath,
       repository: {
         id: 'repository-id',
-        schemaVersion: 2,
+        schemaVersion: 3,
       },
       pendingDeployment: { add: 1, modify: 1, delete: 0, total: 2 },
       postDeployLocalState: {
@@ -120,7 +120,7 @@ describe('inspectStatus', () => {
       nextActions: [],
     });
     expect(report.repository).not.toHaveProperty('git');
-    expect(report.changes).toHaveLength(3);
+    expect(report).not.toHaveProperty('changes');
     expect(snapshotFiles(testRoot)).toEqual(before);
   });
 
@@ -179,10 +179,8 @@ describe('inspectStatus', () => {
       packageNames: ['review'],
       affectedFileCount: 1,
     })]);
-    expect(report.changes.some((change) => change.capability === 'skills')).toBe(false);
-    expect(report.pendingDeployment.total).toBe(
-      report.changes.filter((change) => change.defaultSelected).length,
-    );
+    expect(report).not.toHaveProperty('changes');
+    expect(report.pendingDeployment.total).toBe(1);
     expect(report.issues).toContainEqual(expect.objectContaining({
       severity: 'notice',
       message: expect.stringContaining('Satisfied via link'),
@@ -222,9 +220,7 @@ describe('inspectStatus', () => {
       surface: 'claude-code',
       linkPath: projectionPath,
     })]);
-    expect(report.pendingDeployment.total).toBeGreaterThanOrEqual(1);
-    expect(report.changes.filter((change) =>
-      change.deploymentKind === 'physical-materialization')).toHaveLength(1);
+    expect(report.pendingDeployment.total).toBe(0);
   });
 
   it('reports topology Drift with IDE and Surface when a managed projection is replaced or retargeted', async () => {
@@ -301,7 +297,7 @@ describe('inspectStatus', () => {
       drift: 1,
       missing: 0,
     });
-    expect(report.changes.some((change) => change.targetPath === unowned)).toBe(false);
+    expect(report).not.toHaveProperty('changes');
     expect(fs.readFileSync(unowned, 'utf8')).toBe('leave me alone\n');
   });
   it('reports topology Drift when a managed projection is missing', async () => {
@@ -428,7 +424,9 @@ describe('inspectStatus', () => {
     });
 
     const report = await inspectStatus(context);
-    const skillChanges = report.changes.filter((change) => change.capability === 'skills');
+    const { createDeployPlan } = await import('./deploy.js');
+    const deployPlan = await createDeployPlan(context);
+    const skillChanges = deployPlan.changes.filter((change) => change.capability === 'skills');
 
     expect(skillChanges).toEqual(expect.arrayContaining([
       expect.objectContaining({ ide: 'gemini', surface: 'gemini-cli' }),
@@ -445,7 +443,7 @@ function seedManagedSkillRepository(
   context: DeviceContext,
 ): void {
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 2',
+    'schemaVersion: 3',
     'repositoryId: repository-id',
     'initializedAt: 2026-07-21T00:00:00.000Z',
     'targets:',
@@ -459,9 +457,6 @@ function seedManagedSkillRepository(
     '      geminiCli: auto',
     '      antigravity: auto',
     'variables: {}',
-    'security:',
-    '  scanSecrets: true',
-    '  allowPlaintextSecrets: false',
     'capture:',
     '  preserveUnknownNativeFields: true',
     'deploy:',
@@ -482,7 +477,7 @@ function seedManagedSkillRepository(
 
 function createRepository(repositoryPath: string, codexEnabled = true): void {
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 2',
+    'schemaVersion: 3',
     'repositoryId: repository-id',
     'initializedAt: 2026-07-21T00:00:00.000Z',
     'targets:',
@@ -496,9 +491,6 @@ function createRepository(repositoryPath: string, codexEnabled = true): void {
     '      geminiCli: auto',
     '      antigravity: auto',
     'variables: {}',
-    'security:',
-    '  scanSecrets: true',
-    '  allowPlaintextSecrets: false',
     'capture:',
     '  preserveUnknownNativeFields: true',
     'deploy:',

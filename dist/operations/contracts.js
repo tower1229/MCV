@@ -1,1 +1,1 @@
-export const OPERATION_SCHEMA_VERSION = 1;
+export const OPERATION_SCHEMA_VERSION = 2;

@@ -1,5 +1,3 @@
-import type { OperationContract } from '../operations/contracts.js';
-
-export function renderJson(contract: OperationContract): string {
+export function renderJson(contract: unknown): string {
   return JSON.stringify(contract, null, 2);
 }

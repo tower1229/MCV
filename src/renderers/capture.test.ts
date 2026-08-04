@@ -5,7 +5,7 @@ import { formatContributingProjections, renderCapturePlanPlain } from './capture
 describe('Capture plan rendering', () => {
   it('identifies contributing Skill projections without duplicating the package change', () => {
     const plan = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'capture',
       status: 'planned',
       readyToApply: true,
@@ -53,7 +53,6 @@ describe('Capture plan rendering', () => {
       issues: [],
       nextActions: [],
       summary: {
-        sensitiveFieldCount: 0,
         parameterizedPathCount: 0,
         excludedFileCount: 0,
       },

@@ -70,7 +70,7 @@ describe('packaged mcv CLI', () => {
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
     expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'discover',
       status: 'reported',
       ready: true,
@@ -112,7 +112,7 @@ describe('packaged mcv CLI', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'repository',
         status: 'reported',
         ready: false,
@@ -146,7 +146,7 @@ describe('packaged mcv CLI', () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'bind',
         status: 'failed',
         repositoryPath: invalidRepository,
@@ -167,10 +167,9 @@ describe('packaged mcv CLI', () => {
         : path.join(isolatedRoot, '.config', 'mcv', 'config.json');
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: process-binding-id',
       'initializedAt: 2026-07-22T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets: {}',
@@ -336,7 +335,7 @@ describe('packaged mcv CLI', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'init',
         status: 'planned',
         readyToApply: true,
@@ -375,17 +374,17 @@ describe('packaged mcv CLI', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'migrate',
         status: 'succeeded',
         repositoryPath: resolvedRepositoryPath,
         data: expect.objectContaining({
           previousSchemaVersion: 1,
-          repositorySchemaVersion: 2,
+          repositorySchemaVersion: 3,
           backupVerified: true,
         }),
       }));
-      expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).toContain('schemaVersion: 2');
+      expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).toContain('schemaVersion: 3');
     } finally {
       fs.rmSync(isolatedRoot, { recursive: true, force: true });
     }
@@ -399,10 +398,9 @@ describe('packaged mcv CLI', () => {
     const resolvedRepositoryPath = fs.realpathSync(repositoryPath);
     fs.mkdirSync(claudeRoot);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: process-capture-id',
       'initializedAt: 2026-07-22T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets:',
@@ -432,7 +430,7 @@ describe('packaged mcv CLI', () => {
       ).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'capture',
         status: 'planned',
         repositoryPath: resolvedRepositoryPath,
@@ -442,7 +440,7 @@ describe('packaged mcv CLI', () => {
           itemType: 'file',
         })],
       }));
-      expect(result.stdout).not.toContain('process-secret-must-not-leak');
+      expect(result.stdout).toContain('process-secret-must-not-leak');
       expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
       expect(fs.existsSync(path.join(isolatedRoot, 'mcv', 'config.json'))).toBe(false);
 
@@ -462,6 +460,10 @@ describe('packaged mcv CLI', () => {
         status: 'succeeded',
         data: expect.objectContaining({ appliedChangeIds: [expect.any(String)] }),
       }));
+      expect(fs.readFileSync(
+        path.join(repositoryPath, 'ide', 'claude-code', 'native', 'settings.json'),
+        'utf8',
+      )).toContain('process-secret-must-not-leak');
       expect(applyResult.stdout).not.toMatch(/\u001b\[/);
     } finally {
       fs.rmSync(isolatedRoot, { recursive: true, force: true });
@@ -473,10 +475,9 @@ describe('packaged mcv CLI', () => {
     const repositoryPath = path.join(isolatedRoot, 'repository');
     fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: process-deploy-id',
       'initializedAt: 2026-07-22T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets:',
@@ -500,7 +501,7 @@ describe('packaged mcv CLI', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'deploy',
         status: 'planned',
         repositoryPath,
@@ -548,10 +549,9 @@ describe('packaged mcv CLI', () => {
     fs.mkdirSync(path.dirname(externalSkill), { recursive: true });
     fs.mkdirSync(path.dirname(linkedRoot), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: process-linked-skill-id',
       'initializedAt: 2026-07-29T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets:',
@@ -630,10 +630,9 @@ describe('packaged mcv CLI', () => {
       const projection = path.join(isolatedRoot, '.claude', 'skills', 'review');
       fs.mkdirSync(path.dirname(sourceSkill), { recursive: true });
       fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-        'schemaVersion: 2',
+        'schemaVersion: 3',
         'repositoryId: process-managed-skill-id',
         'initializedAt: 2026-07-30T00:00:00.000Z',
-        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
         'capture: { preserveUnknownNativeFields: true }',
         'deploy: { backupBeforeWrite: true, useSymlinks: true }',
         'targets:',
@@ -731,10 +730,9 @@ describe('packaged mcv CLI', () => {
     fs.mkdirSync(path.join(backupDirectory, 'files'), { recursive: true });
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: restore-interrupt-id',
       'initializedAt: 2026-07-27T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets: {}',
@@ -772,7 +770,7 @@ describe('packaged mcv CLI', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'restore',
         status: 'planned',
         readyToApply: true,

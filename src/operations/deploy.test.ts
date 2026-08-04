@@ -23,10 +23,9 @@ describe('Deploy operations', () => {
     fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'review'), { recursive: true });
     fs.mkdirSync(path.join(repositoryPath, 'ide', 'claude-code', 'native'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: deploy-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets:',
@@ -87,14 +86,14 @@ describe('Deploy operations', () => {
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
 
-  it('returns a grouped read-only Plan with stable IDs, safe previews, and precondition hashes', async () => {
+  it('returns a grouped read-only Plan with stable IDs, full previews, and precondition hashes', async () => {
     const repositoryBefore = hashDirectory(repositoryPath);
     const stateBefore = readState(context);
     const first = await createDeployPlan(context);
     const second = await createDeployPlan(context);
 
     expect(first).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'deploy',
       status: 'planned',
       readyToApply: true,
@@ -144,7 +143,7 @@ describe('Deploy operations', () => {
     expect(readState(context)).toEqual(stateBefore);
   });
 
-  it('redacts an existing local secret from the preview without blocking a safe replacement', async () => {
+  it('shows existing local plaintext configuration in the preview without blocking replacement', async () => {
     const settingsSource = path.join(
       repositoryPath,
       'ide',
@@ -165,13 +164,12 @@ describe('Deploy operations', () => {
     const plan = await createDeployPlan(context);
 
     expect(plan.readyToApply).toBe(true);
-    expect(plan.issues).toContainEqual(expect.objectContaining({
-      severity: 'notice',
-      code: expect.stringMatching(/^deploy\.unsafeDiffWithheld\./),
-    }));
+    expect(plan.issues.map((issue) => issue.code)).not.toContainEqual(
+      expect.stringMatching(/^deploy\.unsafeDiffWithheld\./),
+    );
     expect(plan.changes.find((change) => change.targetPath === settingsTarget)?.preview)
-      .toMatchObject({ kind: 'text', diff: '[unsafe text withheld]' });
-    expect(JSON.stringify(plan)).not.toContain(`sk-${'a'.repeat(24)}`);
+      .toMatchObject({ kind: 'text', diff: expect.stringContaining(`sk-${'a'.repeat(24)}`) });
+    expect(JSON.stringify(plan)).toContain(`sk-${'a'.repeat(24)}`);
   });
 
   it('keeps source and target preconditions independent', async () => {
@@ -429,7 +427,7 @@ describe('Deploy operations', () => {
     const plan = await createDeployPlan(context);
     const warningCodes = plan.issues
       .filter((issue) => issue.severity === 'warning')
-      .map((issue) => issue.code);
+      .map((issue) => issue.confirmationId!);
     expect(warningCodes.length).toBeGreaterThan(0);
     const selectedIds = plan.changes.filter((change) => change.defaultSelected).map((change) => change.id);
 
@@ -450,7 +448,7 @@ describe('Deploy operations', () => {
     const confirmedPlan = await createDeployPlan(context);
     const confirmed = await applyDeployPlan(context, confirmedPlan, {
       changeIds: confirmedPlan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
-      confirmedIssueCodes: warningCodes,
+      confirmedIssueIds: warningCodes,
     });
     expect(confirmed.status).toBe('succeeded');
     expect(fs.readFileSync(linkTarget, 'utf8')).toBe('# Linked rules\n');
@@ -467,7 +465,7 @@ describe('Deploy operations', () => {
 
     const plan = await createDeployPlan(context);
 
-    expect(plan.linkOutcomes).toEqual([{
+    expect(plan.linkOutcomes).toEqual([expect.objectContaining({
       status: 'satisfied-via-link',
       ownership: 'external',
       scope: 'shared-link-root',
@@ -480,10 +478,10 @@ describe('Deploy operations', () => {
       resolvedPaths: [externalRoot],
       packageNames: ['review'],
       affectedFileCount: 1,
-    }]);
+    })]);
     expect(plan.issues).toContainEqual(expect.objectContaining({
       severity: 'notice',
-      code: 'deploy.skillsLinked.satisfied.claude-code:claude-code',
+      code: 'deploy.skillsLinked.satisfied',
       message: expect.stringContaining('Satisfied via link'),
     }));
     expect(plan.changes.some((change) =>
@@ -575,13 +573,19 @@ describe('Deploy operations', () => {
       affectedFileCount: 2,
     })]);
     expect(plan.issues.filter((issue) =>
-      issue.code.startsWith('deploy.skillsLinked.satisfied.'))).toHaveLength(1);
+      issue.code === 'deploy.skillsLinked.satisfied')).toHaveLength(1);
     expect(plan.changes.some((change) =>
       change.capability === 'skills' && change.targetPath.startsWith(packageRoot))).toBe(false);
   });
 
-  it('blocks a divergent external Skill link once at package-root granularity', async () => {
+  it('preserves a divergent external Skill link without blocking unrelated Deploy changes', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(manifestPath, fs.readFileSync(manifestPath, 'utf8').replace(
+      'targets:\n  claudeCode:',
+      'targets:\n  codex:\n    enabled: true\n  claudeCode:',
+    ));
     const skillsRoot = path.join(homeDir, '.claude', 'skills');
+    const codexSkillsRoot = path.join(homeDir, '.agents', 'skills');
     const externalRoot = path.join(testRoot, 'external-skills');
     const externalSkill = path.join(externalRoot, 'review', 'SKILL.md');
     const sourceReference = path.join(
@@ -598,32 +602,138 @@ describe('Deploy operations', () => {
     fs.writeFileSync(externalSkill, '# Externally changed\n');
     fs.writeFileSync(sourceReference, '# Guide\n');
     createDirectoryLink(externalRoot, skillsRoot);
+    fs.mkdirSync(path.dirname(codexSkillsRoot), { recursive: true });
+    createDirectoryLink(externalRoot, codexSkillsRoot);
 
     const plan = await createDeployPlan(context);
 
-    expect(plan.readyToApply).toBe(false);
-    expect(plan.linkOutcomes).toEqual([expect.objectContaining({
-      status: 'blocked',
-      ownership: 'external',
-      scope: 'shared-link-root',
-      linkPath: skillsRoot,
-      resolvedPath: externalRoot,
-      packageNames: ['review'],
-      affectedFileCount: 2,
-      reason: 'divergent',
-    })]);
-    expect(plan.issues.filter((issue) =>
-      issue.code.startsWith('deploy.skillsLinked.blocked.'))).toEqual([
+    expect(plan.readyToApply).toBe(true);
+    expect(plan.linkOutcomes).toHaveLength(2);
+    expect(plan.linkOutcomes).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        severity: 'decisionRequired',
+        status: 'blocked',
+        ownership: 'external',
+        scope: 'shared-link-root',
+        linkPath: skillsRoot,
+        resolvedPath: externalRoot,
+        packageNames: ['review'],
+        affectedFileCount: 2,
+        reason: 'divergent',
+      }),
+      expect.objectContaining({
+        status: 'blocked',
+        ownership: 'external',
+        scope: 'shared-link-root',
+        linkPath: codexSkillsRoot,
+        resolvedPath: externalRoot,
+        packageNames: ['review'],
+        affectedFileCount: 2,
+        reason: 'divergent',
+      }),
+    ]));
+    expect(plan.issues.filter((issue) =>
+      issue.code === 'deploy.skillsLinked.divergent')).toEqual([
+      expect.objectContaining({
+        severity: 'warning',
         message: expect.stringContaining('2 affected file(s)'),
       }),
     ]);
-    expect(plan.changes.some((change) => change.targetPath.startsWith(skillsRoot))).toBe(false);
+    expect(plan.changes.some((change) =>
+      change.targetPath.startsWith(skillsRoot)
+      || change.targetPath.startsWith(codexSkillsRoot))).toBe(false);
+    const unrelatedChange = plan.changes.find((change) =>
+      change.defaultSelected
+      && !change.targetPath.startsWith(skillsRoot)
+      && !change.targetPath.startsWith(codexSkillsRoot));
+    expect(unrelatedChange).toBeDefined();
 
-    const result = await applyDeployPlan(context, plan, { changeIds: [] });
-    expect(result.status).toBe('blocked');
+    const result = await applyDeployPlan(context, plan, {
+      changeIds: [unrelatedChange!.id],
+      confirmedIssueIds: plan.issues
+        .filter((issue) => issue.severity === 'warning')
+        .map((issue) => issue.confirmationId!),
+    });
+    expect(result.status).toBe('succeeded');
+    expect(fs.existsSync(unrelatedChange!.targetPath)).toBe(true);
     expect(fs.readFileSync(externalSkill, 'utf8')).toBe('# Externally changed\n');
+  });
+
+  it('requires a per-package external link decision and preserves it without touching its target', async () => {
+    const packagePath = path.join(homeDir, '.claude', 'skills', 'review');
+    const externalPackage = path.join(testRoot, 'external-review');
+    const externalSkill = path.join(externalPackage, 'SKILL.md');
+    fs.rmSync(packagePath, { recursive: true, force: true });
+    fs.mkdirSync(externalPackage, { recursive: true });
+    fs.writeFileSync(externalSkill, '# External review\n');
+    createDirectoryLink(externalPackage, packagePath);
+
+    const plan = await createDeployPlan(context);
+    expect(plan.decisions).toEqual([expect.objectContaining({
+      kind: 'external-skill-divergence',
+      packageNames: ['review'],
+      choices: ['preserve-external', 'replace-with-repository'],
+    })]);
+    expect(plan.issues).toContainEqual(expect.objectContaining({
+      severity: 'decisionRequired',
+      decisionId: plan.decisions[0].id,
+    }));
+
+    const blocked = await applyDeployPlan(context, plan, {
+      changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+    });
+    expect(blocked.status).toBe('blocked');
+
+    const preservePlan = await createDeployPlan(context);
+    const decision = preservePlan.decisions[0];
+    const result = await applyDeployPlan(context, preservePlan, {
+      changeIds: preservePlan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+      decisions: { [decision.id]: 'preserve-external' },
+    });
+    expect(result.status).toBe('succeeded');
+    expect(fs.lstatSync(packagePath).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(externalSkill, 'utf8')).toBe('# External review\n');
+  });
+
+  it('replaces only a divergent per-package link node and rolls it back exactly on failure', async () => {
+    const packagePath = path.join(homeDir, '.claude', 'skills', 'review');
+    const externalPackage = path.join(testRoot, 'external-review');
+    const externalSkill = path.join(externalPackage, 'SKILL.md');
+    fs.rmSync(packagePath, { recursive: true, force: true });
+    fs.mkdirSync(externalPackage, { recursive: true });
+    fs.writeFileSync(externalSkill, '# External review\n');
+    createDirectoryLink(externalPackage, packagePath);
+
+    const failingPlan = await createDeployPlan(context);
+    const failingDecision = failingPlan.decisions[0];
+    const failingSelection = [
+      ...failingPlan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+      ...failingDecision.replacementChangeIds,
+    ];
+    const failed = await applyDeployPlan(context, failingPlan, {
+      changeIds: failingSelection,
+      decisions: { [failingDecision.id]: 'replace-with-repository' },
+    }, {
+      writeFile: () => { throw new Error('injected package write failure'); },
+    });
+    expect(failed).toMatchObject({ status: 'failed', error: { code: 'deploy.transactionFailed' } });
+    expect(fs.lstatSync(packagePath).isSymbolicLink()).toBe(true);
+    expect(fs.realpathSync(packagePath)).toBe(fs.realpathSync(externalPackage));
+    expect(fs.readFileSync(externalSkill, 'utf8')).toBe('# External review\n');
+
+    const plan = await createDeployPlan(context);
+    const decision = plan.decisions[0];
+    const result = await applyDeployPlan(context, plan, {
+      changeIds: [
+        ...plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+        ...decision.replacementChangeIds,
+      ],
+      decisions: { [decision.id]: 'replace-with-repository' },
+    });
+    expect(result.status).toBe('succeeded');
+    expect(fs.lstatSync(packagePath).isDirectory()).toBe(true);
+    expect(fs.lstatSync(packagePath).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(path.join(packagePath, 'SKILL.md'), 'utf8')).toBe('# Review\n');
+    expect(fs.readFileSync(externalSkill, 'utf8')).toBe('# External review\n');
   });
 
   it('classifies a non-directory link target as one physical-target conflict', async () => {
@@ -643,7 +753,7 @@ describe('Deploy operations', () => {
       affectedFileCount: 1,
     })]);
     expect(plan.issues.filter((issue) =>
-      issue.code.startsWith('deploy.skillsLinked.blocked.'))).toHaveLength(1);
+      issue.code === 'deploy.skillsLinked.physical-target-conflict')).toHaveLength(1);
   });
 
   it('never proposes managed cleanup beneath an unclassified external link', async () => {
@@ -682,7 +792,7 @@ describe('Deploy operations', () => {
       affectedFileCount: 1,
     })]);
     expect(plan.issues.filter((issue) =>
-      issue.code.startsWith('deploy.skillsLinked.blocked.'))).toHaveLength(1);
+      issue.code === `deploy.skillsLinked.${reason}`)).toHaveLength(1);
     expect(plan.changes.some((change) => change.targetPath.startsWith(skillsRoot))).toBe(false);
   });
 
@@ -864,9 +974,9 @@ describe('Deploy operations', () => {
         changeIds: dryRun.changes
           .filter((change) => change.defaultSelected || change.deploymentKind === 'topology-migration')
           .map((change) => change.id),
-        confirmedIssueCodes: dryRun.issues
+        confirmedIssueIds: dryRun.issues
           .filter((issue) => issue.severity === 'warning')
-          .map((issue) => issue.code),
+          .map((issue) => issue.confirmationId!),
       },
       { nonInteractive: true },
     );
@@ -903,9 +1013,9 @@ describe('Deploy operations', () => {
       plan,
       {
         changeIds: selected.map((change) => change.id),
-        confirmedIssueCodes: plan.issues
+        confirmedIssueIds: plan.issues
           .filter((issue) => issue.severity === 'warning')
-          .map((issue) => issue.code),
+          .map((issue) => issue.confirmationId!),
       },
     );
 
@@ -970,9 +1080,9 @@ describe('Deploy operations', () => {
         changeIds: plan.changes
           .filter((change) => change.defaultSelected || change.deploymentKind === 'topology-migration')
           .map((change) => change.id),
-        confirmedIssueCodes: plan.issues
+        confirmedIssueIds: plan.issues
           .filter((issue) => issue.severity === 'warning')
-          .map((issue) => issue.code),
+          .map((issue) => issue.confirmationId!),
       },
     );
 
@@ -1002,9 +1112,9 @@ describe('Deploy operations', () => {
         changeIds: plan.changes
           .filter((change) => change.defaultSelected || change.deploymentKind === 'topology-migration')
           .map((change) => change.id),
-        confirmedIssueCodes: plan.issues
+        confirmedIssueIds: plan.issues
           .filter((issue) => issue.severity === 'warning')
-          .map((issue) => issue.code),
+          .map((issue) => issue.confirmationId!),
       },
       {
         createSymbolicLink: () => {
@@ -1041,9 +1151,9 @@ describe('Deploy operations', () => {
         changeIds: plan.changes
           .filter((change) => change.defaultSelected || change.deploymentKind === 'topology-migration')
           .map((change) => change.id),
-        confirmedIssueCodes: plan.issues
+        confirmedIssueIds: plan.issues
           .filter((issue) => issue.severity === 'warning')
-          .map((issue) => issue.code),
+          .map((issue) => issue.confirmationId!),
       },
       {
         createSymbolicLink: () => {
@@ -1120,9 +1230,9 @@ describe('Deploy operations', () => {
         changeIds: plan.changes
           .filter((change) => change.defaultSelected || change.deploymentKind === 'topology-migration')
           .map((change) => change.id),
-        confirmedIssueCodes: plan.issues
+        confirmedIssueIds: plan.issues
           .filter((issue) => issue.severity === 'warning')
-          .map((issue) => issue.code),
+          .map((issue) => issue.confirmationId!),
       },
       {
         createSymbolicLink: (_target, linkPath) => {
@@ -1439,10 +1549,9 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 2',
+        'schemaVersion: 3',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
-        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
         'capture: { preserveUnknownNativeFields: true }',
         'deploy: { backupBeforeWrite: true, useSymlinks: true }',
         'targets:',
@@ -1488,10 +1597,9 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 2',
+        'schemaVersion: 3',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
-        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
         'capture: { preserveUnknownNativeFields: true }',
         'deploy: { backupBeforeWrite: true, useSymlinks: true }',
         'targets:',
@@ -1546,10 +1654,9 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 2',
+        'schemaVersion: 3',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
-        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
         'capture: { preserveUnknownNativeFields: true }',
         'deploy: { backupBeforeWrite: true, useSymlinks: true }',
         'targets:',
@@ -1639,7 +1746,12 @@ describe('Deploy operations', () => {
     expect(projections.length).toBe(1);
 
     const status = await inspectStatus(context);
-    expect(status.pendingDeployment.total).toBe(6);
+    expect(status.pendingDeployment).toMatchObject({
+      total: 5,
+      recommended: 5,
+      optional: 0,
+      advancedCleanupExcluded: 1,
+    });
   });
 
   it('counts a multi-file copy projection as one pending Skill package action', async () => {
@@ -1932,10 +2044,9 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 2',
+        'schemaVersion: 3',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
-        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
         'capture: { preserveUnknownNativeFields: true }',
         'deploy: { backupBeforeWrite: true, useSymlinks: true }',
         'targets:',
@@ -2002,10 +2113,9 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 2',
+        'schemaVersion: 3',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
-        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
         'capture: { preserveUnknownNativeFields: true }',
         'deploy: { backupBeforeWrite: true, useSymlinks: true }',
         'targets:',

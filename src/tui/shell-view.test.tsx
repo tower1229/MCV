@@ -114,6 +114,9 @@ describe('TUI Shell view', () => {
           modify: 0,
           delete: 0,
           total: 0,
+          recommended: 0,
+          optional: 0,
+          advancedCleanupExcluded: 0,
         },
         postDeployLocalState: {
           unchanged: 3,
@@ -254,7 +257,7 @@ describe('TUI Shell view', () => {
     const overview = shellReducer(createInitialShellState('overview'), {
       type: 'overview.loaded',
       report: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'status',
         status: 'reported',
         ready: true,
@@ -269,12 +272,14 @@ describe('TUI Shell view', () => {
             uncommittedChanges: 1_234,
           },
         },
-        changes: [],
         pendingDeployment: {
           add: 123_456,
           modify: 98_765,
           delete: 4_321,
           total: 226_542,
+          recommended: 226_542,
+          optional: 0,
+          advancedCleanupExcluded: 0,
         },
         postDeployLocalState: {
           unchanged: 10_000,
@@ -314,6 +319,7 @@ describe('TUI Shell view', () => {
           ],
         },
         linkOutcomes: [],
+        linkFacts: [],
         lastOperation: {
           kind: 'deploy',
           time: '2026-07-27T00:00:00.000Z',
@@ -331,7 +337,7 @@ describe('TUI Shell view', () => {
     const environment = shellReducer(createInitialShellState('environment'), {
       type: 'environment.loaded',
       report: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'discover',
         status: 'reported',
         ready: true,
@@ -406,8 +412,9 @@ describe('TUI Shell view', () => {
         Capture (c)                     Path: /Users/张涛/Configuration Repository/long-path
         Deploy (d)                    ! Git: Changes · 1234 uncommitted changes · main
         Restore Latest Deployment (s) ! Pending Deployment Changes: Review · 226542 changes (123456 add,
-        Repository (r)                98765 modify, 4321 delete)
-        Help (h)                      ! Drift: Review · 0 content, 0 topology, 9876 changed, 543 missing
+        Repository (r)                98765 modify, 4321 delete; 226542 recommended, 0 optional; 0 cleanup
+        Help (h)                       excluded)
+                                      ! Drift: Review · 0 content, 0 topology, 9876 changed, 543 missing
                                       ! Environment: Warning · 2 missing variables
                                       IDE support:
                                         ✓ Codex: Ready · enabled, detected
@@ -437,7 +444,8 @@ describe('TUI Shell view', () => {
       main
       ! Pending Deployment Changes: Review ·
       226542 changes (123456 add, 98765 modify,
-      4321 delete)
+      4321 delete; 226542 recommended, 0 optional;
+       0 cleanup excluded)
       ! Drift: Review · 0 content, 0 topology,
       9876 changed, 543 missing
       ! Environment: Warning · 2 missing variables
@@ -550,17 +558,12 @@ describe('TUI Shell view', () => {
     expect(rendered).toContain('Codex + Claude Code · External · 1 package · 4 affected files');
   });
 
-  it('keeps internal Deploy preview and cleanup notices out of the Overview', () => {
+  it('keeps Advanced Cleanup notices out of the Overview', () => {
     const state = overviewState();
     if (state.page.route !== 'overview' || state.page.status !== 'ready') {
       throw new Error('Expected a ready Overview fixture.');
     }
     state.page.report.issues = [
-      {
-        severity: 'notice',
-        code: 'deploy.unsafeDiffWithheld.1',
-        message: 'Unsafe plaintext content was withheld from the Deploy preview.',
-      },
       {
         severity: 'notice',
         code: 'deploy.legacyCodexSkillDuplicates',
@@ -573,7 +576,6 @@ describe('TUI Shell view', () => {
       { columns: 120 },
     );
 
-    expect(rendered).not.toContain('unsafeDiffWithheld');
     expect(rendered).not.toContain('legacyCodexSkillDuplicates');
     expect(rendered).not.toContain('Advanced Cleanup candidates');
   });
@@ -635,7 +637,7 @@ describe('TUI Shell view', () => {
     expect(rendered).toContain('PgUp/PgDn');
   });
 
-  it('snapshots sanitized text Diff and binary metadata without raw content', () => {
+  it('snapshots faithful text Diff and binary metadata', () => {
     const loaded = shellReducer(createInitialShellState('capture'), {
       type: 'capture.loaded',
       plan: capturePlan(2),
@@ -825,6 +827,7 @@ describe('TUI Shell view', () => {
         issues: [{
           severity: 'warning',
           code: 'capture.stateRecordFailed',
+          confirmationId: 'capture-warning-state-record-failed',
           message: 'Local history was not updated.',
         }],
       },
@@ -832,7 +835,7 @@ describe('TUI Shell view', () => {
     const blocked = shellReducer(applying, {
       type: 'capture.applied',
       result: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'capture',
         status: 'blocked',
         repositoryPath: '/tmp/mcv',
@@ -840,6 +843,7 @@ describe('TUI Shell view', () => {
         issues: [{
           severity: 'warning',
           code: 'capture.blocked',
+          confirmationId: 'capture-warning-blocked',
           message: 'Review is incomplete.',
         }],
         nextActions: ['Review the Capture Plan again.'],
@@ -883,6 +887,7 @@ describe('TUI Shell view', () => {
     plan.issues.push(...Array.from({ length: 14 }, (_, index) => ({
       severity: 'warning' as const,
       code: `capture.warning.${index + 2}`,
+      confirmationId: `capture-warning-${index + 2}`,
       message: `Review warning ${index + 2}.`,
     })));
     let state = shellReducer(createInitialShellState('capture'), {
@@ -973,6 +978,7 @@ describe('TUI Shell view', () => {
       packageNames: ['hatch-pet', 'review'],
       affectedFileCount: 18,
     }];
+    plan.linkFacts = linkFactsFromOutcomes(plan.linkOutcomes);
     const state = shellReducer(createInitialShellState('deploy'), {
       type: 'deploy.loaded',
       plan,
@@ -1002,6 +1008,7 @@ describe('TUI Shell view', () => {
       packageNames: ['review'],
       affectedFileCount: 1,
     }];
+    plan.linkFacts = linkFactsFromOutcomes(plan.linkOutcomes);
     const state = shellReducer(createInitialShellState('deploy'), {
       type: 'deploy.loaded',
       plan,
@@ -1053,6 +1060,7 @@ describe('TUI Shell view', () => {
       issues: [{
         severity: 'warning' as const,
         code: 'deploy.skillsTopology.migrationCandidate',
+        confirmationId: 'deploy-warning-topology-migration',
         message: 'Topology migration available: replace matching physical Skill copy review with a managed link.',
       }],
     };
@@ -1095,7 +1103,7 @@ describe('TUI Shell view', () => {
     const result = shellReducer(applying, {
       type: 'deploy.applied',
       result: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'deploy',
         status: 'succeeded',
         repositoryPath: '/Users/张涛/Configuration Repository',
@@ -1152,6 +1160,7 @@ describe('TUI Shell view', () => {
     }));
     const plan = largeDeployPlan();
     plan.linkOutcomes = outcomes;
+    plan.linkFacts = linkFactsFromOutcomes(outcomes);
     const deploy = shellReducer(createInitialShellState('deploy'), {
       type: 'deploy.loaded',
       plan,
@@ -1169,8 +1178,8 @@ describe('TUI Shell view', () => {
     const normalized = `${deployRendered}\n${overviewRendered}`.replace(/\s+/g, ' ');
 
     expect(deployRendered.split('\n').length).toBeLessThanOrEqual(24);
-    expect(normalized).toContain('Claude Code · 18 external');
-    expect(normalized).toContain('Claude Code · 2 external needs decision');
+    expect(normalized).toContain('Satisfied via link · External · 18 Skill');
+    expect(normalized).toContain('Needs decision · External · 1 Skill package');
     expect(normalized).toContain('180 affected files');
     expect(normalized).not.toContain('/Volumes/config/skills/skill-19');
   });
@@ -1223,6 +1232,7 @@ describe('TUI Shell view', () => {
     plan.issues.push(...Array.from({ length: 14 }, (_, index) => ({
       severity: 'warning' as const,
       code: `deploy.warning.${index + 2}`,
+      confirmationId: `deploy-warning-${index + 2}`,
       message: `Review warning ${index + 2}.`,
     })));
     let state = shellReducer(createInitialShellState('deploy'), {
@@ -1379,7 +1389,7 @@ describe('TUI Shell view', () => {
     const result = shellReducer(applying, {
       type: 'deploy.applied',
       result: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'deploy',
         status: 'succeeded',
         repositoryPath: '/Users/张涛/Configuration Repository',
@@ -1510,7 +1520,7 @@ describe('TUI Shell view', () => {
 
 function deployPlan(): DeployPlan {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'deploy',
     status: 'planned',
     readyToApply: true,
@@ -1577,9 +1587,12 @@ function deployPlan(): DeployPlan {
       },
     ],
     linkOutcomes: [],
+    linkFacts: [],
+    decisions: [],
     issues: [{
       severity: 'warning',
       code: 'deploy.warning',
+      confirmationId: 'deploy-warning-test',
       message: 'A target needs explicit review.',
     }],
     nextActions: [],
@@ -1626,7 +1639,7 @@ function largeDeployPlan(): DeployPlan {
     },
   }));
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'deploy',
     status: 'planned',
     readyToApply: true,
@@ -1635,6 +1648,8 @@ function largeDeployPlan(): DeployPlan {
     repositoryPath: '/Users/张涛/Configuration Repository',
     changes: [...standard, ...advanced],
     linkOutcomes: [],
+    linkFacts: [],
+    decisions: [],
     issues: [],
     nextActions: [],
   };
@@ -1644,7 +1659,7 @@ function restorePlan(
   override: Partial<RestorePlan> = {},
 ): RestorePlan {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'restore',
     status: 'planned',
     readyToApply: true,
@@ -1679,7 +1694,7 @@ function restorePlan(
 
 function successfulRestoreResult(): RestoreResult {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'restore',
     status: 'succeeded',
     repositoryPath: '/Users/张涛/Configuration Repository',
@@ -1697,7 +1712,7 @@ function successfulRestoreResult(): RestoreResult {
 
 function restoreResult(code: string): RestoreResult {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'restore',
     status: 'failed',
     repositoryPath: '/Users/张涛/Configuration Repository',
@@ -1714,7 +1729,7 @@ function restoreResult(code: string): RestoreResult {
 
 function failedDeployResult(code: string): DeployResult {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'deploy',
     status: 'failed',
     repositoryPath: '/Users/张涛/Configuration Repository',
@@ -1822,7 +1837,7 @@ function capturePlan(
   }
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'capture',
     status: 'planned',
     readyToApply: !withIssues,
@@ -1839,14 +1854,14 @@ function capturePlan(
         },
         {
           severity: 'warning',
-          code: 'capture.sourceSkipped.1.1',
+          code: 'capture.sourceSkipped',
+          confirmationId: 'capture-warning-source-skipped',
           message: 'A source item was skipped safely.',
         },
       ]
       : [],
     nextActions: [],
     summary: {
-      sensitiveFieldCount: 1,
       parameterizedPathCount: 2,
       excludedFileCount: 3,
     },
@@ -1855,7 +1870,7 @@ function capturePlan(
 
 function staleCaptureResult(): CaptureResult {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'capture',
     status: 'failed',
     repositoryPath: '/tmp/mcv',
@@ -1872,7 +1887,7 @@ function staleCaptureResult(): CaptureResult {
 
 function successfulCaptureResult(): CaptureResult {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'capture',
     status: 'succeeded',
     repositoryPath: '/tmp/mcv',
@@ -1921,7 +1936,7 @@ function repositoryFailureResultState(): ShellState {
 
 function repositoryRecoveryMenuState(): ShellState {
   const report: RepositoryReport = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'repository',
     status: 'reported',
     ready: false,
@@ -1947,7 +1962,7 @@ function repositoryRecoveryMenuState(): ShellState {
 
 function overviewState(linkOutcomes: StatusReport['linkOutcomes'] = []): ShellState {
   const report: StatusReport = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     operation: 'status',
     status: 'reported',
     ready: false,
@@ -1962,12 +1977,14 @@ function overviewState(linkOutcomes: StatusReport['linkOutcomes'] = []): ShellSt
         uncommittedChanges: 1_234,
       },
     },
-    changes: [],
     pendingDeployment: {
       add: 123_456,
       modify: 98_765,
       delete: 4_321,
       total: 226_542,
+      recommended: 226_542,
+      optional: 0,
+      advancedCleanupExcluded: 0,
     },
     postDeployLocalState: {
       unchanged: 10_000,
@@ -2007,6 +2024,7 @@ function overviewState(linkOutcomes: StatusReport['linkOutcomes'] = []): ShellSt
         ],
       },
       linkOutcomes,
+      linkFacts: linkFactsFromOutcomes(linkOutcomes),
       lastOperation: {
       kind: 'deploy',
       time: '2026-07-27T00:00:00.000Z',
@@ -2023,5 +2041,47 @@ function overviewState(linkOutcomes: StatusReport['linkOutcomes'] = []): ShellSt
   return shellReducer(createInitialShellState('overview'), {
     type: 'overview.loaded',
     report,
+  });
+}
+
+function linkFactsFromOutcomes(
+  outcomes: StatusReport['linkOutcomes'],
+): StatusReport['linkFacts'] {
+  const groups = new Map<string, typeof outcomes>();
+  for (const outcome of outcomes) {
+    const key = [
+      outcome.status,
+      outcome.ownership,
+      outcome.scope,
+      outcome.reason,
+      [...outcome.packageNames].sort().join(','),
+      [...(outcome.resolvedPaths ?? outcome.linkPaths)].sort().join(','),
+    ].join(':');
+    groups.set(key, [...(groups.get(key) ?? []), outcome]);
+  }
+  return [...groups.entries()].map(([key, matching], index) => {
+    const first = matching[0];
+    const severity = first.status === 'satisfied-via-link'
+      ? 'notice' as const
+      : first.reason === 'divergent' && first.ownership === 'external'
+        ? first.scope === 'skill-package' ? 'decisionRequired' as const : 'warning' as const
+        : 'error' as const;
+    return {
+      id: `test-link-fact-${index}-${key}`,
+      status: first.status,
+      severity,
+      ownership: first.ownership,
+      scope: first.scope,
+      ...(first.reason ? { reason: first.reason } : {}),
+      packageNames: [...new Set(matching.flatMap((item) => item.packageNames))],
+      linkPaths: [...new Set(matching.flatMap((item) => item.linkPaths))],
+      resolvedPaths: [...new Set(matching.flatMap((item) => item.resolvedPaths ?? []))],
+      surfaces: [...new Map(matching.flatMap((item) => item.owner === 'ide'
+        ? [[`${item.ide}:${item.surface}`, { ide: item.ide, surface: item.surface }] as const]
+        : [])).values()],
+      affectedFileCount: first.status === 'blocked'
+        ? Math.max(...matching.map((item) => item.affectedFileCount))
+        : matching.reduce((total, item) => total + item.affectedFileCount, 0),
+    };
   });
 }

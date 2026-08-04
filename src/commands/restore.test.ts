@@ -91,7 +91,7 @@ describe('mcv restore', () => {
   it('blocks Restore while the bound Repository still uses an old schema', async () => {
     const repositoryPath = path.join(testRoot, 'old-repository');
     fs.mkdirSync(repositoryPath);
-    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), 'schemaVersion: 1\nrepositoryId: old-repository-id\n');
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), 'schemaVersion: 2\nrepositoryId: old-repository-id\n');
     const context = { homeDir: stateRoot, platform: 'win32' as const, env: { APPDATA: stateRoot } };
     writeState(context, {
       schemaVersion: 2,
@@ -133,7 +133,7 @@ describe('mcv restore', () => {
 
     expect(console.log).toHaveBeenCalledOnce();
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'restore',
       status: 'planned',
       readyToApply: true,
@@ -158,7 +158,7 @@ describe('mcv restore', () => {
 
     expect(console.log).toHaveBeenCalledOnce();
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'restore',
       status: 'succeeded',
       changes: [{

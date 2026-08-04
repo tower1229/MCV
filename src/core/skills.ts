@@ -4,7 +4,6 @@ import * as path from 'path';
 import type { CaptureFile, DeviceContext } from '../adapters/types.js';
 import { hashDeviceTopologyNode } from './canonical-skill-device-layout.js';
 import type { ManagedSkillProjectionRecord } from './managed-skill-layout.js';
-import { isSensitiveFile, scanTextForSecrets } from '../utils/sanitize.js';
 
 export interface SkillSource {
   ide: string;
@@ -203,24 +202,7 @@ function walkSkill(
       continue;
     }
     if (!entry.isFile()) continue;
-    if (isSensitiveFile(current)) {
-      warnings.push(`Excluded sensitive Skill file: ${current}`);
-      excluded();
-      continue;
-    }
     const content = fs.readFileSync(current);
-    if (isText(content)) {
-      const findings = scanTextForSecrets(content.toString('utf8'));
-      if (findings.length > 0) {
-        warnings.push(`Blocked Skill file with suspected plaintext secret: ${current} (${findings.join(', ')})`);
-        excluded();
-        continue;
-      }
-    }
     files.push({ relativePath: path.relative(root, current), content });
   }
-}
-
-function isText(content: Buffer): boolean {
-  return !content.subarray(0, Math.min(content.length, 8_192)).includes(0);
 }

@@ -20,7 +20,7 @@ describe('mcv capture', () => {
     fs.mkdirSync(path.join(homeDir, '.claude'), { recursive: true });
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 2\nrepositoryId: test\ninitializedAt: test\nsecurity: { scanSecrets: true, allowPlaintextSecrets: false }\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  claudeCode:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 3\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  claudeCode:\n    enabled: true\nvariables: {}\n',
     );
     fs.writeFileSync(
       path.join(homeDir, '.claude', 'settings.json'),
@@ -56,7 +56,7 @@ describe('mcv capture', () => {
     expect(console.log).toHaveBeenCalledOnce();
     const plan = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(plan).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'capture',
       status: 'planned',
       readyToApply: true,
@@ -68,8 +68,7 @@ describe('mcv capture', () => {
         defaultSelected: true,
       })],
     });
-    expect(JSON.stringify(plan)).toContain('${env:API_TOKEN}');
-    expect(JSON.stringify(plan)).not.toContain('must-not-leak');
+    expect(JSON.stringify(plan)).toContain('must-not-leak');
     expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
     expect(readFileIfPresent(path.join(stateRoot, 'mcv', 'config.json'))).toBeUndefined();
   });
@@ -86,8 +85,7 @@ describe('mcv capture', () => {
     expect(output).toContain(`Capture Plan: ${repositoryPath}`);
     expect(output).toContain('Claude Code / File');
     expect(output).toContain('[add] settings.json');
-    expect(output).toContain('${env:API_TOKEN}');
-    expect(output).not.toContain('must-not-leak');
+    expect(output).toContain('must-not-leak');
     expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
   });
 
@@ -103,7 +101,7 @@ describe('mcv capture', () => {
     expect(console.log).toHaveBeenCalledOnce();
     const result = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(result).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'capture',
       status: 'succeeded',
       data: { appliedChangeIds: [expect.any(String)] },
@@ -148,7 +146,7 @@ describe('mcv capture', () => {
     expect(fs.readFileSync(repositoryRules, 'utf8')).toBe('# Keep until reviewed\n');
   });
 
-  it('previews only sanitized content and does not write when the user declines', async () => {
+  it('previews faithful content and does not write when the user declines', async () => {
     const confirmCapture = vi.fn().mockResolvedValue(false);
 
     await createProgram(
@@ -157,8 +155,7 @@ describe('mcv capture', () => {
     ).parseAsync(['node', 'mcv', 'capture']);
 
     const preview = vi.mocked(console.log).mock.calls.flat().join('\n');
-    expect(preview).toContain('${env:API_TOKEN}');
-    expect(preview).not.toContain('must-not-leak');
+    expect(preview).toContain('must-not-leak');
     expect(confirmCapture).toHaveBeenCalledOnce();
     expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
   });
@@ -207,14 +204,13 @@ describe('mcv capture', () => {
         path.join(repositoryPath, 'ide', 'claude-code', 'native', 'settings.json'),
         'utf8',
       ),
-    ).toContain('${env:API_TOKEN}');
+    ).toContain('must-not-leak');
     const mcpRegistry = fs.readFileSync(
       path.join(repositoryPath, 'common', 'mcp.yaml'),
       'utf8',
     );
     expect(mcpRegistry).toContain('${HOME}\\bin\\server.exe');
-    expect(mcpRegistry).toContain('${env:API_KEY}');
-    expect(mcpRegistry).not.toContain('must-not-leak');
+    expect(mcpRegistry).toContain('apiKey: must-not-leak');
     expect(mcpRegistry).not.toContain('projects:');
   });
 
@@ -249,7 +245,7 @@ describe('mcv capture', () => {
 
     expect(
       JSON.parse(fs.readFileSync(path.join(nativeDirectory, 'settings.json'), 'utf8')),
-    ).toEqual({ repositoryOnly: true, theme: 'dark', apiToken: '${env:API_TOKEN}' });
+    ).toEqual({ repositoryOnly: true, theme: 'dark', apiToken: 'must-not-leak' });
     const mcpRegistry = fs.readFileSync(
       path.join(repositoryPath, 'common', 'mcp.yaml'),
       'utf8',
@@ -261,7 +257,7 @@ describe('mcv capture', () => {
   it('captures Gemini merged settings while preserving repository-only fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 2\nrepositoryId: test\ninitializedAt: test\nsecurity: { scanSecrets: true, allowPlaintextSecrets: false }\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 3\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
     );
     const geminiRoot = path.join(homeDir, '.gemini');
     fs.mkdirSync(geminiRoot, { recursive: true });
@@ -306,7 +302,7 @@ describe('mcv capture', () => {
   it('structurally merges captured Codex TOML with repository-native fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 2\nrepositoryId: test\ninitializedAt: test\nsecurity: { scanSecrets: true, allowPlaintextSecrets: false }\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 3\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
     );
     const codexRoot = path.join(homeDir, '.codex');
     fs.mkdirSync(codexRoot, { recursive: true });
@@ -333,10 +329,9 @@ describe('mcv capture', () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 2',
+        'schemaVersion: 3',
         'repositoryId: test',
         'initializedAt: test',
-        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
         'capture: { preserveUnknownNativeFields: true }',
         'deploy: { backupBeforeWrite: true, useSymlinks: false }',
         'targets:',
@@ -375,10 +370,9 @@ describe('mcv capture', () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 2',
+        'schemaVersion: 3',
         'repositoryId: test',
         'initializedAt: test',
-        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
         'capture: { preserveUnknownNativeFields: true }',
         'deploy: { backupBeforeWrite: true, useSymlinks: false }',
         'targets:',

@@ -83,7 +83,7 @@ export interface ShellDependencies {
     plan: CapturePlan,
     selection: {
       changeIds: string[];
-      confirmedIssueCodes?: string[];
+      confirmedIssueIds?: string[];
     },
   ) => Promise<CaptureResult>;
   recordCaptureSuccess?: (context: DeviceContext) => void;
@@ -93,7 +93,7 @@ export interface ShellDependencies {
     plan: DeployPlan,
     selection: {
       changeIds: string[];
-      confirmedIssueCodes?: string[];
+      confirmedIssueIds?: string[];
     },
   ) => Promise<DeployResult>;
   createRestorePlan?: (context: DeviceContext) => RestorePlan;
@@ -342,7 +342,8 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
       workflow.plan,
       {
         changeIds: workflow.selectedIds,
-        confirmedIssueCodes: workflow.confirmedIssueCodes,
+        confirmedIssueIds: workflow.confirmedIssueIds,
+        decisions: workflow.decisions,
       },
     ).then(
       (result) => {
@@ -460,7 +461,7 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
       workflow.plan,
       {
         changeIds: workflow.selectedIds,
-        confirmedIssueCodes: workflow.confirmedIssueCodes,
+        confirmedIssueIds: workflow.confirmedIssueIds,
       },
     ).then(
       (result) => {
@@ -477,6 +478,7 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
                 {
                   severity: 'warning',
                   code: 'capture.stateRecordFailed',
+                  confirmationId: 'capture-warning-state-record-failed',
                   message: 'Capture succeeded, but local operation history could not be updated.',
                 },
               ],
@@ -725,6 +727,16 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
         && (intent.type === 'back' || intent.type === 'cancel')
       ) {
         dispatch({ type: 'deploy.back' });
+        return;
+      }
+      if (deployWorkflow?.status === 'decision') {
+        if (intent.type === 'toggle' || intent.type === 'open') {
+          dispatch({ type: 'deploy.chooseDecision' });
+        }
+        else if (intent.type === 'confirm') dispatch({ type: 'deploy.continue' });
+        else if (intent.type === 'back' || intent.type === 'cancel') {
+          dispatch({ type: 'deploy.back' });
+        }
         return;
       }
       if (deployWorkflow?.status === 'confirmation') {

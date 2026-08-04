@@ -1,4 +1,4 @@
-export const OPERATION_SCHEMA_VERSION = 1 as const;
+export const OPERATION_SCHEMA_VERSION = 2 as const;
 
 export type OperationName =
   | 'discover'
@@ -18,12 +18,17 @@ export type IssueSeverity =
   | 'decisionRequired'
   | 'error';
 
-export interface Issue {
-  severity: IssueSeverity;
+interface IssueDetails {
   code: string;
+  decisionId?: string;
   message: string;
   details?: string;
 }
+
+export type Issue = IssueDetails & (
+  | { severity: 'warning'; confirmationId: string }
+  | { severity: Exclude<IssueSeverity, 'warning'>; confirmationId?: never }
+);
 
 export interface McvError {
   code: string;

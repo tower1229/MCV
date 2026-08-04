@@ -7,7 +7,6 @@ import {
 import {
   inspectManagedSkillDrift,
   isPathCoveredByManagedSkillLayout,
-  resolveSkillPackageStorePath,
   type ContentDriftEntry,
   type TopologyDriftEntry,
 } from '../core/managed-skill-layout.js';
@@ -21,6 +20,7 @@ import {
   createDeployPlan,
   type DeployChange,
   type DeployLinkOutcome,
+  type DeployPlan,
 } from './deploy.js';
 import {
   OPERATION_SCHEMA_VERSION,
@@ -48,6 +48,9 @@ export interface PendingDeploymentSummary {
   modify: number;
   delete: number;
   total: number;
+  recommended: number;
+  optional: number;
+  advancedCleanupExcluded: number;
 }
 
 export interface LocalStateFileStatus {
@@ -86,13 +89,14 @@ export interface StatusEnvironmentSummary {
   ideSupport: IdeSupport[];
 }
 
-export type StatusReport = Report<DeployChange> & {
+export type StatusReport = Omit<Report<DeployChange>, 'changes'> & {
   operation: 'status';
   repository: RepositoryStatusSummary;
   pendingDeployment: PendingDeploymentSummary;
   postDeployLocalState: PostDeployLocalStateSummary;
   environment: StatusEnvironmentSummary;
   linkOutcomes: DeployLinkOutcome[];
+  linkFacts: DeployPlan['linkFacts'];
   lastOperation: ReturnType<typeof readState>['lastOperation'] | null;
 };
 
@@ -123,8 +127,8 @@ export async function inspectStatus(context: DeviceContext): Promise<StatusRepor
       schemaVersion: repositoryReport.repositorySchemaVersion ?? manifest.schemaVersion,
       ...(repositoryReport.git ? { git: repositoryReport.git } : {}),
     },
-    changes,
     linkOutcomes: deployPlan.linkOutcomes,
+    linkFacts: deployPlan.linkFacts,
     pendingDeployment: summarizePendingDeployment(changes),
     postDeployLocalState: summarizePostDeployLocalState(state),
     environment: {
@@ -138,27 +142,54 @@ export async function inspectStatus(context: DeviceContext): Promise<StatusRepor
 }
 
 function summarizePendingDeployment(changes: DeployChange[]): PendingDeploymentSummary {
-  const summary: PendingDeploymentSummary = { add: 0, modify: 0, delete: 0, total: 0 };
-  const skillPackages = new Map<string, DeployChange['change']>();
+  const summary: PendingDeploymentSummary = {
+    add: 0,
+    modify: 0,
+    delete: 0,
+    total: 0,
+    recommended: 0,
+    optional: 0,
+    advancedCleanupExcluded: 0,
+  };
+  const standardChanges = new Map<string, {
+    change: DeployChange['change'];
+    defaultSelected: boolean;
+  }>();
+  const cleanupChanges = new Set<string>();
   for (const change of changes) {
-    if (!change.defaultSelected) continue;
+    const packageKey = change.capability === 'skills'
+      ? change.owner === 'canonical-store'
+        ? undefined
+        : [change.ide, change.surface, change.name].join(':')
+      : change.id;
+    if (change.group === 'advanced') {
+      cleanupChanges.add(packageKey ?? change.id);
+      continue;
+    }
+    if (!packageKey) continue;
     if (change.capability === 'skills') {
-      const packageKey = change.deploymentKind === 'physical-materialization'
-        ? resolveSkillPackageStorePath(change.targetPath)
-        : [change.owner, change.ide, change.surface, change.name, change.deploymentKind].join(':');
-      skillPackages.set(
+      const current = standardChanges.get(packageKey);
+      standardChanges.set(
         packageKey,
-        mergePendingChange(skillPackages.get(packageKey), change.change),
+        {
+          change: mergePendingChange(current?.change, change.change),
+          defaultSelected: current?.defaultSelected === true || change.defaultSelected,
+        },
       );
       continue;
     }
-    summary[change.change] += 1;
-    summary.total += 1;
+    standardChanges.set(packageKey, {
+      change: change.change,
+      defaultSelected: change.defaultSelected,
+    });
   }
-  for (const change of skillPackages.values()) {
+  for (const { change, defaultSelected } of standardChanges.values()) {
     summary[change] += 1;
     summary.total += 1;
+    if (defaultSelected) summary.recommended += 1;
+    else summary.optional += 1;
   }
+  summary.advancedCleanupExcluded = cleanupChanges.size;
   return summary;
 }
 

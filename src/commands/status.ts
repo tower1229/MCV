@@ -16,7 +16,7 @@ export async function showStatus(
   options: StatusOptions = {},
 ): Promise<StatusReport> {
   const report = await inspectStatus(context);
-  if (options.json) console.log(renderJson({ ...report, changes: [] }));
+  if (options.json) console.log(renderJson(report));
   else for (const line of renderStatusPlain(report)) console.log(line);
   return report;
 }

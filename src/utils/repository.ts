@@ -6,11 +6,11 @@ import { isRecord } from './objects.js';
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
 import type { DeviceContext } from '../adapters/types.js';
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 let manifestValidator: ValidateFunction | undefined;
 
 export interface McvManifest {
-  schemaVersion: 2;
+  schemaVersion: 3;
   repositoryId: string;
   initializedAt: string;
   targets: {
@@ -22,7 +22,6 @@ export interface McvManifest {
     };
   };
   variables: Record<string, unknown>;
-  security: { scanSecrets: true; allowPlaintextSecrets: false };
   capture: { preserveUnknownNativeFields: boolean };
   deploy: { backupBeforeWrite: true; useSymlinks: boolean };
 }

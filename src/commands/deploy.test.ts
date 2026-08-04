@@ -24,10 +24,9 @@ describe('mcv deploy', () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 2',
+        'schemaVersion: 3',
         'repositoryId: test',
         'initializedAt: test',
-        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
         'capture: { preserveUnknownNativeFields: true }',
         'targets:',
         '  claudeCode:',
@@ -114,7 +113,7 @@ describe('mcv deploy', () => {
     expect(vi.mocked(console.log)).toHaveBeenCalledOnce();
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0][0]))).toEqual(
       expect.objectContaining({
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'deploy',
         status: 'planned',
         repositoryPath,
@@ -292,7 +291,7 @@ describe('mcv deploy', () => {
   it('prunes only exact duplicate Codex skills from the legacy directory', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 2\nrepositoryId: test\ninitializedAt: test\nsecurity: { scanSecrets: true, allowPlaintextSecrets: false }\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 3\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
     );
     const canonicalSkill = path.join(repositoryPath, 'common', 'skills', 'grill-me');
     fs.mkdirSync(path.join(canonicalSkill, 'references'), { recursive: true });
@@ -501,10 +500,9 @@ describe('mcv deploy', () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 2',
+        'schemaVersion: 3',
         'repositoryId: test',
         'initializedAt: test',
-        'security: { scanSecrets: true, allowPlaintextSecrets: false }',
         'capture: { preserveUnknownNativeFields: true }',
         'targets:',
         '  claudeCode:',
@@ -584,7 +582,7 @@ describe('mcv deploy', () => {
   it('deploys Gemini merged settings without replacing unknown local fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 2\nrepositoryId: test\ninitializedAt: test\nsecurity: { scanSecrets: true, allowPlaintextSecrets: false }\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 3\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
     );
     const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native');
     fs.mkdirSync(nativeRoot, { recursive: true });
@@ -626,7 +624,7 @@ describe('mcv deploy', () => {
   it('deploys Codex canonical content and preserves unknown TOML fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 2\nrepositoryId: test\ninitializedAt: test\nsecurity: { scanSecrets: true, allowPlaintextSecrets: false }\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 3\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
     );
     const nativeRoot = path.join(repositoryPath, 'ide', 'codex', 'native');
     fs.mkdirSync(nativeRoot, { recursive: true });

@@ -3,6 +3,17 @@ import * as path from 'path';
 import { createAdapterDefinitions } from '../adapters/index.js';
 import { OPERATION_SCHEMA_VERSION, } from './contracts.js';
 import { readManifest } from '../utils/repository.js';
+const INTERPRETED_NATIVE_CONFIG_PATHS = [
+    'ide/codex/native/config.toml',
+    'ide/claude-code/native/settings.json',
+    'ide/claude-code/native/.claude.json',
+    'ide/gemini/native/gemini-cli/settings.json',
+    'ide/gemini/native/antigravity/config.json',
+    'ide/gemini/native/antigravity/mcp_config.json',
+    'ide/gemini/native/antigravity/cli-settings.json',
+    'ide/gemini/native/antigravity/ide-settings.json',
+    'ide/gemini/native/antigravity/keybindings.json',
+];
 export async function inspectEnvironment(context, repositoryPath = null) {
     const environments = await Promise.all(createAdapterDefinitions().map(async ({ targetId, adapter }) => {
         const [ide, configFiles] = await Promise.all([
@@ -47,7 +58,8 @@ function findMissingVariables(repositoryPath, manifest, context) {
         ...Object.keys(context.variables ?? {}),
         ...availableManifestVariableNames(manifest.variables, context.platform),
     ]);
-    visitRepositoryTextFiles(repositoryPath, new Set([path.resolve(repositoryPath, 'common', 'skills')]), (content) => {
+    for (const filePath of interpretedConfigurationFiles(repositoryPath, context.platform)) {
+        const content = fs.readFileSync(filePath, 'utf8');
         for (const match of content.matchAll(/\$\{env:([A-Z][A-Z0-9_]*)\}/g)) {
             if (!context.env[match[1]])
                 missing.add(match[1]);
@@ -56,7 +68,7 @@ function findMissingVariables(repositoryPath, manifest, context) {
             if (!availablePortable.has(match[1]))
                 missing.add(match[1]);
         }
-    });
+    }
     return [...missing].sort();
 }
 function availableManifestVariableNames(variables, platform) {
@@ -72,18 +84,26 @@ function availableManifestVariableNames(variables, platform) {
         return [];
     });
 }
-function visitRepositoryTextFiles(directory, excludedDirectories, visit) {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-        if (entry.name === '.git' || entry.name === 'node_modules')
-            continue;
-        const entryPath = path.join(directory, entry.name);
-        if (entry.isDirectory()) {
-            if (!excludedDirectories.has(path.resolve(entryPath))) {
-                visitRepositoryTextFiles(entryPath, excludedDirectories, visit);
-            }
-        }
-        else if (entry.isFile() && /\.(?:json|ya?ml|toml|md)$/i.test(entry.name)) {
-            visit(fs.readFileSync(entryPath, 'utf8'));
-        }
+function interpretedConfigurationFiles(repositoryPath, platform) {
+    const platformDirectory = platform === 'win32' ? 'windows' : 'macos';
+    const overrideRoot = path.join(repositoryPath, 'overrides', platformDirectory);
+    const files = new Set();
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    if (fs.existsSync(manifestPath))
+        files.add(manifestPath);
+    const commonMcp = path.join(repositoryPath, 'common', 'mcp.yaml');
+    const overrideMcp = path.join(overrideRoot, 'common', 'mcp.yaml');
+    if (fs.existsSync(overrideMcp))
+        files.add(overrideMcp);
+    else if (fs.existsSync(commonMcp))
+        files.add(commonMcp);
+    for (const relativePath of INTERPRETED_NATIVE_CONFIG_PATHS) {
+        const override = path.join(overrideRoot, relativePath);
+        const base = path.join(repositoryPath, relativePath);
+        if (fs.existsSync(override))
+            files.add(override);
+        else if (fs.existsSync(base))
+            files.add(base);
     }
+    return [...files].sort();
 }

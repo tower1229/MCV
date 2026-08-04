@@ -1,6 +1,6 @@
 import * as path from 'path';
 import { deployPathExists, hashDeviceTopologyNode, } from '../core/canonical-skill-device-layout.js';
-import { inspectManagedSkillDrift, isPathCoveredByManagedSkillLayout, resolveSkillPackageStorePath, } from '../core/managed-skill-layout.js';
+import { inspectManagedSkillDrift, isPathCoveredByManagedSkillLayout, } from '../core/managed-skill-layout.js';
 import { readManifest, resolveBoundRepository, } from '../utils/repository.js';
 import { readState } from '../utils/state.js';
 import { createDeployPlan, } from './deploy.js';
@@ -32,8 +32,8 @@ export async function inspectStatus(context) {
             schemaVersion: repositoryReport.repositorySchemaVersion ?? manifest.schemaVersion,
             ...(repositoryReport.git ? { git: repositoryReport.git } : {}),
         },
-        changes,
         linkOutcomes: deployPlan.linkOutcomes,
+        linkFacts: deployPlan.linkFacts,
         pendingDeployment: summarizePendingDeployment(changes),
         postDeployLocalState: summarizePostDeployLocalState(state),
         environment: {
@@ -46,25 +46,51 @@ export async function inspectStatus(context) {
     };
 }
 function summarizePendingDeployment(changes) {
-    const summary = { add: 0, modify: 0, delete: 0, total: 0 };
-    const skillPackages = new Map();
+    const summary = {
+        add: 0,
+        modify: 0,
+        delete: 0,
+        total: 0,
+        recommended: 0,
+        optional: 0,
+        advancedCleanupExcluded: 0,
+    };
+    const standardChanges = new Map();
+    const cleanupChanges = new Set();
     for (const change of changes) {
-        if (!change.defaultSelected)
-            continue;
-        if (change.capability === 'skills') {
-            const packageKey = change.deploymentKind === 'physical-materialization'
-                ? resolveSkillPackageStorePath(change.targetPath)
-                : [change.owner, change.ide, change.surface, change.name, change.deploymentKind].join(':');
-            skillPackages.set(packageKey, mergePendingChange(skillPackages.get(packageKey), change.change));
+        const packageKey = change.capability === 'skills'
+            ? change.owner === 'canonical-store'
+                ? undefined
+                : [change.ide, change.surface, change.name].join(':')
+            : change.id;
+        if (change.group === 'advanced') {
+            cleanupChanges.add(packageKey ?? change.id);
             continue;
         }
-        summary[change.change] += 1;
-        summary.total += 1;
+        if (!packageKey)
+            continue;
+        if (change.capability === 'skills') {
+            const current = standardChanges.get(packageKey);
+            standardChanges.set(packageKey, {
+                change: mergePendingChange(current?.change, change.change),
+                defaultSelected: current?.defaultSelected === true || change.defaultSelected,
+            });
+            continue;
+        }
+        standardChanges.set(packageKey, {
+            change: change.change,
+            defaultSelected: change.defaultSelected,
+        });
     }
-    for (const change of skillPackages.values()) {
+    for (const { change, defaultSelected } of standardChanges.values()) {
         summary[change] += 1;
         summary.total += 1;
+        if (defaultSelected)
+            summary.recommended += 1;
+        else
+            summary.optional += 1;
     }
+    summary.advancedCleanupExcluded = cleanupChanges.size;
     return summary;
 }
 function mergePendingChange(current, next) {

@@ -30,7 +30,7 @@ TTY 中执行 `mcv` 打开首页；执行任一业务子命令则作为深链接
 14. As an MCV user, I want Overview to distinguish Pending Deployment Changes from post-deploy local changes, so that Repository updates are not confused with Drift.
 15. As an MCV user, I want Overview to calculate a read-only Deploy Plan asynchronously, so that I can see pending work without triggering Capture or writes.
 16. As an MCV user, I want environment and IDE support shown on Overview, so that missing variables and unavailable surfaces are visible before deployment.
-17. As an MCV user, I want Capture previews to contain only sanitized and parameterized content, so that previewing a change cannot expose raw secrets.
+17. As an MCV user, I want Capture previews to show the faithful, path-parameterized content that will be written, so that plaintext and `${env:*}` choices remain under my control.
 18. As an MCV user, I want Capture selection grouped by IDE and then by file, Skill, or MCP, so that I can accept only the configuration I intend to store.
 19. As an MCV user, I want safe managed-source conflicts resolved deterministically and only ambiguous conflicts to require choosing an authoritative source or skipping the item, so that routine duplicates do not interrupt Capture and unsafe guesses are still prevented.
 20. As an MCV user, I want Repository deletion candidates unselected by default, so that a device-side deletion is not silently propagated.
@@ -80,11 +80,14 @@ TTY 中执行 `mcv` 打开首页；执行任一业务子命令则作为深链接
 - Every Plan carries an opaque operation ID and source/target precondition hashes. Apply validates the operation ID, selection, and hashes and requires regeneration after any mismatch.
 - Selection contains only IDs from the Plan. Interfaces cannot construct target paths or arbitrary write requests.
 - Issues use four severities: `notice`, `warning`, `decisionRequired`, and `error`. Only `notice` is permitted in `--yes` execution.
-- `--yes` performs Plan generation and Apply in one process and rejects incomplete, ambiguous, destructive, or unsafe execution before the first write.
+- `--yes` performs Plan generation and Apply in one process and rejects warnings, unresolved decisions, deletions, and topology changes before the first write.
 - Deletions are never selected by default and are never applied by `--yes`.
-- Capture Diff uses only processed, sanitized, parameterized content. Binary content is represented by metadata rather than dumped to the screen.
+- Capture Diff shows faithful path-parameterized text, including plaintext keys when present. Binary content is represented by metadata rather than dumped to the screen.
 - Capture resolves safe source differences before presenting the Plan: Canonical Rules merge by deduplicated Markdown blocks with existing Repository content first, and conflicting Skill packages select the copy with the newest included-file modification time. Ties are deterministic. Ambiguous MCP core conflicts remain `decisionRequired`.
-- Capture groups IDE Skill projections by verified physical package identity. Several managed aliases of one physical package produce one Capture candidate, one sanitized preview, and one summary contribution. Device projection links are topology metadata and are not copied into the Repository portable Skill package; symbolic links inside that package remain rejected. Capture selection, Diff, plain text, and JSON identify contributing IDE projections without duplicating the package change. A link or physical-identity change between Plan review and Apply invalidates the Plan.
+- Capture groups IDE Skill projections by verified physical package identity. Several managed aliases of one physical package produce one Capture candidate, one faithful preview, and one summary contribution. Device projection links are topology metadata and are not copied into the Repository portable Skill package; symbolic links inside that package remain rejected. Capture selection, Diff, plain text, and JSON identify contributing IDE projections without duplicating the package change. A link or physical-identity change between Plan review and Apply invalidates the Plan.
+- Core emits the unique `CanonicalSkillLinkFact` model consumed by Issues, Overview, and Deploy. Per-package divergent external links require Preserve or Replace; shared-root divergence permits only explicit Preserve; dangling, cycle, unclassified, physical-target conflict, and Canonical Store divergence are errors. Replace backs up and removes only the link node and never writes through the external target.
+- Every warning has a stable unique `confirmationId`; `code` identifies only its category. Capture and Deploy selections carry `confirmedIssueIds`.
+- Pending Deployment counts user actions: ordinary changes individually, Skills by `(IDE, Surface, package)`, default-unselected topology migration as optional, and Advanced Cleanup only as `advancedCleanupExcluded`. Canonical materialization is not double-counted.
 - Deploy never exposes a global overwrite switch. Overlay ownership remains authoritative: managed fields may change, Native undeclared fields are preserved, and Local fields remain excluded.
 - Whole-file replacement is supported only for content fully owned by MCV and is labeled explicitly in the preview.
 - Successful partial Deploy updates Baseline Snapshot and managed inventory only for selected and successfully applied items while preserving valid prior state for unselected items.
@@ -98,7 +101,7 @@ TTY 中执行 `mcv` 打开首页；执行任一业务子命令则作为深链接
 - `status` and `discover` support `--plain` for one-shot English text and `--json` for a JSON Report. Those flags are mutually exclusive.
 - `--dry-run` and `--yes` are mutually exclusive. Invalid combinations exit with usage code 2.
 - JSON stdout contains exactly one document. Progress and diagnostics use stderr.
-- JSON payloads include schema version, operation, status, readiness, Repository path, changes, Issues, and next actions. Structured codes are stable; human messages remain English.
+- JSON payloads use operation schema v2 and include schema version, operation, status, readiness, Repository path, Issues, and next actions. Plans and Results carry their real changes; Status intentionally omits `changes` and exposes only `pendingDeployment`. Structured codes are stable; human messages remain English.
 - Exit codes are 0 for the requested result, 1 for execution/system failure, 2 for usage/input error, 3 for a non-interactive human-decision block, and 130 for user interruption. A successfully generated dry-run Plan exits 0 even when its payload is not ready to apply.
 - Color is automatic and respects `NO_COLOR`; no additional color flag is introduced, and color is never the only indicator.
 - All product UI text is English, including TUI, help, prompts, errors, progress, and result summaries. README remains Chinese. v0.1 does not introduce an i18n framework.
@@ -114,12 +117,12 @@ TTY 中执行 `mcv` 打开首页；执行任一业务子命令则作为深链接
 - Real PTY tests cover TTY detection, alternate-screen entry and exit, Overview navigation, subcommand deep links, Enter/Escape/`q`, Ctrl+C, uncaught failures, and cursor/input-mode restoration on Windows and macOS.
 - Non-PTY process tests cover `--dry-run`, `--yes`, `--plain`, `--json`, non-TTY help, mutually exclusive flags, stdout/stderr separation, and exit codes.
 - Operation Modules are the focused safety seam for cases that are expensive or nondeterministic through a PTY: Plan precondition races, source/target hash changes, transaction rollback, backup failure, restore conflict, selection validation, Baseline Snapshot updates, and managed inventory updates.
-- Existing command-level tests that invoke the Commander program are prior art for protocol assertions. Existing Capture, Deploy, Restore, Status, Init, migration, sanitization, Overlay, and adapter tests remain the prior art for filesystem and safety behavior.
+- Existing command-level tests that invoke the Commander program are prior art for protocol assertions. Existing Capture, Deploy, Restore, Status, Init, migration, path-parameterization, Overlay, and adapter tests remain the prior art for filesystem and transaction behavior.
 - Tests assert external structured values and resulting files, not private helper calls, React component trees, hook implementation, or directory layout.
 - TUI reducer tests cover state transitions independently of rendering: loading, ready, selection, warning confirmation, decision resolution, applying, success, failure, cancellation, and stale-plan regeneration.
-- Renderer snapshots cover common Windows Terminal and macOS widths, narrow single-column layouts, long paths, Unicode paths, missing color, and large change counts. Snapshots must not contain raw secrets.
+- Renderer snapshots cover common Windows Terminal and macOS widths, narrow single-column layouts, long paths, Unicode paths, missing color, large change counts, and faithful plaintext previews.
 - JSON contract tests assert exactly one parseable stdout document, schema version, stable codes, readiness, Issues, next actions, and no ANSI sequences.
-- Security tests verify that Capture Plan, Diff, errors, logs, snapshots, and JSON never contain source secret values.
+- Data-fidelity tests verify that supported plaintext configuration survives Capture, Repository, Deploy, Diff, plain text, and JSON unchanged; malformed-input diagnostics still avoid echoing unparsed source content.
 - Selection tests verify IDE/capability/file hierarchy, default-safe choices, unselected deletions, conflict resolution, partial Apply, and last-successful Deploy selection reuse.
 - Status tests separately verify Pending Deployment Changes against the current Repository and post-deploy local changes against Baseline Snapshot.
 - Restore tests verify selection of the latest complete backup, ignoring failed backups, Restore Conflict blocking, current-state backup, deletion restoration, and transactional rollback.
@@ -141,7 +144,7 @@ TTY 中执行 `mcv` 打开首页；执行任一业务子命令则作为深链接
 - Persisted, signed, replayable, or cross-process Plans.
 - Command palette, mouse-first navigation, or automatic Git init/commit/push/pull.
 - Git hosting integration or any required backup/transport provider.
-- Credential storage, environment-variable value entry, or secret synchronization.
+- Credential management or environment-variable value entry. MCV may transfer credential-like bytes as ordinary supported configuration but provides no secrecy guarantees.
 - Automatic IDE installation.
 - Full internationalization or bilingual interface text in v0.1.
 - CommonJS/ESM dual builds or a separate ESM-only TUI package.

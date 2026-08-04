@@ -7,7 +7,7 @@
 **项目属性：** 数字主权生态基础设施
 **目标平台：** macOS、Windows
 **首期目标 IDE：** Codex、Claude Code、Gemini (涵盖 Gemini CLI 和 Antigravity)
-**实现状态（2026-07-19）：** schema v2；Gemini 为单目标双 Surface；capture/deploy/status 共用 Adapter 扫描契约；支持 bind、迁移预览、事务部署与漂移保护恢复。
+**实现状态（2026-08-03）：** Repository schema v3、operation schema v2；Gemini 为单目标双 Surface；配置数据中立；支持 bind、v1/v2 显式迁移、事务部署、linked Skill 决策与漂移保护恢复。
 
 ---
 
@@ -420,13 +420,12 @@ files:
       windows: "%USERPROFILE%\\.example\\config.json"
     format: json
     portability: portable
-    secretPolicy: sanitize
+    contentPolicy: preserve
 
 exclude:
   - cache/**
   - logs/**
   - sessions/**
-  - credentials.json
 ```
 
 清单负责描述：
@@ -435,7 +434,7 @@ exclude:
 - 不同平台路径；
 - 是否收集；
 - 是否由 MCV 生成；
-- 是否需要脱敏；
+- 是否需要路径参数化；
 - 是否属于运行状态；
 - 部署目标位置。
 
@@ -678,35 +677,26 @@ MCV v0.1 必须处理：
 
 ---
 
-## 14. 密钥与敏感数据
+## 14. 配置数据中立与责任边界
 
-MCV 数据仓库中禁止保存明文密钥，无论用户采用哪种备份或版本管理方式。
+MCV 是忠实转移用户配置的数据工具，不是密钥管理器，也不是 Repository 内容安全边界。
 
-需要识别和排除：
+- 对 Adapter 或 Skill Surface 已发现的支持内容，字段值和文件原样保留；不按 `secret`、`token`、`.env`、credential、PEM/key 等名称替换、排除、遮罩或阻断。
+- 用户可以自行选择明文值或 `${env:NAME}`。选择环境变量引用时，Environment 报告缺失值；选择明文时不产生变量要求。
+- Capture/Deploy Diff、plain、TTY、JSON、Repository 和事务备份均可能包含明文密钥。
+- Repository 访问控制、加密、备份、传输和泄漏风险完全由用户负责。
+- 数据中立不扩大收集范围：MCV 仍只解释 Adapter/Skill 声明的内容，不递归收集任意 HOME 文件。
+- MCV 仍负责事务、备份、路径所有权、不写穿外部链接、包内 symlink 拒绝和失败回滚。
 
-- API Key；
-- Bearer Token；
-- OAuth Token；
-- Cookie；
-- 密码；
-- SSH 私钥；
-- 认证文件；
-- 内网凭据；
-- 数据库连接密码。
+Repository schema v3 删除 `security` 字段。v2→v3 只升级版本并删除该字段，不修改配置内容；v1→v3 在既有布局规范化后执行同一删除。旧 schema 在迁移前不得执行普通业务操作。
 
-v0.1 的脱敏采取简单的两层策略：
-1. 文件名黑名单：硬编码常见敏感文件（如 `.env`, `id_rsa`, `credentials.json` 等）。
-2. 字段名匹配：对 JSON/YAML 中 key 包含 `secret`、`token`、`password` 等关键字的值，替换为引用：
+Operation schema v2 的附加契约：
 
-```text
-${env:OPENAI_API_KEY}
-```
-
-不集成外部正则扫描或专业泄漏工具。部署时，如果缺少所需变量，应提示用户设置，不得静默写入空值。
-
-MCV 的最低安全保障为：
-
-> 预览、备份、脱敏。
+- Capture summary 不再包含敏感字段计数；Status JSON 不包含 `changes`。
+- 每个 warning 使用唯一稳定的 `confirmationId`，`code` 只表示类别；selection 使用 `confirmedIssueIds`。
+- Pending 输出 `add/modify/delete/total/recommended/optional/advancedCleanupExcluded`。Skill 按 `(IDE, Surface, package)` 聚合，Canonical materialization 不重复计数。
+- Environment 只扫描 MCV 实际解释的 manifest、MCP 和 Native structured configuration，不扫描 Rules、Skills、references 或普通 Markdown。
+- linked Skill 由核心 `CanonicalSkillLinkFact` 统一表达。per-package divergent 外部链接要求 Preserve/Replace；shared-root divergent 只能 Preserve；dangling、cycle、unclassified、physical-target-conflict 和 Canonical Store divergent 为 error。Replace 只移除链接节点，绝不写穿外部目标，且 `--yes` 始终阻断。
 
 ---
 
@@ -749,11 +739,8 @@ It will store:
 - Native AI IDE configuration
 - Platform overrides
 
-It will not store:
-- Plaintext secrets
-- Login credentials
-- Session history
-- Caches or logs
+It may store plaintext keys found in supported configuration.
+It will not collect undeclared session history, caches, logs, or arbitrary HOME files.
 ```
 
 用户确认后：
@@ -770,7 +757,7 @@ It will not store:
 
 ```yaml
 # mcv.yaml
-schemaVersion: 2
+schemaVersion: 3
 repositoryId: "稳定唯一标识"
 initializedAt: "ISO 时间"
 ```
@@ -989,16 +976,16 @@ Gemini Native Configuration (Gemini CLI and Antigravity surfaces)
    ↓
 发现变化
    ↓
-脱敏和参数化
+原值保留和路径参数化
    ↓
-候选变更 (已脱敏、已参数化的最终形式)
+候选变更 (原值保留、路径已参数化的最终形式)
    ↓
 人工确认
    ↓
 数据仓库
 ```
 
-Capture 呈现给用户确认的是处理后的“最终形态”（例如已经替换为 `${env:API_KEY}` 的内容），而非原始带有真实密钥的形态。
+Capture 呈现给用户确认的是将要写入的最终形态：已知绝对路径可以参数化，但明文或 `${env:API_KEY}` 的选择保持不变。
 
 ### 18.2 不允许直接写入
 
@@ -1358,7 +1345,7 @@ my-mcv/
 ## 25. `mcv.yaml` 建议结构
 
 ```yaml
-schemaVersion: 2
+schemaVersion: 3
 repositoryId: repository-unique-id
 initializedAt: "ISO 时间"
 
@@ -1377,10 +1364,6 @@ variables:
   PROJECTS_HOME:
     macos: "${HOME}/Projects"
     windows: "D:\\Projects"
-
-security:
-  scanSecrets: true
-  allowPlaintextSecrets: false
 
 capture:
   preserveUnknownNativeFields: true
@@ -1458,7 +1441,6 @@ packages/
 │  ├─ deploy/
 │  ├─ diff/
 │  ├─ backup/
-│  ├─ secrets/
 │  ├─ variables/
 │  └─ merge/
 │
@@ -1770,7 +1752,7 @@ MCV 默认遵循：
 - 稳定数据格式；
 - 完整跨平台测试矩阵；
 - 独立二进制分发；
-- 可选加密 Secret Provider；
+- 用户自选的外部加密、访问控制或 Secret Provider 集成（不改变 MCV 数据中立边界）；
 - 可选 GUI；
 - 配置模块市场或共享模板；
 - 更丰富的个人开发环境蓝图。
@@ -1791,7 +1773,7 @@ MCV v0.1 达到可发布状态，需要满足：
 8. Capture 不会未经确认修改仓库。
 9. 部署不会未经确认覆盖本机配置。
 10. 所有覆盖操作都有可恢复备份。
-11. 明文密钥不会进入数据仓库。
+11. 支持范围内的配置内容保持忠实，明文密钥可以进入数据仓库且责任边界有明确说明。
 12. 未知 IDE 原生字段不会因为 MCV 不认识而丢失。
 13. macOS 与 Windows 的核心流程行为一致。
 14. 仓库移动后可以重新绑定。

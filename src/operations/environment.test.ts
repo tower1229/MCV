@@ -30,7 +30,7 @@ describe('inspectEnvironment', () => {
     });
 
     expect(report).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'discover',
       status: 'reported',
       ready: true,
@@ -50,9 +50,10 @@ describe('inspectEnvironment', () => {
 
   it('reports configuration variables without treating Skill documentation as device setup', async () => {
     fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'example', 'references'), { recursive: true });
+    fs.mkdirSync(path.join(repositoryPath, 'common', 'rules'), { recursive: true });
     fs.mkdirSync(path.join(repositoryPath, 'ide', 'claude-code', 'native'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: repository-id',
       'initializedAt: 2026-08-03T00:00:00.000Z',
       'targets:',
@@ -62,7 +63,6 @@ describe('inspectEnvironment', () => {
       '    enabled: false',
       '    surfaces: { geminiCli: auto, antigravity: auto }',
       'variables: {}',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       '',
@@ -74,6 +74,14 @@ describe('inspectEnvironment', () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'common', 'skills', 'example', 'references', 'setup.md'),
       'Example only: `${env:DOCUMENTATION_TOKEN}`\n',
+    );
+    fs.writeFileSync(
+      path.join(repositoryPath, 'common', 'rules', 'example.json'),
+      '{"example":"${env:RULE_TOKEN}"}\n',
+    );
+    fs.writeFileSync(
+      path.join(repositoryPath, 'ide', 'claude-code', 'native', 'unmanaged.json'),
+      '{"example":"${env:UNKNOWN_NATIVE_TOKEN}"}\n',
     );
 
     const report = await inspectEnvironment({

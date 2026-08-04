@@ -13,7 +13,7 @@ Configuration that only has meaning within a single specific IDE, stored in its 
 _Avoid_: "IDE-specific", "per-IDE"
 
 **Local/Runtime（本机运行状态层）**:
-Device-bound data that must never enter the shared repository — credentials, caches, logs, session state, device identifiers.
+Device-bound data that an Adapter does not declare as transferable configuration — caches, logs, session state, device identifiers. Secret-like content is not automatically Local: a plaintext key inside supported configuration remains configuration data.
 _Avoid_: "temporary", "transient"
 
 **Repository（数据仓库）**:
@@ -29,7 +29,7 @@ The internal component of an Adapter responsible for semantic conversion between
 _Avoid_: "converter", "mapper"
 
 **NativeFileHandler**:
-The internal component of an Adapter responsible for path discovery, file read/write, secret filtering, and variable substitution — without understanding the semantic meaning of configuration fields.
+The internal component of an Adapter responsible for path discovery, file read/write, and path parameterization — without understanding the semantic meaning of configuration fields.
 _Avoid_: "file copier", "sync engine"
 
 **Overlay（字段级合并）**:
@@ -50,7 +50,7 @@ A local content or topology change made after the latest deployment that would b
 _Avoid_: "restore drift", "extra confirmation"
 
 **Capture（收集）**:
-The reverse operation that collects device-side configuration changes back into the Repository. Secret sanitization and path parameterization happen automatically as convention-based processing before the user sees any output. The user confirms the processed final form (what will actually be written to the repository), not the raw original values. Summary counts (e.g. "3 secrets excluded, 5 paths parameterized") are shown; per-field transformation details are available via `--verbose`.
+The reverse operation that collects supported device-side configuration changes back into the Repository. Configuration values are preserved faithfully; only known absolute paths are parameterized for portability. The user confirms the exact form that will be written, including any plaintext keys.
 _Avoid_: "sync back", "import"
 
 **Canonical Rules（通用规则）**:
@@ -70,12 +70,12 @@ A record of file hashes written to local device state after `init` or `deploy`, 
 _Avoid_: "deploy record", "sync state"
 
 **mcv.yaml（仓库清单）**:
-The single root-level file that identifies a directory as an MCV Repository and holds all repository-level configuration: identity (`repositoryId`, `schemaVersion`, `initializedAt`), target IDE declarations, variable definitions, security policy, and capture/deploy settings. Replaces the earlier `.mcv/repository.json` — no hidden metadata directory needed.
+The single root-level file that identifies a directory as an MCV Repository and holds all repository-level configuration: identity (`repositoryId`, `schemaVersion`, `initializedAt`), target IDE declarations, variable definitions, and capture/deploy settings. Schema v3 has no content-security policy field.
 _Avoid_: "config file", "settings file"
 
-**Secret Scanning（密钥扫描）**:
-V0.1 uses three layers: sensitive file/directory exclusion, structured sensitive-field replacement, and high-confidence plaintext-key detection in config and Skill text. Environment-variable reference fields are typed references rather than secret values. Unsafe candidates block capture instead of becoming warnings only.
-_Avoid_: "secret scanner", "credential vault"
+**Configuration Data Neutrality（配置数据中立）**:
+MCV does not recognize, replace, exclude, mask, or block plaintext keys in supported configuration. Users may choose plaintext or `${env:*}` references. Repository files, backups, terminal previews, and JSON can therefore contain plaintext keys; access control, encryption, transport, and disclosure risk belong to the user. This does not widen discovery beyond Adapter/Skill-declared content.
+_Avoid_: "secret scanner", "credential vault", "safe Repository"
 
 **Platform Override（平台覆盖）**:
 Platform differences are primarily handled by the variable system (`${HOME}`, `${PROJECTS_HOME}`, etc.). The `overrides/macos/` and `overrides/windows/` directories exist for truly platform-exclusive content (e.g. a Windows-only MCP server). When used, override files replace the corresponding base file entirely (file-level override) — no deep merge in v0.1.

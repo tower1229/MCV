@@ -16,7 +16,7 @@ describe('mcv status', () => {
     stateRoot = path.join(testRoot, 'device');
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: repository-id',
       'initializedAt: 2026-07-19T00:00:00.000Z',
       'targets:',
@@ -30,9 +30,6 @@ describe('mcv status', () => {
       '      geminiCli: auto',
       '      antigravity: auto',
       'variables: {}',
-      'security:',
-      '  scanSecrets: true',
-      '  allowPlaintextSecrets: false',
       'capture:',
       '  preserveUnknownNativeFields: true',
       'deploy:',
@@ -75,8 +72,8 @@ describe('mcv status', () => {
     expect(vi.mocked(console.log).mock.calls.map(([line]) => line)).toEqual([
       `Repository: ${repositoryPath}`,
       'Repository ID: repository-id',
-      'Repository schema: 2',
-      'Pending deployment: 0 changes (0 add, 0 modify, 0 delete)',
+      'Repository schema: 3',
+      'Pending deployment: 0 changes (0 add, 0 modify, 0 delete; 0 recommended, 0 optional; 0 Advanced Cleanup excluded)',
       'Post-deploy local state: 1 unchanged, 0 content Drift, 0 topology Drift, 1 Drift, 1 missing',
       'Environment: 0 missing variables',
       'IDE support:',
@@ -97,14 +94,21 @@ describe('mcv status', () => {
     expect(console.log).toHaveBeenCalledOnce();
     const report = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(report).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'status',
       status: 'reported',
       ready: true,
       repositoryPath,
-      repository: { path: repositoryPath, id: 'repository-id', schemaVersion: 2 },
-      changes: [],
-      pendingDeployment: { add: 0, modify: 0, delete: 0, total: 0 },
+      repository: { path: repositoryPath, id: 'repository-id', schemaVersion: 3 },
+      pendingDeployment: {
+        add: 0,
+        modify: 0,
+        delete: 0,
+        total: 0,
+        recommended: 0,
+        optional: 0,
+        advancedCleanupExcluded: 0,
+      },
       postDeployLocalState: {
         unchanged: 0,
         drift: 0,
@@ -136,7 +140,7 @@ describe('mcv status', () => {
 
     const output = String(vi.mocked(console.log).mock.calls.at(-1)?.[0]);
     const report = JSON.parse(output);
-    expect(report.changes).toEqual([]);
+    expect(report).not.toHaveProperty('changes');
     expect(report.pendingDeployment.total).toBeGreaterThan(0);
     expect(output).not.toContain('detail');
     expect(output.length).toBeLessThan(20_000);

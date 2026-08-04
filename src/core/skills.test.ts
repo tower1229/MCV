@@ -23,13 +23,16 @@ describe('Skill package collection', () => {
     ]));
   });
 
-  it('rejects mismatched names, plaintext secrets, and package-internal symlinks', () => {
+  it('rejects mismatched names and package-internal symlinks while preserving plaintext files', () => {
     const root = fs.mkdtempSync(path.join(process.cwd(), '.mcv-skills-')); roots.push(root);
     const mismatch = path.join(root, 'mismatch'); fs.mkdirSync(mismatch);
     fs.writeFileSync(path.join(mismatch, 'SKILL.md'), '---\nname: other\n---\n');
     const unsafe = path.join(root, 'unsafe'); fs.mkdirSync(unsafe);
     fs.writeFileSync(path.join(unsafe, 'SKILL.md'), '---\nname: unsafe\n---\n');
     fs.writeFileSync(path.join(unsafe, 'secret.txt'), 'token: ghp_abcdefghijklmnopqrstuvwxyz123456');
+    fs.writeFileSync(path.join(unsafe, '.env'), 'API_TOKEN=plain-token\n');
+    fs.writeFileSync(path.join(unsafe, 'credentials.json'), '{"apiKey":"plain-key"}\n');
+    fs.writeFileSync(path.join(unsafe, 'private.pem'), '-----BEGIN PRIVATE KEY-----\nplain-key\n');
     const linked = path.join(root, 'linked'); fs.mkdirSync(linked);
     fs.writeFileSync(path.join(linked, 'SKILL.md'), '---\nname: linked\n---\n');
     if (process.platform !== 'win32') {
@@ -37,9 +40,15 @@ describe('Skill package collection', () => {
     }
     const result = collectSkills([{ ide: 'test', surface: 'test', root }]);
     expect(result.packages.has('mismatch')).toBe(false);
-    expect(result.packages.has('unsafe')).toBe(false);
+    expect(result.packages.has('unsafe')).toBe(true);
+    expect(result.packages.get('unsafe')?.[0].files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ relativePath: 'secret.txt' }),
+      expect.objectContaining({ relativePath: '.env' }),
+      expect.objectContaining({ relativePath: 'credentials.json' }),
+      expect.objectContaining({ relativePath: 'private.pem' }),
+    ]));
     expect(result.warnings.join('\n')).toContain('does not match directory name');
-    expect(result.warnings.join('\n')).toContain('Blocked Skill file');
+    expect(result.warnings.join('\n')).not.toContain('Blocked Skill file');
     if (process.platform !== 'win32') {
       expect(result.packages.has('linked')).toBe(false);
       expect(result.warnings.join('\n')).toContain('portable Skill package');

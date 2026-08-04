@@ -95,6 +95,19 @@ function renderChange(change) {
     if (change.preview.kind === 'link') {
         lines.push(`    ${change.preview.targetPath} -> ${change.preview.linkTarget}`);
     }
+    else if (change.preview.kind === 'package') {
+        lines.push(`    ${change.preview.targetPath}: replace linked package node`);
+        for (const file of change.preview.files) {
+            if (file.kind === 'binary') {
+                lines.push(`      ${file.targetPath}: binary, ${file.bytes} bytes, sha256 ${file.sha256}`);
+            }
+            else {
+                lines.push(`      ${file.targetPath}:`);
+                for (const line of file.diff.split('\n'))
+                    lines.push(`        ${line}`);
+            }
+        }
+    }
     else if (change.preview.kind === 'binary') {
         lines.push(`    ${change.targetPath}: binary, ${change.preview.bytes} bytes, sha256 ${change.preview.sha256}`);
     }

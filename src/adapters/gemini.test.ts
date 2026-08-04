@@ -58,4 +58,30 @@ describe('GeminiAdapter', () => {
       servers: { local: { command: 'server', transport: 'stdio' } },
     });
   });
+
+  it('preserves credential-shaped and environment configuration fields verbatim', async () => {
+    const userRoot = path.join(homeDir, 'Library', 'Application Support', 'Antigravity', 'User');
+    fs.mkdirSync(userRoot, { recursive: true });
+    fs.writeFileSync(path.join(userRoot, 'settings.json'), JSON.stringify({
+      apiKey: 'plain-key',
+      oauth: { accessToken: 'plain-token' },
+      environmentVariables: { API_TOKEN: '${env:API_TOKEN}' },
+      'terminal.integrated.env.osx': { SERVICE_TOKEN: 'plain-service-token' },
+      windowState: { x: 10 },
+    }));
+    const adapter = new GeminiAdapter();
+    const context = { homeDir, platform: 'darwin' as const, env: {} };
+
+    const result = await adapter.capture(await adapter.discoverFiles(context), context);
+    const native = result.files.find(
+      (file) => file.repositoryPath === 'ide/gemini/native/antigravity/ide-settings.json',
+    );
+
+    expect(JSON.parse(native?.content.toString() ?? '')).toEqual({
+      apiKey: 'plain-key',
+      oauth: { accessToken: 'plain-token' },
+      environmentVariables: { API_TOKEN: '${env:API_TOKEN}' },
+      'terminal.integrated.env.osx': { SERVICE_TOKEN: 'plain-service-token' },
+    });
+  });
 });

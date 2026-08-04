@@ -64,7 +64,7 @@ describe('CodexAdapter', () => {
       servers: {
         local: {
           command: '${HOME}\\bin\\server.exe',
-          env: { API_TOKEN: '${env:API_TOKEN}' },
+          env: { API_TOKEN: 'real-token' },
           transport: 'stdio',
         },
       },

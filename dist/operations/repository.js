@@ -39,7 +39,7 @@ export function inspectRepository(context, explicitPath) {
     const inspectedSchemaVersion = identity.schemaVersion;
     if (inspectedSchemaVersion !== null
         && inspectedSchemaVersion !== CURRENT_SCHEMA_VERSION) {
-        const migratable = inspectedSchemaVersion === 1;
+        const migratable = inspectedSchemaVersion === 1 || inspectedSchemaVersion === 2;
         const code = migratable
             ? 'repository.migrationRequired'
             : 'repository.unsupportedSchema';
@@ -213,6 +213,7 @@ export function createInitPlan(context, repositoryPath = process.cwd()) {
     const issues = entries.length === 0 ? [] : [{
             severity: 'warning',
             code: 'repository.initTargetNotEmpty',
+            confirmationId: `repository-warning-${hashText(`init-target\0${resolvedPath}`).slice(0, 16)}`,
             message: 'The Init target contains existing files that MCV will leave unchanged.',
             details: `${entries.length} existing entr${entries.length === 1 ? 'y' : 'ies'}.`,
         }];
@@ -335,10 +336,10 @@ export function createMigrationPlan(context, repositoryPath = process.cwd()) {
             code: 'repository.invalidManifest',
             message: 'The selected directory does not contain a readable MCV Repository manifest.',
             technicalDetails: error instanceof Error ? error.message : String(error),
-            nextActions: ['Choose a Repository containing a schema v1 mcv.yaml manifest.'],
+            nextActions: ['Choose a Repository containing a supported older mcv.yaml manifest.'],
         });
     }
-    if (raw.schemaVersion !== 1) {
+    if (raw.schemaVersion !== 1 && raw.schemaVersion !== 2) {
         const current = raw.schemaVersion === CURRENT_SCHEMA_VERSION;
         return failed({
             code: current ? 'repository.migrationNotRequired' : 'repository.unsupportedSchema',
@@ -353,7 +354,7 @@ export function createMigrationPlan(context, repositoryPath = process.cwd()) {
     if (typeof raw.repositoryId !== 'string' || raw.repositoryId.length === 0) {
         return failed({
             code: 'repository.invalidManifest',
-            message: 'The schema v1 manifest does not contain a Repository ID.',
+            message: 'The older manifest does not contain a Repository ID.',
             nextActions: ['Repair repositoryId in mcv.yaml before migrating.'],
         });
     }
@@ -365,18 +366,20 @@ export function createMigrationPlan(context, repositoryPath = process.cwd()) {
             id: 'schema-version',
             kind: 'modify',
             path: manifestPath,
-            before: 1,
+            before: raw.schemaVersion,
             after: CURRENT_SCHEMA_VERSION,
         }];
-    for (const mapping of geminiLayoutMappings(resolvedPath)) {
-        if (fs.existsSync(mapping.sourcePath) && !fs.existsSync(mapping.targetPath)) {
-            changes.push({ id: mapping.id, kind: 'move', sourcePath: mapping.sourcePath, targetPath: mapping.targetPath });
+    if (raw.schemaVersion === 1) {
+        for (const mapping of geminiLayoutMappings(resolvedPath)) {
+            if (fs.existsSync(mapping.sourcePath) && !fs.existsSync(mapping.targetPath)) {
+                changes.push({ id: mapping.id, kind: 'move', sourcePath: mapping.sourcePath, targetPath: mapping.targetPath });
+            }
         }
-    }
-    const registryPath = path.join(resolvedPath, 'common', 'mcp.yaml');
-    const normalizedRegistry = readNormalizedMcpRegistry(registryPath);
-    if (normalizedRegistry !== undefined && normalizedRegistry !== fs.readFileSync(registryPath, 'utf8')) {
-        changes.push({ id: 'mcp-registry', kind: 'modify', path: registryPath });
+        const registryPath = path.join(resolvedPath, 'common', 'mcp.yaml');
+        const normalizedRegistry = readNormalizedMcpRegistry(registryPath);
+        if (normalizedRegistry !== undefined && normalizedRegistry !== fs.readFileSync(registryPath, 'utf8')) {
+            changes.push({ id: 'mcp-registry', kind: 'modify', path: registryPath });
+        }
     }
     return registerLifecyclePlan({
         schemaVersion: OPERATION_SCHEMA_VERSION,
@@ -406,11 +409,19 @@ export function applyMigrationPlan(context, plan) {
     }
     const repositoryPath = plan.repositoryPath;
     const backupRoot = path.join(path.dirname(getStateFilePath(context)), 'repository-backups');
+    const sourceSchemaVersion = plan.changes.find((change) => change.id === 'schema-version')?.before;
+    if (sourceSchemaVersion !== 1 && sourceSchemaVersion !== 2) {
+        return failedMigrationResult(repositoryPath, {
+            code: 'operation.invalidPlan',
+            message: 'The Migration Plan does not identify a supported source schema.',
+            nextActions: ['Generate and review a new Migration Plan.'],
+        });
+    }
     let backupPath;
     let backupVerified = false;
     try {
         fs.mkdirSync(backupRoot, { recursive: true });
-        const backupDirectory = fs.mkdtempSync(path.join(backupRoot, 'schema-v1-'));
+        const backupDirectory = fs.mkdtempSync(path.join(backupRoot, `schema-v${sourceSchemaVersion}-`));
         backupPath = path.join(backupDirectory, 'repository');
         fs.cpSync(repositoryPath, backupPath, { recursive: true, verbatimSymlinks: true });
         if (hashDirectory(backupPath) !== plan.preconditions.repository) {
@@ -419,10 +430,11 @@ export function applyMigrationPlan(context, plan) {
         backupVerified = true;
         const manifestPath = path.join(repositoryPath, 'mcv.yaml');
         const raw = yaml.parse(fs.readFileSync(manifestPath, 'utf8'));
-        if (!isRecord(raw) || raw.schemaVersion !== 1)
-            throw new Error('The Repository is no longer schema v1.');
-        const migrated = migrateV1Manifest(raw);
-        validateManifest(migrated, manifestPath);
+        if (!isRecord(raw) || (raw.schemaVersion !== 1 && raw.schemaVersion !== 2)) {
+            throw new Error('The Repository is no longer at the planned older schema.');
+        }
+        const migrated = migrateManifestToV3(raw);
+        validateManifest(structuredClone(migrated), manifestPath);
         for (const change of plan.changes) {
             if (change.kind === 'move' && change.sourcePath && change.targetPath) {
                 fs.mkdirSync(path.dirname(change.targetPath), { recursive: true });
@@ -469,7 +481,7 @@ export function applyMigrationPlan(context, plan) {
         nextActions: [],
         data: {
             repositoryId: manifest.repositoryId,
-            previousSchemaVersion: 1,
+            previousSchemaVersion: sourceSchemaVersion,
             repositorySchemaVersion: CURRENT_SCHEMA_VERSION,
             backupPath: backupPath,
             backupVerified: true,
@@ -490,7 +502,7 @@ export function createBindPlan(context, repositoryPath = process.cwd()) {
     const identity = manifestSnapshot.identity;
     if (identity.schemaVersion !== null
         && identity.schemaVersion !== CURRENT_SCHEMA_VERSION) {
-        const migratable = identity.schemaVersion === 1;
+        const migratable = identity.schemaVersion === 1 || identity.schemaVersion === 2;
         const code = migratable
             ? 'repository.migrationRequired'
             : 'repository.unsupportedSchema';
@@ -900,12 +912,16 @@ function createEmptyManifest(repositoryId, initializedAt) {
             },
         },
         variables: {},
-        security: { scanSecrets: true, allowPlaintextSecrets: false },
         capture: { preserveUnknownNativeFields: true },
         deploy: { backupBeforeWrite: true, useSymlinks: false },
     };
 }
-function migrateV1Manifest(raw) {
+function migrateManifestToV3(raw) {
+    if (raw.schemaVersion === 2) {
+        const migrated = { ...raw, schemaVersion: CURRENT_SCHEMA_VERSION };
+        delete migrated.security;
+        return migrated;
+    }
     const targets = isRecord(raw.targets) ? raw.targets : {};
     const gemini = isRecord(targets.gemini) ? targets.gemini : {};
     const migrated = {
@@ -930,7 +946,6 @@ function migrateV1Manifest(raw) {
             },
         },
         variables: isRecord(raw.variables) ? raw.variables : {},
-        security: { scanSecrets: true, allowPlaintextSecrets: false },
         capture: {
             preserveUnknownNativeFields: !isRecord(raw.capture)
                 || raw.capture.preserveUnknownNativeFields !== false,
@@ -939,6 +954,7 @@ function migrateV1Manifest(raw) {
     };
     delete migrated.includeRuntimeState;
     delete migrated.allowPlaintextSecrets;
+    delete migrated.security;
     return migrated;
 }
 function geminiLayoutMappings(repositoryPath) {

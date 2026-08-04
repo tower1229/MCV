@@ -1,6 +1,7 @@
 import { Box, Text, useWindowSize } from 'ink';
 import type { ReactNode } from 'react';
 import type { SkillSurfaceId } from '../adapters/types.js';
+import type { CanonicalSkillLinkFact } from '../core/canonical-skill-device-layout.js';
 import { displaySkillSurface } from '../core/skill-surfaces.js';
 import type { EnvironmentReport } from '../operations/environment.js';
 import type {
@@ -13,7 +14,6 @@ import { formatContributingProjections } from '../renderers/capture.js';
 import type { StatusReport } from '../operations/status.js';
 import type { RepositoryReport } from '../operations/repository.js';
 import type {
-  DeployLinkOutcome,
   DeployPlan,
   DeployPreview,
   DeployResult,
@@ -501,6 +501,7 @@ function pageTitle(state: ShellState): string {
     switch (page.workflow.status) {
       case 'selection': return 'Deploy · Select Changes';
       case 'diff': return 'Deploy · Diff';
+      case 'decision': return 'Deploy · Resolve Linked Skill';
       case 'confirmation': return 'Deploy · Confirm Apply';
       case 'applying': return 'Deploy · Applying';
       case 'regenerating': return 'Deploy · Regenerating';
@@ -579,6 +580,8 @@ function pageControls(
           ].join('\n');
       case 'diff':
         return '←/Escape Close Diff   q Quit   Ctrl+C Cancel';
+      case 'decision':
+        return '↑↓ Move   Space Choose   Enter Next   ←/Escape Back   q Quit';
       case 'confirmation':
         return terminalRows <= 12
           ? '↑↓/Pg Move   Home/End   Space Confirm   Enter Apply   ← Back   q Quit'
@@ -1147,11 +1150,15 @@ function createOverviewStatusViewModel(
       tone: pending.total > 0 ? 'warning' : 'muted',
       label: 'Pending Deployment Changes',
       state: pending.total > 0 ? 'Review' : 'None',
-      details: `${pending.total} changes (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete)`,
+      details: `${pending.total} changes (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete; ${pending.recommended} recommended, ${pending.optional} optional; ${pending.advancedCleanupExcluded} cleanup excluded)`,
     },
-    linkedSkills: summarizeLinkOutcomes(report.linkOutcomes).map((summary) => ({
+    linkedSkills: summarizeLinkFacts(report.linkFacts).map((summary) => ({
       key: `linked-skills:${summary.key}`,
-      tone: summary.status === 'satisfied-via-link' ? 'info' : 'warning',
+      tone: summary.severity === 'error'
+        ? 'error'
+        : summary.severity === 'notice'
+          ? 'info'
+          : 'warning',
       label: 'Linked Skills',
       state: summary.outcomeCount === 1
         ? summary.state
@@ -1214,7 +1221,7 @@ function createOverviewStatusViewModel(
     issues: report.issues
       .filter((issue) => !isAdvancedDeployIssue(issue.code))
       .map((issue) => ({
-      key: issue.code,
+      key: issue.confirmationId ?? issue.decisionId ?? issue.code,
       tone: issue.severity === 'error'
         ? 'error'
         : issue.severity === 'notice'
@@ -1233,80 +1240,68 @@ function createOverviewStatusViewModel(
 
 function isAdvancedDeployIssue(code: string): boolean {
   return code.startsWith('deploy.skillsLinked.')
-    || code.startsWith('deploy.unsafeDiffWithheld.')
     || code === 'deploy.legacyCodexSkillDuplicates';
 }
 
 interface LinkOutcomeSummary {
   key: string;
-  status: DeployLinkOutcome['status'];
-  ownership: DeployLinkOutcome['ownership'];
+  status: CanonicalSkillLinkFact['status'];
+  severity: CanonicalSkillLinkFact['severity'];
+  ownership: CanonicalSkillLinkFact['ownership'];
   surfaceLabel: string;
-  state: 'Satisfied via link' | 'Already satisfied projection' | 'Needs decision';
+  state: 'Satisfied via link' | 'Already satisfied projection' | 'Needs decision' | 'Preserve external' | 'Blocked';
   outcomeCount: number;
   packageCount: number;
   affectedFileCount: number;
+  pathMapping?: string;
 }
 
-function summarizeLinkOutcomes(
-  outcomes: DeployLinkOutcome[],
+function summarizeLinkFacts(
+  facts: CanonicalSkillLinkFact[],
 ): LinkOutcomeSummary[] {
-  const groups = new Map<string, DeployLinkOutcome[]>();
-  for (const outcome of outcomes) {
-    const surface = linkOutcomeSurface(outcome);
-    const key = outcome.status === 'blocked'
-      ? [
-          outcome.ownership,
-          outcome.status,
-          outcome.reason,
-          [...outcome.packageNames].sort().join(','),
-          [...(outcome.resolvedPaths ?? outcome.linkPaths)].sort().join(','),
-        ].join(':')
-      : `${outcome.ownership}:${outcome.status}:${surface}`;
-    const matching = groups.get(key) ?? [];
-    matching.push(outcome);
-    groups.set(key, matching);
+  const groups = new Map<string, CanonicalSkillLinkFact[]>();
+  for (const fact of facts) {
+    const surfaceLabel = fact.surfaces.length === 0
+      ? displaySkillSurface('canonical-store')
+      : fact.surfaces.map(({ surface }) => displaySkillSurface(surface)).join(' + ');
+    const key = fact.status === 'blocked'
+      ? fact.id
+      : `${fact.ownership}:${fact.status}:${fact.severity}:${surfaceLabel}`;
+    groups.set(key, [...(groups.get(key) ?? []), fact]);
   }
-  const physicalFacts = [...groups.entries()].map(([key, matching]): LinkOutcomeSummary => {
-    const { ownership, status } = matching[0];
-    const surfaces = [...new Set(matching.map(linkOutcomeSurface))];
-    const packageNames = new Set(matching.flatMap((outcome) => outcome.packageNames));
+  return [...groups.entries()].map(([key, matching]): LinkOutcomeSummary => {
+    const { ownership, status, severity } = matching[0];
+    const surfaces = [...new Set(matching.flatMap((fact) => fact.surfaces.map(({ surface }) => surface)))];
+    const packageNames = new Set(matching.flatMap((fact) => fact.packageNames));
     return {
       key,
       status,
+      severity,
       ownership,
-      surfaceLabel: surfaces.map(displaySkillSurface).join(' + '),
-      state: status === 'blocked'
-        ? 'Needs decision' as const
+      surfaceLabel: surfaces.length === 0
+        ? displaySkillSurface('canonical-store')
+        : surfaces.map(displaySkillSurface).join(' + '),
+      state: severity === 'error'
+        ? 'Blocked' as const
+        : severity === 'decisionRequired'
+          ? 'Needs decision' as const
+          : severity === 'warning'
+            ? 'Preserve external' as const
         : ownership === 'managed'
           ? 'Already satisfied projection' as const
           : 'Satisfied via link' as const,
       outcomeCount: status === 'blocked' ? 1 : matching.length,
       packageCount: packageNames.size,
       affectedFileCount: status === 'blocked'
-        ? Math.max(...matching.map((outcome) => outcome.affectedFileCount))
-        : matching.reduce((total, outcome) => total + outcome.affectedFileCount, 0),
+        ? Math.max(...matching.map((fact) => fact.affectedFileCount))
+        : matching.reduce((total, fact) => total + fact.affectedFileCount, 0),
+      ...(matching.length === 1
+        && matching[0].linkPaths.length === 1
+        && matching[0].resolvedPaths?.length === 1
+        ? { pathMapping: `${matching[0].linkPaths[0]} → ${matching[0].resolvedPaths[0]}` }
+        : {}),
     };
   });
-  const summaries = new Map<string, LinkOutcomeSummary>();
-  for (const fact of physicalFacts) {
-    const key = `${fact.ownership}:${fact.status}:${fact.surfaceLabel}`;
-    const current = summaries.get(key);
-    summaries.set(key, current
-      ? {
-          ...current,
-          outcomeCount: current.outcomeCount + fact.outcomeCount,
-          packageCount: current.packageCount + fact.packageCount,
-          affectedFileCount: current.affectedFileCount + fact.affectedFileCount,
-        }
-      : { ...fact, key });
-  }
-  return [...summaries.values()];
-}
-
-function linkOutcomeSurface(outcome: DeployLinkOutcome): SkillSurfaceId | 'canonical-store' {
-  if (outcome.owner === 'canonical-store') return 'canonical-store';
-  return outcome.surface;
 }
 
 function statusItemText(
@@ -1615,7 +1610,7 @@ function CaptureConfirmation({
 }): ReactNode {
   const warnings = captureWarnings(workflow.plan);
   const allConfirmed = warnings.every((warning) =>
-    workflow.confirmedIssueCodes.includes(warning.code));
+    workflow.confirmedIssueIds.includes(warning.confirmationId));
   const viewport = listViewport(
     warnings,
     workflow.warningCursor,
@@ -1629,7 +1624,7 @@ function CaptureConfirmation({
         <Text dimColor>  … {viewport.hiddenBefore} earlier</Text>
       )}
       {viewport.items.map(({ item: warning }, index) => {
-        const confirmed = workflow.confirmedIssueCodes.includes(warning.code);
+        const confirmed = workflow.confirmedIssueIds.includes(warning.confirmationId);
         const style = statusToneStyle(confirmed ? 'success' : 'warning');
         return (
           <Text
@@ -1684,6 +1679,8 @@ function DeployWorkflow({
       return <DeploySelection workflow={workflow} terminalRows={terminalRows} />;
     case 'diff':
       return <DeployDiff workflow={workflow} />;
+    case 'decision':
+      return <DeployDecision workflow={workflow} />;
     case 'confirmation':
       return (
         <DeployConfirmation
@@ -1718,6 +1715,43 @@ function DeployWorkflow({
   }
 }
 
+function DeployDecision({
+  workflow,
+}: {
+  workflow: Extract<DeployWorkflowState, { status: 'decision' }>;
+}): ReactNode {
+  const decision = workflow.plan.decisions[workflow.decisionIndex];
+  if (!decision) return null;
+  const labels = {
+    'preserve-external': 'Preserve external link and target',
+    'replace-with-repository': 'Replace link node with Repository version',
+  } as const;
+  return (
+    <Box flexDirection="column">
+      <StatusLine tone="warning" label="Needs decision">
+        divergent external Skill link
+      </StatusLine>
+      <Text>{workflow.decisionIndex + 1}/{workflow.plan.decisions.length} · {decision.packageNames.join(', ')}</Text>
+      {decision.linkPaths.map((linkPath) => (
+        <Text key={linkPath} wrap="truncate-middle">{linkPath}</Text>
+      ))}
+      <Text> </Text>
+      {decision.choices.map((choice, index) => {
+        const selected = workflow.decisions[decision.id] === choice;
+        return (
+          <Text key={choice} color={index === workflow.cursor ? 'cyan' : undefined}>
+            {index === workflow.cursor ? '›' : ' '} {selected ? '[x]' : '[ ]'} {labels[choice]}
+          </Text>
+        );
+      })}
+      <Text> </Text>
+      <Text dimColor>
+        Replace backs up and removes only the link node; it never writes through the external target.
+      </Text>
+    </Box>
+  );
+}
+
 function DeploySelection({
   workflow,
   terminalRows,
@@ -1730,10 +1764,12 @@ function DeploySelection({
   const advanced = workflow.plan.changes.filter(
     (change) => change.group === 'advanced',
   );
-  const linkOutcomeSummaries = summarizeLinkOutcomes(workflow.plan.linkOutcomes);
-  const linkOutcomeRows = workflow.plan.linkOutcomes.length === 1
-    ? 2
-    : linkOutcomeSummaries.length;
+  const linkOutcomeSummaries = summarizeLinkFacts(workflow.plan.linkFacts);
+  const showLinkPathMapping = linkOutcomeSummaries.length === 1;
+  const linkOutcomeRows = linkOutcomeSummaries.reduce(
+    (total, summary) => total + 1 + (showLinkPathMapping && summary.pathMapping ? 1 : 0),
+    0,
+  );
   const viewport = listViewport(
     visible,
     workflow.cursor,
@@ -1748,34 +1784,18 @@ function DeploySelection({
       <Text>
         {workflow.plan.changes.length} changes · {workflow.selectedIds.length} selected
       </Text>
-      {workflow.plan.linkOutcomes.length === 1 && workflow.plan.linkOutcomes.map((outcome) => (
-        <Box key={`${outcome.owner}:${outcome.owner === 'ide' ? outcome.ide : 'store'}:${outcome.linkPath}`} flexDirection="column">
+      {linkOutcomeSummaries.map((summary) => (
+        <Box key={summary.key} flexDirection="column">
           <Text wrap="truncate-middle">
-            {outcome.status === 'satisfied-via-link'
-              ? outcome.ownership === 'managed'
-                ? 'Already satisfied projection'
-                : 'Satisfied via link'
-              : `Blocked · ${outcome.reason?.replaceAll('-', ' ') ?? 'unclassified'}`}
-            {' '}· {outcome.ownership === 'managed' ? 'Managed' : 'External'} · {outcome.packageNames.length} Skill{' '}
-            {outcome.packageNames.length === 1 ? 'package' : 'packages'} ·{' '}
-            {outcome.affectedFileCount} affected{' '}
-            {outcome.affectedFileCount === 1 ? 'file' : 'files'} ·{' '}
-            {outcome.linkPaths.length} {outcome.linkPaths.length === 1 ? 'link' : 'links'}
+            {summary.state} · {summary.ownership === 'managed' ? 'Managed' : 'External'} ·{' '}
+            {summary.packageCount} Skill {summary.packageCount === 1 ? 'package' : 'packages'} ·{' '}
+            {summary.affectedFileCount} affected{' '}
+            {summary.affectedFileCount === 1 ? 'file' : 'files'} · {summary.surfaceLabel}
           </Text>
-          <Text wrap="truncate-middle">
-            {'  '}{outcome.linkPath}
-            {outcome.resolvedPath ? ` → ${outcome.resolvedPath}` : ''}
-          </Text>
+          {showLinkPathMapping && summary.pathMapping && (
+            <Text dimColor wrap="truncate-middle">  {summary.pathMapping}</Text>
+          )}
         </Box>
-      ))}
-      {workflow.plan.linkOutcomes.length > 1 && linkOutcomeSummaries.map((summary) => (
-        <Text key={summary.key} wrap="truncate-middle">
-          {summary.surfaceLabel} · {summary.outcomeCount} {summary.ownership}{' '}
-          {summary.state.toLowerCase()} outcomes ·{' '}
-          {summary.packageCount} Skill {summary.packageCount === 1 ? 'package' : 'packages'} ·{' '}
-          {summary.affectedFileCount} affected{' '}
-          {summary.affectedFileCount === 1 ? 'file' : 'files'}
-        </Text>
       ))}
       <Text> </Text>
       {!viewport.combinedIndicator && viewport.hiddenBefore > 0 && (
@@ -1950,6 +1970,25 @@ function DeployPreviewView({
       </Box>
     );
   }
+  if (preview.kind === 'package') {
+    return (
+      <Box flexDirection="column">
+        <Text>Replace linked package node: {preview.targetPath}</Text>
+        {preview.files.map((file) => (
+          file.kind === 'binary'
+            ? <Text key={file.targetPath}>{file.targetPath} · binary · {file.bytes} bytes · sha256 {file.sha256}</Text>
+            : (
+              <Box key={file.targetPath} flexDirection="column">
+                <Text>{file.targetPath}</Text>
+                {file.diff.split('\n').map((line, index) => (
+                  <Text key={`${file.targetPath}:${index}`}>{'  '}{line}</Text>
+                ))}
+              </Box>
+            )
+        ))}
+      </Box>
+    );
+  }
   return (
     <Box flexDirection="column">
       <Text>{preview.targetPath}</Text>
@@ -1969,7 +2008,7 @@ function DeployConfirmation({
 }): ReactNode {
   const warnings = deployWarnings(workflow.plan);
   const allConfirmed = warnings.every((warning) =>
-    workflow.confirmedIssueCodes.includes(warning.code));
+    workflow.confirmedIssueIds.includes(warning.confirmationId));
   const viewport = listViewport(
     warnings,
     workflow.warningCursor,
@@ -1985,7 +2024,7 @@ function DeployConfirmation({
       {viewport.items.map(({ item: warning }, index) => (
         <Text key={warning.code}>
           {viewport.start + index === workflow.warningCursor ? '>' : ' '}{' '}
-          [{workflow.confirmedIssueCodes.includes(warning.code) ? 'x' : ' '}] {warning.message}
+          [{workflow.confirmedIssueIds.includes(warning.confirmationId) ? 'x' : ' '}] {warning.message}
         </Text>
       ))}
       {!viewport.combinedIndicator && viewport.hiddenAfter > 0 && (

@@ -169,7 +169,7 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
             unbind(context, options);
         }
     });
-    const migrateCommand = program.command('migrate [path]').description('Migrate a v1 repository to schema v2')
+    const migrateCommand = program.command('migrate [path]').description('Migrate an older repository to the current schema')
         .option('--dry-run', 'Preview migration without writing')
         .option('--yes', 'Migrate without prompting after reviewing a dry-run')
         .option('--json', 'Print one machine-readable Plan or Result')

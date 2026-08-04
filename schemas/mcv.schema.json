@@ -3,9 +3,9 @@
   "title": "MCV repository manifest",
   "type": "object",
   "additionalProperties": true,
-  "required": ["schemaVersion", "repositoryId", "initializedAt", "targets", "variables", "security", "capture", "deploy"],
+  "required": ["schemaVersion", "repositoryId", "initializedAt", "targets", "variables", "capture", "deploy"],
   "properties": {
-    "schemaVersion": { "const": 2 },
+    "schemaVersion": { "const": 3 },
     "repositoryId": { "type": "string", "minLength": 1 },
     "initializedAt": { "type": "string" },
     "targets": {
@@ -36,12 +36,6 @@
       }
     },
     "variables": { "type": "object" },
-    "security": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["scanSecrets", "allowPlaintextSecrets"],
-      "properties": { "scanSecrets": { "const": true }, "allowPlaintextSecrets": { "const": false } }
-    },
     "capture": {
       "type": "object",
       "additionalProperties": false,

@@ -24,7 +24,6 @@ import {
 } from '../utils/files.js';
 import { isRecord } from '../utils/objects.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
-import { scanTextForSecrets } from '../utils/sanitize.js';
 import {
   hashSkillPackageContent,
   resolveSkillPackageStorePath,
@@ -39,6 +38,7 @@ import { resolveVariableDefinitions } from '../utils/variables.js';
 import { findLegacyCodexSkillDuplicates } from '../utils/deploy-skills.js';
 import {
   classifyCanonicalSkillLinks,
+  canonicalDeviceSkillStoreRoot,
   canonicalSkillTargetKey,
   canonicalSkillPackageName,
   deployPathExists,
@@ -48,6 +48,7 @@ import {
   type CanonicalSkillIde,
   type CanonicalSkillLayoutFile,
   type CanonicalSkillLinkOutcome,
+  type CanonicalSkillLinkFact,
   type CanonicalSkillTarget,
 } from '../core/canonical-skill-device-layout.js';
 import { ideForSkillSurface } from '../core/skill-surfaces.js';
@@ -83,14 +84,21 @@ export interface DeployLinkPreview {
   linkTarget: string;
 }
 
-export type DeployPreview = DeployTextPreview | DeployBinaryPreview | DeployLinkPreview;
+export interface DeployPackagePreview {
+  targetPath: string;
+  kind: 'package';
+  files: Array<DeployTextPreview | DeployBinaryPreview>;
+}
+
+export type DeployPreview = DeployTextPreview | DeployBinaryPreview | DeployLinkPreview | DeployPackagePreview;
 
 export type DeployDeploymentKind =
   | 'ordinary-file'
   | 'physical-materialization'
   | 'managed-link-projection'
   | 'copy-projection'
-  | 'topology-migration';
+  | 'topology-migration'
+  | 'external-link-replacement';
 
 export type DeployIde = CanonicalSkillIde;
 
@@ -121,14 +129,27 @@ export type DeployChange = DeployChangeBase & DeployChangeTarget;
 
 export type DeployLinkOutcome = CanonicalSkillLinkOutcome;
 
+export interface DeployDecision {
+  id: string;
+  factId: string;
+  kind: 'external-skill-divergence';
+  packageNames: string[];
+  linkPaths: string[];
+  choices: ['preserve-external', 'replace-with-repository'];
+  replacementChangeIds: string[];
+}
+
 export type DeployPlan = Plan<DeployChange> & {
   operation: 'deploy';
   linkOutcomes: DeployLinkOutcome[];
+  linkFacts: CanonicalSkillLinkFact[];
+  decisions: DeployDecision[];
 };
 
 export interface DeploySelection {
   changeIds: string[];
-  confirmedIssueCodes?: string[];
+  confirmedIssueIds?: string[];
+  decisions?: Record<string, 'preserve-external' | 'replace-with-repository'>;
 }
 
 export interface DeployApplyOptions {
@@ -152,6 +173,7 @@ export interface DeployResultData {
 export type DeployResult = Result<DeployResultData, DeployChange> & {
   operation: 'deploy';
   linkOutcomes?: DeployLinkOutcome[];
+  linkFacts?: CanonicalSkillLinkFact[];
 };
 
 type SourcedDeployFile = DeployFile & {
@@ -163,6 +185,7 @@ type SourcedDeployFile = DeployFile & {
 interface DeployMutation {
   content?: Buffer;
   linkTarget?: string;
+  packageFiles?: Array<{ relativePath: string; content: Buffer }>;
 }
 
 interface ActiveDeployPlan {
@@ -193,9 +216,10 @@ interface DeployBackupManifest {
 
 interface PreparedDeployWrite {
   targetPath: string;
-  change: 'write' | 'delete' | 'link' | 'migrate-link';
+  change: 'write' | 'delete' | 'link' | 'migrate-link' | 'replace-directory';
   content?: Buffer;
   linkTarget?: string;
+  packageFiles?: Array<{ relativePath: string; content: Buffer }>;
 }
 
 const activeDeployPlans = new WeakMap<DeployPlan, ActiveDeployPlan>();
@@ -220,6 +244,8 @@ export async function createDeployPlan(context: DeviceContext): Promise<DeployPl
       repositoryPath,
       changes: [],
       linkOutcomes: [],
+      linkFacts: [],
+      decisions: [],
       issues: [{
         severity: 'error',
         code: 'deploy.planFailed',
@@ -257,6 +283,8 @@ async function buildDeployPlan(
       repositoryPath,
       changes: [],
       linkOutcomes: [],
+      linkFacts: [],
+      decisions: [],
       issues: [{
         severity: 'notice',
         code: 'deploy.noEnabledTargets',
@@ -292,6 +320,7 @@ async function buildDeployPlan(
 
   const issues: Issue[] = [];
   const linkOutcomes: DeployLinkOutcome[] = [];
+  const linkFacts: CanonicalSkillLinkFact[] = [];
   const layout = planCanonicalSkillLayout(
     desired,
     context,
@@ -306,7 +335,8 @@ async function buildDeployPlan(
     if (file.capability === 'skills') return false;
     issues.push({
       severity: 'warning',
-      code: `deploy.symbolicLinkSkipped.${issues.length + 1}`,
+      code: 'deploy.symbolicLinkSkipped',
+      confirmationId: `deploy-warning-${hashText(`symbolic-link\0${file.targetPath}\0${linkPath}`).slice(0, 16)}`,
       message: `A target beneath a symbolic link was excluded: ${file.targetPath}.`,
       details: `Symbolic link ancestor: ${linkPath}`,
     });
@@ -318,6 +348,7 @@ async function buildDeployPlan(
     (linkPath) => inventory[linkPath]?.hash === hashDeviceTopologyNode(linkPath),
   );
   linkOutcomes.push(...linkedSkills.outcomes);
+  linkFacts.push(...linkedSkills.facts);
   issues.push(...linkedSkills.issues);
 
   const changes = safeDesired.flatMap((file): DeployChange[] => {
@@ -351,6 +382,16 @@ async function buildDeployPlan(
     }];
   });
   changes.push(...layout.projectionChanges);
+  const decisions = addExternalLinkReplacementDecisions(
+    linkedSkills.facts,
+    linkedSkills.outcomes,
+    layout.desiredForExternalReplacement,
+    manifest.deploy.useSymlinks,
+    context,
+    changes,
+    mutations,
+    issues,
+  );
 
   const legacyDuplicates = findLegacyCodexSkillDuplicates(
     context,
@@ -518,6 +559,8 @@ async function buildDeployPlan(
     repositoryPath,
     changes,
     linkOutcomes,
+    linkFacts,
+    decisions,
     issues,
     nextActions: blocked
       ? ['Resolve every decisionRequired or error Issue, then regenerate the Deploy Plan.']
@@ -535,6 +578,7 @@ function planCanonicalSkillLayout(
 ): {
   desired: SourcedDeployFile[];
   desiredForLinkClassification: CanonicalSkillLayoutFile[];
+  desiredForExternalReplacement: SourcedDeployFile[];
   projectionChanges: DeployChange[];
   externalStorePackages: Array<{ packageName: string; storePath: string }>;
 } {
@@ -548,8 +592,9 @@ function planCanonicalSkillLayout(
   const managedStorePaths = new Set(Object.values(
     readState(context).managedSkillLayout?.packages ?? {},
   ).map((pkg) => path.resolve(pkg.storePath)));
+  const annotatedDesired = desired.map((file) => annotateSkillSurface(file, projectionSurfaces));
   const managedLayout = planCanonicalSkillDeviceLayout({
-    files: desired.map((file) => annotateSkillSurface(file, projectionSurfaces)),
+    files: annotatedDesired,
     context,
     useManagedLinks: useSymlinks
       && projectionSurfaces.some((surface) => surface.supportsManagedLinks),
@@ -624,6 +669,7 @@ function planCanonicalSkillLayout(
     issues.push({
       severity: 'warning',
       code: 'deploy.skillsTopology.migrationCandidate',
+      confirmationId: `deploy-warning-${hashText(`topology-migration\0${migration.targetPath}`).slice(0, 16)}`,
       message: `Topology migration available: replace matching physical Skill copy ${migration.packageName} with a managed link.`,
       details: `${migration.targetPath} currently matches Canonical package content and can be replaced with a link to ${migration.physicalTargetPath}. Migration is destructive, never selected by default, and requires explicit interactive confirmation.`,
     });
@@ -632,6 +678,7 @@ function planCanonicalSkillLayout(
     issues.push({
       severity: 'warning',
       code: 'deploy.skillsTopology.divergentPhysicalCopy',
+      confirmationId: `deploy-warning-${hashText(`divergent-copy\0${divergent.targetPath}`).slice(0, 16)}`,
       message: `Divergent physical Skill copy preserved: ${divergent.packageName}.`,
       details: `${divergent.targetPath} differs from the Canonical package. Capture or otherwise resolve the package before replacing it with a managed link.`,
     });
@@ -648,6 +695,7 @@ function planCanonicalSkillLayout(
   return {
     desired: [...managedLayout.filesOutsideLayout, ...materialized],
     desiredForLinkClassification: managedLayout.filesForLinkClassification,
+    desiredForExternalReplacement: annotatedDesired,
     projectionChanges,
     externalStorePackages: managedLayout.externalStorePackages,
   };
@@ -660,6 +708,96 @@ function annotateSkillSurface(
   if (file.capability !== 'skills' || file.owner !== 'ide') return file;
   const match = surfaces.find((surface) => isPathWithinRoot(surface.root, file.targetPath));
   return match ? { ...file, ide: match.ide, surface: match.surface } : file;
+}
+
+function addExternalLinkReplacementDecisions(
+  facts: CanonicalSkillLinkFact[],
+  outcomes: CanonicalSkillLinkOutcome[],
+  desired: SourcedDeployFile[],
+  useSymlinks: boolean,
+  context: DeviceContext,
+  changes: DeployChange[],
+  mutations: Map<string, DeployMutation>,
+  issues: Issue[],
+): DeployDecision[] {
+  const decisions: DeployDecision[] = [];
+  for (const fact of facts.filter((entry) => entry.severity === 'decisionRequired')) {
+    const replacementChangeIds: string[] = [];
+    for (const outcome of outcomes.filter((entry) => entry.factId === fact.id && entry.owner === 'ide')) {
+      if (!outcome.ide || !outcome.surface) continue;
+      for (const linkPath of outcome.linkPaths) {
+        const packageFiles = desired.filter((file) =>
+          file.capability === 'skills'
+          && file.owner === 'ide'
+          && file.ide === outcome.ide
+          && file.surface === outcome.surface
+          && findSymbolicLinkAncestor(file.targetPath) === linkPath);
+        if (packageFiles.length === 0) continue;
+        const packageName = canonicalSkillPackageName(packageFiles[0].targetPath);
+        const id = selectionId(
+          canonicalSkillTargetKey(outcome),
+          'skills',
+          `${linkPath}\0external-link-replacement`,
+        );
+        const materializationRoot = path.join(canonicalDeviceSkillStoreRoot(context), packageName);
+        const dependsOnChangeIds = useSymlinks
+          ? changes.filter((change) =>
+            change.deploymentKind === 'physical-materialization'
+            && isPathWithinRoot(materializationRoot, change.targetPath)).map((change) => change.id)
+          : [];
+        const packageMutation = packageFiles.map((file) => ({
+          relativePath: path.relative(linkPath, file.targetPath),
+          content: toBuffer(file.content),
+        }));
+        changes.push({
+          id,
+          owner: 'ide',
+          ide: outcome.ide,
+          surface: outcome.surface,
+          capability: 'skills',
+          name: packageName,
+          targetPath: linkPath,
+          change: 'modify',
+          defaultSelected: false,
+          group: 'standard',
+          strategy: 'replace-entire-file',
+          deploymentKind: 'external-link-replacement',
+          ...(dependsOnChangeIds.length > 0 ? { dependsOnChangeIds } : {}),
+          preview: useSymlinks
+            ? { targetPath: linkPath, kind: 'link', linkTarget: materializationRoot }
+            : {
+                targetPath: linkPath,
+                kind: 'package',
+                files: packageFiles.map((file) => preview(
+                  file.targetPath,
+                  canonicalSkillTargetKey(outcome),
+                  'skills',
+                  toBuffer(file.content),
+                  fs.existsSync(file.targetPath) ? fs.readFileSync(file.targetPath) : undefined,
+                  issues,
+                )).filter((item): item is DeployTextPreview | DeployBinaryPreview =>
+                  item.kind === 'text' || item.kind === 'binary'),
+              },
+        });
+        mutations.set(id, useSymlinks
+          ? { linkTarget: materializationRoot }
+          : { packageFiles: packageMutation });
+        replacementChangeIds.push(id);
+      }
+    }
+    if (replacementChangeIds.length > 0) {
+      decisions.push({
+        id: fact.id,
+        factId: fact.id,
+        kind: 'external-skill-divergence',
+        packageNames: fact.packageNames,
+        linkPaths: fact.linkPaths,
+        choices: ['preserve-external', 'replace-with-repository'],
+        replacementChangeIds,
+      });
+    }
+  }
+  return decisions;
 }
 
  function registerDeployPlan(
@@ -693,6 +831,29 @@ export async function applyDeployPlan(
   }
 
   const selected = new Set(selectedIds);
+  const decisionChoices = selection.decisions ?? {};
+  const knownDecisionIds = new Set(plan.decisions.map((decision) => decision.id));
+  if (Object.keys(decisionChoices).some((id) => !knownDecisionIds.has(id))) {
+    return failedDeployResult(plan.repositoryPath, {
+      code: 'deploy.invalidSelection',
+      message: 'The Deploy selection contains a decision that is not in the active Plan.',
+      nextActions: ['Choose only decisions from the current Deploy Plan.'],
+    });
+  }
+  for (const decision of plan.decisions) {
+    const choice = decisionChoices[decision.id];
+    if (!choice) continue;
+    const replacementSelected = decision.replacementChangeIds.every((id) => selected.has(id));
+    const replacementPartiallySelected = decision.replacementChangeIds.some((id) => selected.has(id));
+    if ((choice === 'replace-with-repository' && !replacementSelected)
+      || (choice === 'preserve-external' && replacementPartiallySelected)) {
+      return failedDeployResult(plan.repositoryPath, {
+        code: 'deploy.invalidSelection',
+        message: 'The selected external Skill decision does not match its replacement changes.',
+        nextActions: ['Regenerate the Deploy Plan and choose Preserve or Replace again.'],
+      });
+    }
+  }
   const missingDependencies = plan.changes.flatMap((change) =>
     selected.has(change.id)
       ? (change.dependsOnChangeIds ?? []).filter(
@@ -758,6 +919,7 @@ export async function applyDeployPlan(
       nextActions: [],
       data: { appliedChangeIds: [], writtenPaths: [], deletedPaths: [] },
       linkOutcomes: plan.linkOutcomes,
+      linkFacts: plan.linkFacts,
     };
   }
   let backupPath: string | undefined;
@@ -811,13 +973,16 @@ export async function applyDeployPlan(
       nextActions: [],
       data: {
         appliedChangeIds: selectedIds,
-        writtenPaths: prepared.filter((item) => item.change === 'write').map((item) => item.targetPath),
+        writtenPaths: prepared.filter((item) =>
+          item.change === 'write' || item.change === 'replace-directory')
+          .map((item) => item.targetPath),
         deletedPaths: prepared.filter((item) => item.change === 'delete').map((item) => item.targetPath),
         projectionPaths: prepared.filter((item) =>
           item.change === 'link' || item.change === 'migrate-link').map((item) => item.targetPath),
         backupPath,
       },
       linkOutcomes: plan.linkOutcomes,
+      linkFacts: plan.linkFacts,
     };
   } catch (error) {
     activeDeployPlans.delete(plan);
@@ -857,12 +1022,15 @@ function deployBlockingIssues(
       message: 'Non-interactive Deploy cannot apply warnings, decisions, errors, deletions, or topology migrations.',
     }] : [];
   }
-  const confirmed = new Set(selection.confirmedIssueCodes ?? []);
+  const confirmed = new Set(selection.confirmedIssueIds ?? []);
   const warnings = plan.issues.filter((issue) =>
-    issue.severity === 'warning' && !confirmed.has(issue.code));
+    issue.severity === 'warning' && !confirmed.has(issue.confirmationId));
   if (warnings.length > 0) return warnings;
+  const resolvedDecisions = new Set(Object.keys(selection.decisions ?? {}));
   return plan.issues.filter((issue) =>
-    issue.severity === 'decisionRequired' || issue.severity === 'error');
+    issue.severity === 'error'
+    || (issue.severity === 'decisionRequired'
+      && (!issue.decisionId || !resolvedDecisions.has(issue.decisionId))));
 }
 
 function sameDeploySnapshot(left: DeployPlan, right: DeployPlan): boolean {
@@ -871,8 +1039,12 @@ function sameDeploySnapshot(left: DeployPlan, right: DeployPlan): boolean {
     && stableValue(left.changes.map(deploySnapshotChange))
       === stableValue(right.changes.map(deploySnapshotChange))
     && stableValue(left.linkOutcomes) === stableValue(right.linkOutcomes)
-    && stableValue(left.issues.map((issue) => [issue.severity, issue.code]))
-      === stableValue(right.issues.map((issue) => [issue.severity, issue.code]));
+    && stableValue(left.linkFacts) === stableValue(right.linkFacts)
+    && stableValue(left.decisions) === stableValue(right.decisions)
+    && stableValue(left.issues.map((issue) =>
+      [issue.severity, issue.code, issue.confirmationId, issue.decisionId]))
+      === stableValue(right.issues.map((issue) =>
+        [issue.severity, issue.code, issue.confirmationId, issue.decisionId]));
 }
 
 function deploySnapshotChange(change: DeployChange): unknown {
@@ -910,6 +1082,19 @@ function prepareDeployWrites(
         linkTarget: mutation.linkTarget,
       };
     }
+    if (targetChanges.some((change) => change.deploymentKind === 'external-link-replacement')) {
+      if (mutation?.linkTarget) {
+        return { targetPath, change: 'migrate-link' as const, linkTarget: mutation.linkTarget };
+      }
+      if (!mutation?.packageFiles) {
+        throw new Error(`Missing active Deploy package mutation for ${targetChanges[0].id}.`);
+      }
+      return {
+        targetPath,
+        change: 'replace-directory' as const,
+        packageFiles: mutation.packageFiles,
+      };
+    }
     if (targetChanges.some((change) => change.deploymentKind === 'managed-link-projection')) {
       if (!mutation?.linkTarget) {
         throw new Error(`Missing active Deploy link mutation for ${targetChanges[0].id}.`);
@@ -927,7 +1112,7 @@ function prepareDeployWrites(
       content: composeSelectedContent(targetPath, targetChanges, mutation.content),
     };
   }).sort((left, right) => {
-    const order = { write: 0, delete: 1, link: 2, 'migrate-link': 2 } as const;
+    const order = { write: 0, delete: 1, link: 2, 'migrate-link': 2, 'replace-directory': 2 } as const;
     return order[left.change] - order[right.change];
   });
 }
@@ -1107,6 +1292,18 @@ function applyPreparedDeployWrites(
         createSymbolicLink(write.linkTarget as string, write.targetPath);
         attemptedPaths.add(write.targetPath);
         verifyManagedProjection(write.targetPath, write.linkTarget as string);
+      }
+      else if (write.change === 'replace-directory') {
+        attemptedPaths.add(write.targetPath);
+        removeFile(write.targetPath);
+        fs.mkdirSync(write.targetPath, { recursive: true });
+        for (const file of write.packageFiles ?? []) {
+          const targetPath = path.join(write.targetPath, file.relativePath);
+          writeFile(targetPath, file.content);
+          if (!fs.readFileSync(targetPath).equals(file.content)) {
+            throw new Error(`Deploy package write verification failed for ${targetPath}.`);
+          }
+        }
       }
       else {
         attemptedPaths.add(write.targetPath);
@@ -1296,7 +1493,8 @@ function updateDeployState(
         touchedPackages.add(resolveSkillPackageStorePath(change.targetPath));
       }
       if ((change.deploymentKind === 'managed-link-projection'
-        || change.deploymentKind === 'topology-migration')
+        || change.deploymentKind === 'topology-migration'
+        || change.deploymentKind === 'external-link-replacement')
         && change.owner === 'ide'
         && change.preview.kind === 'link') {
         managedSkillLayout.projections[change.targetPath] = {
@@ -1395,6 +1593,7 @@ function blockedDeployResult(plan: DeployPlan, issues: Issue[]): DeployResult {
     repositoryPath: plan.repositoryPath,
     changes: [],
     linkOutcomes: plan.linkOutcomes,
+    linkFacts: plan.linkFacts,
     issues,
     nextActions: issues.some((issue) => issue.severity === 'warning')
       ? ['Confirm every warning explicitly before applying the Deploy Plan.']
@@ -1415,6 +1614,22 @@ function freezeDeployPlan(plan: DeployPlan): DeployPlan {
     Object.freeze(outcome);
   }
   Object.freeze(plan.linkOutcomes);
+  for (const fact of plan.linkFacts) {
+    Object.freeze(fact.packageNames);
+    Object.freeze(fact.linkPaths);
+    if (fact.resolvedPaths) Object.freeze(fact.resolvedPaths);
+    Object.freeze(fact.surfaces);
+    Object.freeze(fact);
+  }
+  Object.freeze(plan.linkFacts);
+  for (const decision of plan.decisions) {
+    Object.freeze(decision.packageNames);
+    Object.freeze(decision.linkPaths);
+    Object.freeze(decision.choices);
+    Object.freeze(decision.replacementChangeIds);
+    Object.freeze(decision);
+  }
+  Object.freeze(plan.decisions);
   for (const issue of plan.issues) Object.freeze(issue);
   Object.freeze(plan.issues);
   Object.freeze(plan.nextActions);
@@ -1445,20 +1660,6 @@ function preview(
     previous?.toString('utf8'),
     next.toString('utf8'),
   );
-  if (scanTextForSecrets(diff).length > 0) {
-    issues.push({
-      severity: 'notice',
-      code: `deploy.unsafeDiffWithheld.${issues.length + 1}`,
-      message: 'Unsafe plaintext content was withheld from the Deploy preview.',
-    });
-    return {
-      targetPath,
-      kind: 'text',
-      bytes: metadata.length,
-      sha256: hashBuffer(metadata),
-      diff: '[unsafe text withheld]',
-    };
-  }
   return { targetPath, kind: 'text', bytes: metadata.length, sha256: hashBuffer(metadata), diff };
 }
 

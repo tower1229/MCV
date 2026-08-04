@@ -526,7 +526,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
 
     expect(migration.code).toBe(0);
     expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8'))
-      .toContain('schemaVersion: 2');
+      .toContain('schemaVersion: 3');
     expect(fs.existsSync(path.join(repositoryPath, 'mcv.yaml'))).toBe(true);
     expect(readBinding()).not.toHaveProperty('repositoryPath');
     expectRestoredTerminal(migration.output);
@@ -1046,10 +1046,9 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     const repositoryPath = path.join(testRoot, 'repository');
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: tui-capture-test',
       'initializedAt: 2026-07-27T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets: {}',
@@ -1063,10 +1062,9 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     const repositoryPath = path.join(testRoot, 'status-tone-repository');
     fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: tui-status-tone-test',
       'initializedAt: 2026-07-27T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets:',
@@ -1134,10 +1132,9 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     );
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: tui-restore-test',
       'initializedAt: 2026-07-27T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets: {}',
@@ -1179,7 +1176,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       `file://${path.join(process.cwd(), 'dist', 'tui', 'shell.js')}`,
     ).href;
     const plan = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'restore',
       status: 'planned',
       readyToApply: true,
@@ -1201,7 +1198,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       nextActions: [],
     };
     const failed = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'restore',
       status: 'failed',
       repositoryPath: '/tmp/mcv',
@@ -1245,7 +1242,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     fs.writeFileSync(fixturePath, [
       `import { runTuiShell } from ${JSON.stringify(shellModuleUrl)};`,
       `const plan = ${JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'capture',
         status: 'planned',
         readyToApply: true,
@@ -1256,13 +1253,12 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
         issues: [],
         nextActions: [],
         summary: {
-          sensitiveFieldCount: 0,
           parameterizedPathCount: 0,
           excludedFileCount: 0,
         },
       })};`,
       `const stale = ${JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         operation: 'capture',
         status: 'failed',
         repositoryPath: '/tmp/mcv',
@@ -1326,10 +1322,9 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     );
     fs.mkdirSync(skillPath, { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 2',
+      'schemaVersion: 3',
       'repositoryId: deploy-tree-pty',
       'initializedAt: 2026-07-27T00:00:00.000Z',
-      'security: { scanSecrets: true, allowPlaintextSecrets: false }',
       'capture: { preserveUnknownNativeFields: true }',
       'deploy: { backupBeforeWrite: true, useSymlinks: false }',
       'targets:',
@@ -1350,7 +1345,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
 
   function validRepositoryReport(): Record<string, unknown> {
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'repository',
       status: 'reported',
       ready: true,
@@ -1370,7 +1365,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       `file://${path.join(process.cwd(), 'dist', 'tui', 'shell.js')}`,
     ).href;
     const plan = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'deploy',
       status: 'planned',
       readyToApply: true,
@@ -1415,6 +1410,9 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
           },
         },
       ],
+      linkOutcomes: [],
+      linkFacts: [],
+      decisions: [],
       issues: [{
         severity: 'warning',
         code: 'deploy.warning',
@@ -1423,7 +1421,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       nextActions: [],
     };
     const failed = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'deploy',
       status: 'failed',
       repositoryPath: '/tmp/mcv',
@@ -1468,7 +1466,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       `file://${path.join(process.cwd(), 'dist', 'tui', 'shell.js')}`,
     ).href;
     const plan = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'capture',
       status: 'planned',
       readyToApply: true,
@@ -1551,13 +1549,12 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       ],
       nextActions: [],
       summary: {
-        sensitiveFieldCount: 0,
         parameterizedPathCount: 0,
         excludedFileCount: 0,
       },
     };
     const failed = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       operation: 'capture',
       status: 'failed',
       repositoryPath: '/tmp/mcv',
@@ -1584,7 +1581,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       '    createCapturePlan: async () => plan,',
       '    applyCapturePlan: async (_context, _plan, selection) => {',
       '      selected = selection.changeIds;',
-      '      confirmed = selection.confirmedIssueCodes ?? [];',
+      '      confirmed = selection.confirmedIssueIds ?? [];',
       '      await new Promise((resolve) => setTimeout(resolve, 300));',
       '      return failed;',
       '    },',

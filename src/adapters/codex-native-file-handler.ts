@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { atomicWriteFile } from '../utils/files.js';
-import { sanitizeConfig } from '../utils/sanitize.js';
+import { parameterizeConfig } from '../utils/parameterize.js';
 import {
   deleteObjectPath,
   parseStructuredObject,
@@ -54,7 +54,6 @@ export class CodexNativeFileHandler implements NativeFileHandler {
       managedFields: [],
       summary: {
         fileCount: 0,
-        sensitiveFieldCount: 0,
         parameterizedPathCount: 0,
         excludedFileCount: 0,
       },
@@ -62,13 +61,12 @@ export class CodexNativeFileHandler implements NativeFileHandler {
     };
     for (const file of files.filter((candidate) => candidate.exists)) {
       if (file.id === 'user-instructions') {
-        const sanitized = sanitizeConfig(fs.readFileSync(file.path, 'utf8'), context);
-        result.summary.sensitiveFieldCount += sanitized.sensitiveFieldCount;
-        result.summary.parameterizedPathCount += sanitized.parameterizedPathCount;
+        const parameterized = parameterizeConfig(fs.readFileSync(file.path, 'utf8'), context);
+        result.summary.parameterizedPathCount += parameterized.parameterizedPathCount;
         result.managedFiles.push({
           id: file.id,
           sourcePath: file.path,
-          content: sanitized.value,
+          content: parameterized.value,
         });
         continue;
       }
@@ -81,8 +79,7 @@ export class CodexNativeFileHandler implements NativeFileHandler {
         );
         const owned = splitOwnedFields(parsed, CODEX_MANAGED_PATHS, LOCAL_PATHS);
         removeCodexRuntimeFields(owned.native);
-        const native = sanitizeConfig(owned.native, context);
-        result.summary.sensitiveFieldCount += native.sensitiveFieldCount;
+        const native = parameterizeConfig(owned.native, context);
         result.summary.parameterizedPathCount += native.parameterizedPathCount;
         if (Object.keys(native.value).length > 0) {
           result.files.push({
@@ -94,13 +91,12 @@ export class CodexNativeFileHandler implements NativeFileHandler {
           });
         }
         for (const field of owned.managed) {
-          const sanitized = sanitizeConfig(field.value, context);
-          result.summary.sensitiveFieldCount += sanitized.sensitiveFieldCount;
-          result.summary.parameterizedPathCount += sanitized.parameterizedPathCount;
+          const parameterized = parameterizeConfig(field.value, context);
+          result.summary.parameterizedPathCount += parameterized.parameterizedPathCount;
           result.managedFields.push({
             sourcePath: file.path,
             path: field.path,
-            value: sanitized.value,
+            value: parameterized.value,
           });
         }
       } catch (error) {

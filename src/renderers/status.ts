@@ -18,19 +18,23 @@ export function renderStatusPlain(report: StatusReport): string[] {
   }
   const pending = report.pendingDeployment;
   lines.push(
-    `Pending deployment: ${pending.total} ${plural(pending.total, 'change')} (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete)`,
+    `Pending deployment: ${pending.total} ${plural(pending.total, 'change')} (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete; ${pending.recommended} recommended, ${pending.optional} optional; ${pending.advancedCleanupExcluded} Advanced Cleanup excluded)`,
   );
-  for (const outcome of report.linkOutcomes) {
-    const surface = outcome.owner === 'canonical-store'
+  for (const fact of report.linkFacts) {
+    const surface = fact.surfaces.length === 0
       ? displaySkillSurface('canonical-store')
-      : displaySkillSurface(outcome.surface);
-    const state = outcome.status === 'satisfied-via-link'
-      ? outcome.ownership === 'managed'
+      : fact.surfaces.map(({ surface: surfaceId }) => displaySkillSurface(surfaceId)).join(' + ');
+    const state = fact.severity === 'error'
+      ? 'Blocked'
+      : fact.severity === 'decisionRequired'
+        ? 'Needs decision'
+        : fact.severity === 'warning'
+          ? 'Preserve external'
+          : fact.ownership === 'managed'
         ? 'Already satisfied projection'
-        : 'Satisfied via link'
-      : 'Blocked';
+        : 'Satisfied via link';
     lines.push(
-      `Linked Skills: ${surface} · ${state} · ${outcome.ownership} · ${outcome.packageNames.length} ${plural(outcome.packageNames.length, 'package')} · ${outcome.affectedFileCount} affected ${plural(outcome.affectedFileCount, 'file')}`,
+      `Linked Skills: ${surface} · ${state} · ${fact.ownership} · ${fact.packageNames.length} ${plural(fact.packageNames.length, 'package')} · ${fact.affectedFileCount} affected ${plural(fact.affectedFileCount, 'file')}`,
     );
   }
   const local = report.postDeployLocalState;

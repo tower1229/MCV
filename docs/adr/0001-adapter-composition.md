@@ -1,6 +1,6 @@
 # Single IdeAdapter interface with internal composition
 
-Each IDE exposes one `IdeAdapter` interface (detect, discoverFiles, capture, deploy, validate). Internally, every adapter composes two separated concerns: a `CanonicalTransformer` (semantic conversion of rules, Skills, MCP between MCV's unified format and the IDE's format) and a `NativeFileHandler` (path discovery, file read/write, secret filtering, variable substitution). The interface stays unified so downstream consumers never deal with two objects per IDE; the implementation stays separated so Canonical schema changes don't force edits to file-handling code and vice versa.
+Each IDE exposes one `IdeAdapter` interface (detect, discoverFiles, capture, deploy, validate). Internally, every adapter composes two separated concerns: a `CanonicalTransformer` (semantic conversion of rules, Skills, MCP between MCV's unified format and the IDE's format) and a `NativeFileHandler` (path discovery, file read/write, path parameterization, and variable resolution). The interface stays unified so downstream consumers never deal with two objects per IDE; the implementation stays separated so Canonical schema changes don't force edits to file-handling code and vice versa. Content security classification is intentionally not an Adapter responsibility.
 
 ## Considered Options
 

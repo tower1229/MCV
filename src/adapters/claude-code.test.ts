@@ -155,14 +155,13 @@ describe('ClaudeCodeAdapter', () => {
       servers: {
         local: {
           command: '${HOME}\\工具\\server.exe',
-          env: { accessToken: '${env:ACCESS_TOKEN}' },
+          env: { accessToken: 'real-token' },
           transport: 'stdio',
         },
       },
     });
     expect(result.summary).toEqual({
       fileCount: 2,
-      sensitiveFieldCount: 1,
       parameterizedPathCount: 1,
       excludedFileCount: 0,
     });

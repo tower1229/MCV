@@ -98,11 +98,11 @@ export async function captureConfigurations(
   const result = await withInterruptsIgnored(() =>
     applyCapturePlan(context, capturePlan, {
       changeIds,
-      confirmedIssueCodes: options.yes
+      confirmedIssueIds: options.yes
         ? []
         : capturePlan.issues
           .filter((issue) => issue.severity === 'warning')
-          .map((issue) => issue.code),
+          .map((issue) => issue.confirmationId),
     }, { nonInteractive: options.yes }));
   if (result.status === 'succeeded') {
     recordCaptureSuccess(context);

@@ -9,13 +9,11 @@ import { collectSkills, getSkillSources, } from '../core/skills.js';
 import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
 import { isRecord, mergeRecords } from '../utils/objects.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
-import { scanTextForSecrets } from '../utils/sanitize.js';
 import { readState } from '../utils/state.js';
 import { deleteObjectPath, parseStructuredObject, stringifyStructuredObject, } from '../utils/structured-config.js';
 import { OPERATION_SCHEMA_VERSION, } from './contracts.js';
 const activeCapturePlans = new WeakMap();
 const EMPTY_SUMMARY = {
-    sensitiveFieldCount: 0,
     parameterizedPathCount: 0,
     excludedFileCount: 0,
 };
@@ -91,7 +89,8 @@ async function buildCapturePlan(context, repositoryPath, operationId, mutations)
     }));
     const issues = captured.flatMap(({ result }, resultIndex) => result.warnings.map((_warning, warningIndex) => ({
         severity: 'warning',
-        code: `capture.sourceSkipped.${resultIndex + 1}.${warningIndex + 1}`,
+        code: 'capture.sourceSkipped',
+        confirmationId: `capture-warning-${hashText(`source\0${resultIndex}\0${warningIndex}\0${result.warnings[warningIndex]}`).slice(0, 16)}`,
         message: 'A source item was skipped because it could not be processed safely.',
     })));
     const sourcedFiles = captured.flatMap(({ definition, result }) => result.files.map((file) => ({
@@ -107,12 +106,12 @@ async function buildCapturePlan(context, repositoryPath, operationId, mutations)
     for (let index = 0; index < skills.warnings.length; index += 1) {
         issues.push({
             severity: 'warning',
-            code: `capture.skillSkipped.${index + 1}`,
+            code: 'capture.skillSkipped',
+            confirmationId: `capture-warning-${hashText(`skill\0${index}\0${skills.warnings[index]}`).slice(0, 16)}`,
             message: 'A Skill source item was skipped because it could not be processed safely.',
         });
     }
     const summary = captured.reduce((total, { result }) => ({
-        sensitiveFieldCount: total.sensitiveFieldCount + result.summary.sensitiveFieldCount,
         parameterizedPathCount: total.parameterizedPathCount + result.summary.parameterizedPathCount,
         excludedFileCount: total.excludedFileCount + result.summary.excludedFileCount,
     }), {
@@ -277,8 +276,8 @@ function captureBlockingIssues(plan, selected, selection, options) {
                 message: 'Non-interactive Capture cannot apply warnings, decisions, errors, or deletions.',
             }] : [];
     }
-    const confirmed = new Set(selection.confirmedIssueCodes ?? []);
-    const unconfirmedWarnings = plan.issues.filter((issue) => issue.severity === 'warning' && !confirmed.has(issue.code));
+    const confirmed = new Set(selection.confirmedIssueIds ?? []);
+    const unconfirmedWarnings = plan.issues.filter((issue) => issue.severity === 'warning' && !confirmed.has(issue.confirmationId));
     if (unconfirmedWarnings.length > 0)
         return unconfirmedWarnings;
     const errors = plan.issues.filter((issue) => issue.severity === 'error');
@@ -310,8 +309,8 @@ function sameCaptureSnapshot(left, right) {
             repositoryPaths: change.repositoryPaths,
             contributingProjections: change.contributingProjections,
         })))
-        && stableValue(left.issues.map((issue) => [issue.severity, issue.code]))
-            === stableValue(right.issues.map((issue) => [issue.severity, issue.code]));
+        && stableValue(left.issues.map((issue) => [issue.severity, issue.code, issue.confirmationId]))
+            === stableValue(right.issues.map((issue) => [issue.severity, issue.code, issue.confirmationId]));
 }
 function applyCaptureTransaction(repositoryPath, mutations, moveFile, restoreFile) {
     const writes = new Map();
@@ -872,14 +871,6 @@ function addRepositoryDeletionChanges(repositoryPath, enabledTargets, sourcedFil
 }
 function planFile(repositoryPath, file, issues) {
     const contentBuffer = toBuffer(file.content);
-    if (isText(contentBuffer) && scanTextForSecrets(contentBuffer.toString('utf8')).length > 0) {
-        issues.push({
-            severity: 'error',
-            code: 'capture.plaintextSecretBlocked',
-            message: 'A Capture source contains a suspected plaintext secret and was blocked.',
-        });
-        return undefined;
-    }
     const destinationPath = path.join(repositoryPath, ...file.repositoryPath.split('/'));
     const existingContent = fs.existsSync(destinationPath)
         ? fs.readFileSync(destinationPath)
@@ -933,21 +924,6 @@ function preview(repositoryPath, next, previous, issues) {
     }
     const nextText = nextBuffer.toString('utf8');
     const previousText = previousBuffer?.toString('utf8');
-    if (scanTextForSecrets(nextText).length > 0
-        || (previousText !== undefined && scanTextForSecrets(previousText).length > 0)) {
-        issues.push({
-            severity: 'error',
-            code: 'capture.plaintextSecretBlocked',
-            message: 'Unsafe plaintext content was withheld from the Capture preview.',
-        });
-        return {
-            repositoryPath,
-            kind: 'text',
-            bytes: nextBuffer.length,
-            sha256: hashBuffer(nextBuffer),
-            diff: '[unsafe text withheld]',
-        };
-    }
     return {
         repositoryPath,
         kind: 'text',

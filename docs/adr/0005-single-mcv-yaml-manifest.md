@@ -1,6 +1,6 @@
 # Single mcv.yaml as repository manifest
 
-Repository identity (`repositoryId`, `schemaVersion`, `initializedAt`) and repository configuration (`targets`, `variables`, `security`, `capture`, `deploy`) are merged into a single `mcv.yaml` at the repository root. The `.mcv/repository.json` file described in early PRD drafts is eliminated. This means `mcv.yaml` is the sole file needed to identify a directory as an MCV repository, simplifying `mcv bind` validation to a single file check.
+Repository identity (`repositoryId`, `schemaVersion`, `initializedAt`) and repository configuration (`targets`, `variables`, `capture`, `deploy`) are merged into a single `mcv.yaml` at the repository root. The `.mcv/repository.json` file described in early PRD drafts is eliminated. Schema v3 removes the former `security` field because MCV no longer classifies configuration content. This means `mcv.yaml` is the sole file needed to identify a directory as an MCV repository, simplifying `mcv bind` validation to a single file check.
 
 ## Considered Options
 

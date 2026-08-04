@@ -290,6 +290,7 @@ function pageTitle(state) {
         switch (page.workflow.status) {
             case 'selection': return 'Deploy · Select Changes';
             case 'diff': return 'Deploy · Diff';
+            case 'decision': return 'Deploy · Resolve Linked Skill';
             case 'confirmation': return 'Deploy · Confirm Apply';
             case 'applying': return 'Deploy · Applying';
             case 'regenerating': return 'Deploy · Regenerating';
@@ -367,6 +368,8 @@ function pageControls(state, terminalRows) {
                     ].join('\n');
             case 'diff':
                 return '←/Escape Close Diff   q Quit   Ctrl+C Cancel';
+            case 'decision':
+                return '↑↓ Move   Space Choose   Enter Next   ←/Escape Back   q Quit';
             case 'confirmation':
                 return terminalRows <= 12
                     ? '↑↓/Pg Move   Home/End   Space Confirm   Enter Apply   ← Back   q Quit'
@@ -577,11 +580,15 @@ function createOverviewStatusViewModel(report) {
             tone: pending.total > 0 ? 'warning' : 'muted',
             label: 'Pending Deployment Changes',
             state: pending.total > 0 ? 'Review' : 'None',
-            details: `${pending.total} changes (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete)`,
+            details: `${pending.total} changes (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete; ${pending.recommended} recommended, ${pending.optional} optional; ${pending.advancedCleanupExcluded} cleanup excluded)`,
         },
-        linkedSkills: summarizeLinkOutcomes(report.linkOutcomes).map((summary) => ({
+        linkedSkills: summarizeLinkFacts(report.linkFacts).map((summary) => ({
             key: `linked-skills:${summary.key}`,
-            tone: summary.status === 'satisfied-via-link' ? 'info' : 'warning',
+            tone: summary.severity === 'error'
+                ? 'error'
+                : summary.severity === 'notice'
+                    ? 'info'
+                    : 'warning',
             label: 'Linked Skills',
             state: summary.outcomeCount === 1
                 ? summary.state
@@ -644,7 +651,7 @@ function createOverviewStatusViewModel(report) {
         issues: report.issues
             .filter((issue) => !isAdvancedDeployIssue(issue.code))
             .map((issue) => ({
-            key: issue.code,
+            key: issue.confirmationId ?? issue.decisionId ?? issue.code,
             tone: issue.severity === 'error'
                 ? 'error'
                 : issue.severity === 'notice'
@@ -662,66 +669,52 @@ function createOverviewStatusViewModel(report) {
 }
 function isAdvancedDeployIssue(code) {
     return code.startsWith('deploy.skillsLinked.')
-        || code.startsWith('deploy.unsafeDiffWithheld.')
         || code === 'deploy.legacyCodexSkillDuplicates';
 }
-function summarizeLinkOutcomes(outcomes) {
+function summarizeLinkFacts(facts) {
     const groups = new Map();
-    for (const outcome of outcomes) {
-        const surface = linkOutcomeSurface(outcome);
-        const key = outcome.status === 'blocked'
-            ? [
-                outcome.ownership,
-                outcome.status,
-                outcome.reason,
-                [...outcome.packageNames].sort().join(','),
-                [...(outcome.resolvedPaths ?? outcome.linkPaths)].sort().join(','),
-            ].join(':')
-            : `${outcome.ownership}:${outcome.status}:${surface}`;
-        const matching = groups.get(key) ?? [];
-        matching.push(outcome);
-        groups.set(key, matching);
+    for (const fact of facts) {
+        const surfaceLabel = fact.surfaces.length === 0
+            ? displaySkillSurface('canonical-store')
+            : fact.surfaces.map(({ surface }) => displaySkillSurface(surface)).join(' + ');
+        const key = fact.status === 'blocked'
+            ? fact.id
+            : `${fact.ownership}:${fact.status}:${fact.severity}:${surfaceLabel}`;
+        groups.set(key, [...(groups.get(key) ?? []), fact]);
     }
-    const physicalFacts = [...groups.entries()].map(([key, matching]) => {
-        const { ownership, status } = matching[0];
-        const surfaces = [...new Set(matching.map(linkOutcomeSurface))];
-        const packageNames = new Set(matching.flatMap((outcome) => outcome.packageNames));
+    return [...groups.entries()].map(([key, matching]) => {
+        const { ownership, status, severity } = matching[0];
+        const surfaces = [...new Set(matching.flatMap((fact) => fact.surfaces.map(({ surface }) => surface)))];
+        const packageNames = new Set(matching.flatMap((fact) => fact.packageNames));
         return {
             key,
             status,
+            severity,
             ownership,
-            surfaceLabel: surfaces.map(displaySkillSurface).join(' + '),
-            state: status === 'blocked'
-                ? 'Needs decision'
-                : ownership === 'managed'
-                    ? 'Already satisfied projection'
-                    : 'Satisfied via link',
+            surfaceLabel: surfaces.length === 0
+                ? displaySkillSurface('canonical-store')
+                : surfaces.map(displaySkillSurface).join(' + '),
+            state: severity === 'error'
+                ? 'Blocked'
+                : severity === 'decisionRequired'
+                    ? 'Needs decision'
+                    : severity === 'warning'
+                        ? 'Preserve external'
+                        : ownership === 'managed'
+                            ? 'Already satisfied projection'
+                            : 'Satisfied via link',
             outcomeCount: status === 'blocked' ? 1 : matching.length,
             packageCount: packageNames.size,
             affectedFileCount: status === 'blocked'
-                ? Math.max(...matching.map((outcome) => outcome.affectedFileCount))
-                : matching.reduce((total, outcome) => total + outcome.affectedFileCount, 0),
+                ? Math.max(...matching.map((fact) => fact.affectedFileCount))
+                : matching.reduce((total, fact) => total + fact.affectedFileCount, 0),
+            ...(matching.length === 1
+                && matching[0].linkPaths.length === 1
+                && matching[0].resolvedPaths?.length === 1
+                ? { pathMapping: `${matching[0].linkPaths[0]} → ${matching[0].resolvedPaths[0]}` }
+                : {}),
         };
     });
-    const summaries = new Map();
-    for (const fact of physicalFacts) {
-        const key = `${fact.ownership}:${fact.status}:${fact.surfaceLabel}`;
-        const current = summaries.get(key);
-        summaries.set(key, current
-            ? {
-                ...current,
-                outcomeCount: current.outcomeCount + fact.outcomeCount,
-                packageCount: current.packageCount + fact.packageCount,
-                affectedFileCount: current.affectedFileCount + fact.affectedFileCount,
-            }
-            : { ...fact, key });
-    }
-    return [...summaries.values()];
-}
-function linkOutcomeSurface(outcome) {
-    if (outcome.owner === 'canonical-store')
-        return 'canonical-store';
-    return outcome.surface;
 }
 function statusItemText(item, includeDetails = true) {
     return includeDetails && item.details
@@ -805,10 +798,10 @@ function CaptureChoiceLine({ choice, focused, selected, }) {
 }
 function CaptureConfirmation({ workflow, terminalRows, }) {
     const warnings = captureWarnings(workflow.plan);
-    const allConfirmed = warnings.every((warning) => workflow.confirmedIssueCodes.includes(warning.code));
+    const allConfirmed = warnings.every((warning) => workflow.confirmedIssueIds.includes(warning.confirmationId));
     const viewport = listViewport(warnings, workflow.warningCursor, Math.max(1, terminalRows - (terminalRows <= 12 ? 8 : 10)));
     return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: [workflow.selectedIds.length, " selected changes"] }), warnings.length > 0 && _jsx(Text, { children: "Warnings require explicit confirmation:" }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: warning }, index) => {
-                const confirmed = workflow.confirmedIssueCodes.includes(warning.code);
+                const confirmed = workflow.confirmedIssueIds.includes(warning.confirmationId);
                 const style = statusToneStyle(confirmed ? 'success' : 'warning');
                 return (_jsxs(Text, { color: style.color, dimColor: style.dimColor, children: [viewport.start + index === workflow.warningCursor ? '>' : ' ', ' ', "[", confirmed ? 'x' : ' ', "] ", style.symbol, ' ', confirmed ? 'Confirmed' : 'Warning', " \u00B7 ", warning.message] }, warning.code));
             }), !viewport.combinedIndicator && viewport.hiddenAfter > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenAfter, " more"] })), viewport.combinedIndicator && (_jsxs(Text, { dimColor: true, children: ['  ', "\u2026 ", viewport.hiddenBefore, " earlier \u00B7 ", viewport.hiddenAfter, " more"] })), !allConfirmed && (_jsx(StatusLine, { tone: "error", label: "Blocked", children: "confirm every warning." }))] }));
@@ -830,6 +823,8 @@ function DeployWorkflow({ workflow, terminalRows, }) {
             return _jsx(DeploySelection, { workflow: workflow, terminalRows: terminalRows });
         case 'diff':
             return _jsx(DeployDiff, { workflow: workflow });
+        case 'decision':
+            return _jsx(DeployDecision, { workflow: workflow });
         case 'confirmation':
             return (_jsx(DeployConfirmation, { workflow: workflow, terminalRows: terminalRows }));
         case 'applying':
@@ -840,20 +835,28 @@ function DeployWorkflow({ workflow, terminalRows, }) {
             return null;
     }
 }
+function DeployDecision({ workflow, }) {
+    const decision = workflow.plan.decisions[workflow.decisionIndex];
+    if (!decision)
+        return null;
+    const labels = {
+        'preserve-external': 'Preserve external link and target',
+        'replace-with-repository': 'Replace link node with Repository version',
+    };
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(StatusLine, { tone: "warning", label: "Needs decision", children: "divergent external Skill link" }), _jsxs(Text, { children: [workflow.decisionIndex + 1, "/", workflow.plan.decisions.length, " \u00B7 ", decision.packageNames.join(', ')] }), decision.linkPaths.map((linkPath) => (_jsx(Text, { wrap: "truncate-middle", children: linkPath }, linkPath))), _jsx(Text, { children: " " }), decision.choices.map((choice, index) => {
+                const selected = workflow.decisions[decision.id] === choice;
+                return (_jsxs(Text, { color: index === workflow.cursor ? 'cyan' : undefined, children: [index === workflow.cursor ? '›' : ' ', " ", selected ? '[x]' : '[ ]', " ", labels[choice]] }, choice));
+            }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Replace backs up and removes only the link node; it never writes through the external target." })] }));
+}
 function DeploySelection({ workflow, terminalRows, }) {
     const tree = buildDeploySelectionTree(workflow.plan);
     const visible = flattenDeploySelectionTree(tree, workflow.expandedNodeIds);
     const advanced = workflow.plan.changes.filter((change) => change.group === 'advanced');
-    const linkOutcomeSummaries = summarizeLinkOutcomes(workflow.plan.linkOutcomes);
-    const linkOutcomeRows = workflow.plan.linkOutcomes.length === 1
-        ? 2
-        : linkOutcomeSummaries.length;
+    const linkOutcomeSummaries = summarizeLinkFacts(workflow.plan.linkFacts);
+    const showLinkPathMapping = linkOutcomeSummaries.length === 1;
+    const linkOutcomeRows = linkOutcomeSummaries.reduce((total, summary) => total + 1 + (showLinkPathMapping && summary.pathMapping ? 1 : 0), 0);
     const viewport = listViewport(visible, workflow.cursor, Math.max(1, terminalRows - (terminalRows <= 12 ? 9 : 10) - linkOutcomeRows));
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: ["Repository: ", workflow.plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: [workflow.plan.changes.length, " changes \u00B7 ", workflow.selectedIds.length, " selected"] }), workflow.plan.linkOutcomes.length === 1 && workflow.plan.linkOutcomes.map((outcome) => (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: [outcome.status === 'satisfied-via-link'
-                                ? outcome.ownership === 'managed'
-                                    ? 'Already satisfied projection'
-                                    : 'Satisfied via link'
-                                : `Blocked · ${outcome.reason?.replaceAll('-', ' ') ?? 'unclassified'}`, ' ', "\u00B7 ", outcome.ownership === 'managed' ? 'Managed' : 'External', " \u00B7 ", outcome.packageNames.length, " Skill", ' ', outcome.packageNames.length === 1 ? 'package' : 'packages', " \u00B7", ' ', outcome.affectedFileCount, " affected", ' ', outcome.affectedFileCount === 1 ? 'file' : 'files', " \u00B7", ' ', outcome.linkPaths.length, " ", outcome.linkPaths.length === 1 ? 'link' : 'links'] }), _jsxs(Text, { wrap: "truncate-middle", children: ['  ', outcome.linkPath, outcome.resolvedPath ? ` → ${outcome.resolvedPath}` : ''] })] }, `${outcome.owner}:${outcome.owner === 'ide' ? outcome.ide : 'store'}:${outcome.linkPath}`))), workflow.plan.linkOutcomes.length > 1 && linkOutcomeSummaries.map((summary) => (_jsxs(Text, { wrap: "truncate-middle", children: [summary.surfaceLabel, " \u00B7 ", summary.outcomeCount, " ", summary.ownership, ' ', summary.state.toLowerCase(), " outcomes \u00B7", ' ', summary.packageCount, " Skill ", summary.packageCount === 1 ? 'package' : 'packages', " \u00B7", ' ', summary.affectedFileCount, " affected", ' ', summary.affectedFileCount === 1 ? 'file' : 'files'] }, summary.key))), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: { node, depth } }, index) => {
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: ["Repository: ", workflow.plan.repositoryPath ?? 'not bound'] }), _jsxs(Text, { children: [workflow.plan.changes.length, " changes \u00B7 ", workflow.selectedIds.length, " selected"] }), linkOutcomeSummaries.map((summary) => (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { wrap: "truncate-middle", children: [summary.state, " \u00B7 ", summary.ownership === 'managed' ? 'Managed' : 'External', " \u00B7", ' ', summary.packageCount, " Skill ", summary.packageCount === 1 ? 'package' : 'packages', " \u00B7", ' ', summary.affectedFileCount, " affected", ' ', summary.affectedFileCount === 1 ? 'file' : 'files', " \u00B7 ", summary.surfaceLabel] }), showLinkPathMapping && summary.pathMapping && (_jsxs(Text, { dimColor: true, wrap: "truncate-middle", children: ["  ", summary.pathMapping] }))] }, summary.key))), _jsx(Text, { children: " " }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: { node, depth } }, index) => {
                 const visibleIndex = viewport.start + index;
                 const expanded = workflow.expandedNodeIds.includes(node.id);
                 const disclosure = node.children.length === 0
@@ -927,13 +930,18 @@ function DeployPreviewView({ preview, }) {
     if (preview.kind === 'binary') {
         return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: preview.targetPath }), _jsxs(Text, { children: ['  ', "binary \u00B7 ", preview.bytes, " bytes \u00B7 sha256 ", preview.sha256] })] }));
     }
+    if (preview.kind === 'package') {
+        return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: ["Replace linked package node: ", preview.targetPath] }), preview.files.map((file) => (file.kind === 'binary'
+                    ? _jsxs(Text, { children: [file.targetPath, " \u00B7 binary \u00B7 ", file.bytes, " bytes \u00B7 sha256 ", file.sha256] }, file.targetPath)
+                    : (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: file.targetPath }), file.diff.split('\n').map((line, index) => (_jsxs(Text, { children: ['  ', line] }, `${file.targetPath}:${index}`)))] }, file.targetPath))))] }));
+    }
     return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { children: preview.targetPath }), preview.diff.split('\n').map((line, index) => (_jsxs(Text, { children: ['  ', line] }, `${preview.targetPath}:${index}`)))] }));
 }
 function DeployConfirmation({ workflow, terminalRows, }) {
     const warnings = deployWarnings(workflow.plan);
-    const allConfirmed = warnings.every((warning) => workflow.confirmedIssueCodes.includes(warning.code));
+    const allConfirmed = warnings.every((warning) => workflow.confirmedIssueIds.includes(warning.confirmationId));
     const viewport = listViewport(warnings, workflow.warningCursor, Math.max(1, terminalRows - (terminalRows <= 12 ? 8 : 10)));
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: [workflow.selectedIds.length, " selected changes"] }), warnings.length > 0 && _jsx(Text, { children: "Warnings require explicit confirmation:" }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: warning }, index) => (_jsxs(Text, { children: [viewport.start + index === workflow.warningCursor ? '>' : ' ', ' ', "[", workflow.confirmedIssueCodes.includes(warning.code) ? 'x' : ' ', "] ", warning.message] }, warning.code))), !viewport.combinedIndicator && viewport.hiddenAfter > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenAfter, " more"] })), viewport.combinedIndicator && (_jsxs(Text, { dimColor: true, children: ['  ', "\u2026 ", viewport.hiddenBefore, " earlier \u00B7 ", viewport.hiddenAfter, " more"] })), !allConfirmed && (_jsx(Text, { color: "yellow", children: "Apply disabled: confirm every warning." }))] }));
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsxs(Text, { children: [workflow.selectedIds.length, " selected changes"] }), warnings.length > 0 && _jsx(Text, { children: "Warnings require explicit confirmation:" }), !viewport.combinedIndicator && viewport.hiddenBefore > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenBefore, " earlier"] })), viewport.items.map(({ item: warning }, index) => (_jsxs(Text, { children: [viewport.start + index === workflow.warningCursor ? '>' : ' ', ' ', "[", workflow.confirmedIssueIds.includes(warning.confirmationId) ? 'x' : ' ', "] ", warning.message] }, warning.code))), !viewport.combinedIndicator && viewport.hiddenAfter > 0 && (_jsxs(Text, { dimColor: true, children: ["  \u2026 ", viewport.hiddenAfter, " more"] })), viewport.combinedIndicator && (_jsxs(Text, { dimColor: true, children: ['  ', "\u2026 ", viewport.hiddenBefore, " earlier \u00B7 ", viewport.hiddenAfter, " more"] })), !allConfirmed && (_jsx(Text, { color: "yellow", children: "Apply disabled: confirm every warning." }))] }));
 }
 function RestoreWorkflow({ workflow, terminalRows, }) {
     switch (workflow.status) {
