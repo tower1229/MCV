@@ -734,6 +734,11 @@ describe('Deploy operations', () => {
     expect(fs.lstatSync(packagePath).isSymbolicLink()).toBe(false);
     expect(fs.readFileSync(path.join(packagePath, 'SKILL.md'), 'utf8')).toBe('# Review\n');
     expect(fs.readFileSync(externalSkill, 'utf8')).toBe('# External review\n');
+
+    const nextPlan = await createDeployPlan(context);
+    expect(nextPlan.status).toBe('planned');
+    expect(nextPlan.changes.some((change) =>
+      change.change === 'delete' && change.targetPath === packagePath)).toBe(false);
   });
 
   it('classifies a non-directory link target as one physical-target conflict', async () => {

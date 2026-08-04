@@ -438,8 +438,10 @@ async function buildDeployPlan(
   const managedStorePaths = Object.keys(managedSkillLayout?.packages ?? {})
     .map((storePath) => path.resolve(storePath));
   for (const [targetPath, inventoryEntry] of Object.entries(managedInventory)) {
-    if (desiredPaths.has(path.resolve(targetPath)) || !deployPathExists(targetPath)) continue;
     const resolvedTarget = path.resolve(targetPath);
+    const containsDesiredPath = [...desiredPaths].some((desiredPath) =>
+      isPathWithinRoot(resolvedTarget, desiredPath));
+    if (containsDesiredPath || !deployPathExists(targetPath)) continue;
     if (isPathUnderAnyRoot(resolvedTarget, managedStorePaths)) continue;
     const linkAncestor = findSymbolicLinkAncestor(targetPath);
     const projection = managedSkillLayout?.projections[targetPath]
