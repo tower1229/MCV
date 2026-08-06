@@ -1,8 +1,8 @@
 # MCV v0.3 Profile 与 Deploy 技术方案
 
-> 状态：产品决策已冻结，技术方案已定稿  
-> 目标版本：MCV 0.3  
-> 设计日期：2026-08-06  
+> 状态：产品决策已冻结，技术方案已定稿
+> 目标版本：MCV 0.3
+> 设计日期：2026-08-06
 > 当前实现基线：MCV 0.2.0-beta.1
 
 ## 1. 方案结论
@@ -998,4 +998,3 @@ Capture、Deploy 和状态不再需要全局 Shell 路由测试。
 - [Gemini CLI MCP](https://geminicli.com/docs/tools/mcp-server/)
 - [MCP 2026-07-28 Specification](https://modelcontextprotocol.io/specification/2026-07-28)
 - [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk)
-
