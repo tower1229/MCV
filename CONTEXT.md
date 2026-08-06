@@ -46,7 +46,7 @@ Status summarizes a multi-file Skill projection as one package action per Surfac
 _Avoid_: "sync status", "unsynced"
 
 **Restore Conflict（恢复冲突）**:
-A local content or topology change made after the latest deployment that would be overwritten by Restore — including file edits, replaced directories, retargeted or removed managed-link projections, and other node-type changes. A Restore Conflict blocks restoration in v0.1 and is distinct from Drift, which describes managed-field changes relative to a Baseline Snapshot.
+A local content or topology change made after the latest deployment that would be overwritten by Restore — including file edits, replaced directories, retargeted or removed managed-link projections, and other node-type changes. A Restore Conflict blocks restoration in the current beta and is distinct from Drift, which describes managed-field changes relative to a Baseline Snapshot.
 _Avoid_: "restore drift", "extra confirmation"
 
 **Capture（收集）**:
@@ -58,7 +58,7 @@ A single Markdown file (`common/AGENTS.md`) containing the user's cross-IDE deve
 _Avoid_: "rule templates", "rule library"
 
 **MCP Registry（MCP 注册表）**:
-A Canonical YAML file (`common/mcp.yaml`) that stores the core definitions of MCP servers (name, command, args, env variable references). IDE-specific overrides (e.g. Cursor's `alwaysAllow`, alternate launch commands) live in `ide/<ide-name>/` and are merged on top during deploy. Override priority: IDE-level > Canonical base.
+A Canonical YAML file (`common/mcp.yaml`) that stores the core definitions of MCP servers (name, command, args, env variable references). Surface-specific overrides (e.g. timeout, disabled, headers, or alternate launch commands) live in `ide/<ide-or-surface>/mcp-overrides.yaml` and are merged on top during deploy. Override priority: Surface-level > Canonical base.
 _Avoid_: "MCP config", "server list"
 
 **Skill**:
@@ -77,10 +77,6 @@ _Avoid_: "config file", "settings file"
 MCV does not recognize, replace, exclude, mask, or block plaintext keys in supported configuration. Users may choose plaintext or `${env:*}` references. Repository files, backups, terminal previews, and JSON can therefore contain plaintext keys; access control, encryption, transport, and disclosure risk belong to the user. This does not widen discovery beyond Adapter/Skill-declared content.
 _Avoid_: "secret scanner", "credential vault", "safe Repository"
 
-**Platform Override（平台覆盖）**:
-Platform differences are primarily handled by the variable system (`${HOME}`, `${PROJECTS_HOME}`, etc.). The `overrides/macos/` and `overrides/windows/` directories exist for truly platform-exclusive content (e.g. a Windows-only MCP server). When used, override files replace the corresponding base file entirely (file-level override) — no deep merge in v0.1.
-_Avoid_: "platform layer", "OS config"
-
 ## Example dialogue
 
 > **Developer:** Status reports Drift in an MCV-managed field. Can Capture silently treat it as Native configuration?
@@ -93,6 +89,6 @@ _Avoid_: "platform layer", "OS config"
 >
 > **Developer:** Restore reports a Restore Conflict for the same path. Is that just another Drift warning?
 >
-> **Domain expert:** No. It means Restore would overwrite a change made after the latest deployment, so v0.1 blocks the restoration until the user preserves or resolves that change.
+> **Domain expert:** No. It means Restore would overwrite a change made after the latest deployment, so the current beta blocks the restoration until the user preserves or resolves that change.
 
 <!-- Add terms lazily as the domain stabilizes. See .agents/skills/domain-modeling/CONTEXT-FORMAT.md. -->

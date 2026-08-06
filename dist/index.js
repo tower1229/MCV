@@ -49,7 +49,7 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         .description('Capture local AI IDE configuration into the MCV repository')
         .option('--dry-run', 'Show the capture plan without writing')
         .option('--json', 'Print a machine-readable plan')
-        .option('--yes', 'Apply only safe non-conflicting changes without prompting')
+        .option('--yes', 'Apply default non-conflicting changes without prompting')
         .option('--verbose', 'Show processed file content in the preview')
         .action(async (options) => {
         validateWriteOutputOptions(captureCommand, options);

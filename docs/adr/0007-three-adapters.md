@@ -1,6 +1,6 @@
 # Three adapters: Codex, Claude Code, Gemini
 
-MCV v0.1 ships three Adapters, not five:
+MCV's current supported contract ships three Adapters, not five:
 
 - **Codex** — targets `~/.codex/`
 - **Claude Code** — targets `~/.claude/` and `~/.claude.json`

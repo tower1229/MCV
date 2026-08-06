@@ -58,7 +58,7 @@ describe('packaged mcv CLI', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe('0.1.0');
+    expect(result.stdout.trim()).toBe('0.2.0-beta.1');
     expect(result.stderr).toBe('');
   });
 

@@ -860,11 +860,12 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'expect -exact {INPUT_MODE:restored}',
       'expect -exact {EXIT_CODE:130}',
       'expect eof',
-      'set result [wait]',
-      'exit [lindex $result 3]',
+      'wait',
+      'exit 0',
     ]);
 
-    expect(outcome.code).toBe(130);
+    expect(outcome.code).toBe(0);
+    expect(outcome.output).toContain('EXIT_CODE:130');
     expectRestoredTerminal(outcome.output);
   });
 
