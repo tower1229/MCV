@@ -587,7 +587,10 @@ describe('TUI Shell view', () => {
       plan,
     });
 
-    const rendered = renderToString(<ShellView state={state} />, { columns: 46 });
+    const rendered = renderToString(
+      <ShellView state={state} terminalRows={24} />,
+      { columns: 46 },
+    );
 
     expect(rendered).toMatchInlineSnapshot(`
       "MCV
@@ -1190,9 +1193,10 @@ describe('TUI Shell view', () => {
       plan: largeDeployPlan(),
     });
 
-    const rendered = renderToString(<ShellView state={state} />, {
-      columns: 80,
-    });
+    const rendered = renderToString(
+      <ShellView state={state} terminalRows={24} />,
+      { columns: 80 },
+    );
 
     expect(rendered.split('\n').length).toBeLessThanOrEqual(24);
     expect(rendered).toContain('Codex / Skills');
