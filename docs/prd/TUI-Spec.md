@@ -92,7 +92,7 @@ TTY 中执行 `mcv` 打开首页；执行任一业务子命令则作为深链接
 - Whole-file replacement is supported only for content fully owned by MCV and is labeled explicitly in the preview.
 - Successful partial Deploy updates Baseline Snapshot and managed inventory only for selected and successfully applied items while preserving valid prior state for unselected items.
 - The latest successful Deploy selection is stored in local device state at IDE/capability granularity. It is neither a Profile nor a Preset and is not stored in the Repository.
-- Restore Conflict is distinct from Drift and blocks Restore in v0.1. There is no force-restore action.
+- Restore Conflict is distinct from Drift and blocks Restore in the current beta. There is no force-restore action.
 - The Repository is a user-owned local directory. Git is an optional recommended versioning, backup, and transport method; non-Git state produces no Issue and MCV performs no Git mutations.
 - TTY business commands deep-link into one persistent TUI Shell. Overview and read-only pages can navigate back to the home screen; write result pages can return home or exit.
 - The TUI uses alternate screen. All success, failure, interrupt, and exception paths restore the main screen, cursor, and input mode.
@@ -104,7 +104,7 @@ TTY 中执行 `mcv` 打开首页；执行任一业务子命令则作为深链接
 - JSON payloads use operation schema v2 and include schema version, operation, status, readiness, Repository path, Issues, and next actions. Plans and Results carry their real changes; Status intentionally omits `changes` and exposes only `pendingDeployment`. Structured codes are stable; human messages remain English.
 - Exit codes are 0 for the requested result, 1 for execution/system failure, 2 for usage/input error, 3 for a non-interactive human-decision block, and 130 for user interruption. A successfully generated dry-run Plan exits 0 even when its payload is not ready to apply.
 - Color is automatic and respects `NO_COLOR`; no additional color flag is introduced, and color is never the only indicator.
-- All product UI text is English, including TUI, help, prompts, errors, progress, and result summaries. README remains Chinese. v0.1 does not introduce an i18n framework.
+- All product UI text is English, including TUI, help, prompts, errors, progress, and result summaries. README remains Chinese. The current beta does not introduce an i18n framework.
 - MCV migrates the entire package from CommonJS to NodeNext/ESM before adding Ink 7. The project keeps a single ESM build and no TUI loading bridge or dual module output.
 - The ESM migration is an independent verified change. Ink, React, and TUI work begin only after existing CLI, typecheck, tests, build, and npm bin behavior pass under ESM.
 - Ink is the only interaction framework. Clack and Inquirer are not introduced alongside it.
@@ -146,7 +146,7 @@ TTY 中执行 `mcv` 打开首页；执行任一业务子命令则作为深链接
 - Git hosting integration or any required backup/transport provider.
 - Credential management or environment-variable value entry. MCV may transfer credential-like bytes as ordinary supported configuration but provides no secrecy guarantees.
 - Automatic IDE installation.
-- Full internationalization or bilingual interface text in v0.1.
+- Full internationalization or bilingual interface text in the current beta.
 - CommonJS/ESM dual builds or a separate ESM-only TUI package.
 - Adding multiple prompt frameworks alongside Ink.
 

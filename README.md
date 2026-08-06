@@ -4,9 +4,9 @@
 
 MCV（Mobile Configuration Vehicle）是一个本地运行的 CLI，用来把 Codex、Claude Code 和 Gemini 的个人配置忠实收集到用户自己掌控的本地数据仓库，并在另一台 macOS 或 Windows 设备上事务化部署。Git 是可选且推荐的版本管理、备份和传输方式，但不是使用 MCV 的前置条件。
 
-MCV v0.1 已完成最小闭环：发现配置、忠实收集与路径参数化、部署、漂移检查和最近一次备份恢复。MCV 不判断配置内容是否敏感；支持范围内发现的明文密钥、`.env`、credential、PEM/key 等文件会原样进入 Repository、预览、终端、JSON 和备份。用户自行决定使用明文还是 `${env:*}`，并自行负责访问控制、加密、传输和泄漏风险。MCV 不会安装 IDE，也不会在后台自动修改配置。
+MCV `0.2.0-beta.1` 已完成最小闭环：发现配置、忠实收集与路径参数化、部署、漂移检查和最近一次备份恢复。MCV 不判断配置内容是否敏感；Adapter 支持范围内发现的明文密钥、`.env`、credential、PEM/key 等文件会原样进入 Repository、预览、终端、JSON 和备份。用户自行决定使用明文还是 `${env:*}`，并自行负责访问控制、加密、传输和泄漏风险。MCV 不会安装 IDE，也不会在后台自动修改配置。
 
-> v0.1 仍是首个公开测试版本。请把 Repository、备份和终端输出视为可能含明文密钥的数据，并按自己的安全要求管理。
+> `0.2.0-beta.1` 是预发布版本。请把 Repository、备份和终端输出视为可能含明文密钥的数据，并按自己的安全要求管理。升级已有 Repository 前先运行 `mcv migrate --dry-run`。
 
 ## 安装
 
@@ -31,7 +31,7 @@ npx @tower1229/mcv --help
 | Claude Code | `~/.claude/CLAUDE.md` | `~/.claude/skills/` | `~/.claude/settings.json`、`~/.claude.json` |
 | Gemini | `~/.gemini/GEMINI.md` | Gemini CLI `~/.gemini/skills/`；Antigravity `~/.gemini/config/skills/` | Gemini CLI `settings.json`；Antigravity `config/`、IDE User 配置 |
 
-Gemini 对用户仍是一个目标，Adapter 内部把 Gemini CLI 与 Antigravity 当作两个独立 Surface 扫描和部署。仅存在 runtime 目录不会被误判为已安装。Cursor 不属于 v0.1 支持范围。
+Gemini 对用户仍是一个目标，Adapter 内部把 Gemini CLI 与 Antigravity 当作两个独立 Surface 扫描和部署。仅存在 runtime 目录不会被误判为已安装。Cursor 不属于当前支持范围。
 
 MCV 仓库中的配置分为：
 
@@ -87,7 +87,7 @@ TTY workflow 会按 IDE 与 File、Skill、MCP 显示最终会写入的完整预
 - Skill 以完整目录包收集，保留 scripts、references、examples、assets 和二进制资源。
 - 只收集 Adapter 与 Skill Surface 声明的支持内容，不扩展为任意 HOME 文件扫描；runtime/cache/session 等非配置数据继续排除。
 
-如果选择用 Git 管理和传输数据仓库，确认预览安全后可自行提交并推送：
+如果选择用 Git 管理和传输数据仓库，确认预览内容及其暴露风险可接受后可自行提交并推送：
 
 ```bash
 git add .
@@ -215,7 +215,7 @@ MCV 对配置内容保持中立，不提供保密保证。
 ## 当前限制
 
 - 仅支持 Codex、Claude Code 和 Gemini。
-- 没有 `doctor`、Profile 或 GUI；计划通过 capture/deploy 的 `--dry-run`、`--json`、`--verbose` 输出。
+- 没有 `doctor`、命名的 Profile/Preset 资产管理或 GUI；当前诊断通过各命令的 `--dry-run`、`--plain`、`--json` 输出。
 - `restore` 只恢复最近一次有效的本机部署前备份，不读取仓库。
 - 没有变化的重复 deploy 不生成新备份。
 - restore 后清除部署基线，要求重新 deploy 或 capture 后再建立事实基线。
@@ -234,6 +234,8 @@ node dist/index.js --help
 ```
 
 发布包之前，npm 会通过 `prepack` 自动运行 typecheck、完整测试和 build。
+
+变更记录与完整发布门见 [CHANGELOG.md](CHANGELOG.md) 和 [docs/release-checklist.md](docs/release-checklist.md)。
 
 只检查将进入 npm 的文件：
 

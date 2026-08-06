@@ -2,12 +2,12 @@
 
 **项目名称：** MCV
 **项目全称：** Mobile Configuration Vehicle
-**版本：** PRD v0.1
+**版本：** PRD 0.2 beta
 **项目口号：** 可以随处部署的个人生产力，帝国的第一个建筑。
 **项目属性：** 数字主权生态基础设施
 **目标平台：** macOS、Windows
 **首期目标 IDE：** Codex、Claude Code、Gemini (涵盖 Gemini CLI 和 Antigravity)
-**实现状态（2026-08-03）：** Repository schema v3、operation schema v2；Gemini 为单目标双 Surface；配置数据中立；支持 bind、v1/v2 显式迁移、事务部署、linked Skill 决策与漂移保护恢复。
+**实现状态（2026-08-05）：** Repository schema v3、operation schema v2；Gemini 为单目标双 Surface；配置数据中立；支持 Repository 生命周期、v1/v2 显式迁移、事务部署、linked Skill 决策与漂移保护恢复。
 
 ---
 
@@ -73,14 +73,14 @@ MCV 在数字主权生态中的定位是：
 
 ### 3.1 首期目标
 
-MCV v0.1 应实现：
+当前 beta 应实现：
 
 1. 用户在自行选择的目录中初始化 MCV 数据仓库。
 2. 当前设备与该仓库建立稳定绑定。
 3. 自动发现已安装或存在配置的 AI IDE。
 4. 收集当前设备上的规则、Skills、MCP 和 IDE 原生配置。
 5. 在写入仓库前进行逐项人工确认。
-6. 自动过滤密钥、缓存、日志和设备运行状态。
+6. 只收集 Adapter/Skill Surface 声明的配置，排除未声明的缓存、日志、会话和设备运行状态；支持范围内的内容不因类似密钥而被过滤。
 7. 将路径等设备相关信息转换为可迁移变量。
 8. 将仓库配置部署到新的 macOS 或 Windows 设备。
 9. 部署前展示变更摘要并自动备份。
@@ -110,19 +110,19 @@ MCV v0.1 应实现：
 恢复主要 AI IDE 配置
 ```
 
-理想情况下，用户不需要理解 Adapter、Profile、Schema、Overlay 等内部概念。
+理想情况下，用户不需要理解 Adapter、Schema、Overlay 等内部概念。
 
 ---
 
 ## 4. 非目标
 
-MCV v0.1 暂不处理以下内容：
+当前 beta 暂不处理以下内容：
 
 - AI IDE 会话记录和聊天历史；
 - 云端托管服务；
 - 多用户协作和权限系统；
 - 自动双向实时同步；
-- API Key、OAuth Token、Cookie 等凭据同步；
+- 独立的凭据清单、Secret Vault 或凭据生命周期管理；支持配置中的同类值仍作为普通配置忠实传输；
 - IDE 安装及完整操作系统环境安装；
 - Docker、字体、终端、系统软件等完整 dotfiles 管理；
 - 企业级审批和审计系统；
@@ -270,7 +270,7 @@ MCV 由两个独立部分组成。
 - 交互式终端界面；
 - IDE 和配置发现；
 - 配置收集；
-- 配置过滤和转换；
+- 配置所有权过滤、路径参数化和格式转换；
 - 差异计算；
 - 配置部署；
 - 自动备份；
@@ -364,10 +364,7 @@ ide/
 
 包括：
 
-- 登录凭据；
-- OAuth Token；
-- API Key；
-- Cookie；
+- Adapter 未声明的专用登录会话与凭据存储；
 - 缓存；
 - 日志；
 - 会话记录；
@@ -380,7 +377,7 @@ ide/
 - IDE 内部索引；
 - 自动更新状态。
 
-此类数据默认排除。
+此类数据默认排除。内容像不像密钥不是分层依据：支持配置中的明文 Key、Token 或 Cookie 仍属于配置数据。
 
 ---
 
@@ -405,7 +402,7 @@ MCV 不采用“全部转换”或“整个目录原样复制”的极端方案�
 - 保留原始 JSON、TOML、YAML 或 Markdown 格式；
 - 不重新定义所有字段；
 - 通过白名单收集指定配置文件；
-- 通过黑名单排除凭据、缓存和运行状态；
+- 通过 Adapter 声明的 `localPaths` 与支持路径边界排除缓存和运行状态；
 - 保留 MCV 不认识的新字段。
 
 ### 9.3 不允许直接复制整个配置目录
@@ -461,7 +458,7 @@ exclude:
 - 发现配置路径；
 - 读取原生配置；
 - 判断可迁移文件；
-- 排除敏感内容；
+- 排除 Adapter 明确声明的 Local/Runtime 内容；
 - 替换路径变量；
 - 结构化合并；
 - 写入目标路径；
@@ -474,7 +471,7 @@ exclude:
 - IDE 修改配置文件位置；
 - IDE 修改配置文件名称；
 - IDE 更换配置格式；
-- 新增必须排除的敏感字段；
+- 新增需要排除的本机运行状态字段；
 - 配置写入方式发生变化。
 
 普通新增字段应当自动被保留。
@@ -574,11 +571,6 @@ managedPaths:
   - $.mcpServers
   - $.rules.global
 
-nativePaths:
-  - $.ui
-  - $.accessibility
-  - $.experimental
-
 localPaths:
   - $.preferredTerminal
   - $.workspaceRoot
@@ -591,9 +583,9 @@ localPaths:
         ↓
 注入 MCV 管理字段
         ↓
-应用平台覆盖
+应用 Adapter/Surface 声明的平台差异
         ↓
-应用本机变量和密钥引用
+解析路径变量，保留明文值或 `${env:*}` 引用
         ↓
 写入设备
 ```
@@ -653,15 +645,9 @@ variables:
 
 部署时由本机值覆盖。
 
-平台差异目录（仅用于发生实际的文件级独有内容替换，其余差异通过变量机制处理）：
+当前 beta 不定义通用 `overrides/` 仓库目录。平台独有行为由拥有该配置的 Adapter 或 Surface 显式声明；增加通用覆盖布局需要独立契约和迁移方案。
 
-```text
-overrides/
-├─ macos/
-└─ windows/
-```
-
-MCV v0.1 必须处理：
+当前 beta 必须处理：
 
 - 路径分隔符；
 - 用户主目录；
@@ -737,7 +723,6 @@ It will store:
 - Skills
 - MCP
 - Native AI IDE configuration
-- Platform overrides
 
 It may store plaintext keys found in supported configuration.
 It will not collect undeclared session history, caches, logs, or arbitrary HOME files.
@@ -839,17 +824,9 @@ mcv unbind
 
 只删除当前设备绑定，不删除仓库或设备配置。
 
-### 15.8 临时指定仓库
+### 15.8 仓库选择边界
 
-高级用法：
-
-```bash
-mcv --repo /path/to/other-mcv status
-```
-
-只对当前命令生效，不修改默认绑定。
-
-第一版用户界面只突出单一默认仓库，但内部数据结构应允许未来扩展多仓库。
+当前 beta 不提供全局 `--repo` 临时覆盖。普通业务命令只使用已验证的本机绑定；用户可通过 `mcv bind [PATH]` 审阅并切换默认 Repository。未来多仓库切换必须保持 Repository ID 校验与显式绑定语义。
 
 ---
 
@@ -883,6 +860,7 @@ MCV
 ```bash
 mcv init
 mcv bind
+mcv migrate
 mcv capture
 mcv deploy
 mcv status
@@ -918,12 +896,7 @@ mcv unbind
 
 ### 17.2 初始化方式
 
-用户选择：
-
-```text
-● 收集当前设备已有配置
-○ 创建空白 MCV 仓库
-```
+Init Plan 只创建并绑定一个有效的空 Repository。TTY 中 Apply 成功后继续进入 Environment discovery 与 Capture workflow；用户可以取消 Capture，已经创建的空 Repository 与绑定仍然保留。`--dry-run`、`--yes` 或 `--json` 使用一次性协议，不隐式执行 Capture。
 
 ### 17.3 扫描结果
 
@@ -935,8 +908,8 @@ mcv unbind
 - 规则文件数量；
 - Skills 数量；
 - MCP 数量；
-- 疑似密钥数量；
-- 本机绝对路径数量。
+- 支持配置文件数量；
+- 已参数化路径数量。
 
 ### 17.4 分类确认
 
@@ -956,10 +929,9 @@ Gemini Native Configuration (Gemini CLI and Antigravity surfaces)
 成功后：
 
 - 创建仓库标识 (`mcv.yaml`)；
-- 写入用户确认的配置；
-- 创建 `.gitignore`；
 - 绑定当前设备；
-- 生成 Baseline Snapshot（基线快照），记录当前写入的所有文件哈希，作为后续 Capture 的参考点；
+- 生成空 Baseline Snapshot（基线快照）；
+- TTY 流程继续 Environment discovery 与 Capture，只有 Capture Apply 后才写入用户确认的配置；
 - 显示未处理警告；
 - 不自动提交 Git。
 
@@ -998,8 +970,10 @@ Capture 呈现给用户确认的是将要写入的最终形态：已知绝对路
 - MCP 增删；
 - 原生配置字段变化；
 - MCV 生成文件被手动修改；
-- 敏感信息被排除；
+- Local/Runtime 内容因所有权边界被排除；
 - 路径被参数化。
+
+完整预览按数据中立契约展示，可能包含明文密钥；不能用“已脱敏”或“安全”标签替代用户审阅。
 
 ### 18.3 人工确认粒度
 
@@ -1008,7 +982,7 @@ Capture 呈现给用户确认的是将要写入的最终形态：已知绝对路
 - 按 IDE 选择；
 - 按配置文件选择；
 - 按 Skill 或 MCP 选择；
-- 接受全部安全变化；
+- 接受全部默认选中的变化；
 - 取消全部变化。
 
 字段级选择可以后续增强。
@@ -1082,7 +1056,7 @@ This configuration was deleted from the device. Remove it from the MCV repositor
 默认选中：
 
 - 已安装且仓库存在配置的 IDE；
-- 安全且可迁移的配置。
+- 不需要额外决策或 warning confirmation 的可迁移变化。
 
 ### 19.3 部署预览
 
@@ -1094,7 +1068,7 @@ Planned deployment:
 Add:              4 files
 Modify:           3 files
 Structured merge: 2 files
-Skip:             2 fields with missing environment variables
+Warnings:         2 unresolved environment references
 Back up:          5 existing files
 ```
 
@@ -1148,7 +1122,7 @@ Back up:          5 existing files
 - 格式可解析；
 - 哈希与预期一致；
 - 必要路径已解析；
-- 敏感变量未被写入明文；
+- 明文值与 `${env:*}` 引用保持用户审阅时的形式，未解析引用不会静默变为空字符串；
 - 可执行的基础校验通过。
 
 ---
@@ -1179,7 +1153,7 @@ Claude Code   1 local managed change
 - 若检测到 Git，数据仓库是否存在未提交修改；非 Git 数据仓库不产生警告；
 - 当前数据仓库相对本机是否存在 Pending Deployment Change（待部署变化）；
 - 相对 Baseline Snapshot 是否存在 Drift 或缺失文件；
-- 是否缺少必要密钥；
+- 实际启用的结构化配置中是否存在缺失的环境变量引用；
 - 最近一次部署或 Capture 是否成功。
 
 不需要展示企业级详细审计日志。
@@ -1197,7 +1171,7 @@ Claude Code   1 local managed change
 - 将恢复的文件数量；
 - 当前文件是否在部署后被再次修改。
 
-如果当前文件已经发生新变化，则形成 Restore Conflict（恢复冲突）。v0.1 必须阻断恢复，列出冲突文件并提示用户先备份或手动处理；不得通过二次确认强制覆盖。
+如果当前文件已经发生新变化，则形成 Restore Conflict（恢复冲突）。当前 beta 必须阻断恢复，列出冲突文件并提示用户先备份或手动处理；不得通过二次确认强制覆盖。
 
 恢复操作本身也应避免直接删除用户新文件，可将当前状态临时备份后再恢复。
 
@@ -1207,7 +1181,7 @@ Claude Code   1 local managed change
 
 ### 22.0 界面语言
 
-v0.1 的所有产品界面文案统一使用英文，包括 TUI、CLI help、提示、错误、确认、进度和结果摘要。命令名、参数名、JSON 字段名和 `error.code` 同样使用英文。README 保持中文。首期不建设 i18n 框架，不在界面中做中英双语混排。
+当前 beta 的所有产品界面文案统一使用英文，包括 TUI、CLI help、提示、错误、确认、进度和结果摘要。命令名、参数名、JSON 字段名和 `error.code` 同样使用英文。README 保持中文。当前阶段不建设 i18n 框架，不在界面中做中英双语混排。
 
 ### 22.1 默认全程交互
 
@@ -1229,16 +1203,15 @@ v0.1 的所有产品界面文案统一使用英文，包括 TUI、CLI help、提
 | Canonical          | Shared Configuration       |
 | Native             | IDE-specific Configuration |
 | Adapter            | IDE Support                |
-| Profile            | 不在首期暴露             |
 | Overlay            | Merge Behavior             |
 | Drift              | Local Managed Change       |
 | Repository Binding | Repository Location        |
 
-### 22.3 安全默认值
+### 22.3 保守默认值
 
 - 删除默认不选中；
 - 覆盖已有配置需要确认；
-- 密钥默认排除；
+- 支持内容完整预览且可能包含明文；
 - 未知文件默认不收集；
 - 本机路径默认参数化；
 - 失败时不保留半写入状态。
@@ -1254,55 +1227,16 @@ v0.1 的所有产品界面文案统一使用英文，包括 TUI、CLI help、提
 
 ---
 
-## 23. Preset 设计
+## 23. 本机部署选择
 
-首期不向用户暴露 `Profile` 概念。
+当前 beta 只记录每台设备最近一次成功 Deploy 的 IDE/capability selection，并在下次 TTY Deploy 中复用。该记录：
 
-每台设备记录上一次部署选择，例如：
+- 只保存在本机状态中，不进入 Repository；
+- 不具备名称、继承、共享或多环境语义；
+- 不是 `Profile`、`Preset` 或其他可移植资产；
+- 在实际 Apply 成功后按本次范围更新。
 
-```yaml
-enabled:
-  ide:
-    - codex
-    - claude-code
-    - cursor
-
-  capabilities:
-    - rules
-    - skills
-    - mcp
-```
-
-下次部署时询问：
-
-```text
-Use this device's previous selection?
-```
-
-未来可以增加：
-
-```text
-Save this selection as a deployment preset?
-```
-
-用户可以建立：
-
-```text
-personal
-work
-minimal
-full
-```
-
-目录名称建议使用：
-
-```text
-presets/
-```
-
-而不是 `profiles/`。
-
-Preset 属于后续增强功能，不应阻塞第一版。
+未来是否需要命名、可移植、按项目或按环境作用域的配置资产，必须先通过用户研究定义场景和边界，再以独立 PRD/ADR 决定名称、存储布局与迁移方式。当前文档不预留 `profiles/` 或 `presets/` 目录。
 
 ---
 
@@ -1310,32 +1244,22 @@ Preset 属于后续增强功能，不应阻塞第一版。
 
 ```text
 my-mcv/
-├─ .mcv/
-│  └─ repository.json
-│
 ├─ mcv.yaml
-│
 ├─ common/
 │  ├─ AGENTS.md
 │  ├─ skills/
 │  └─ mcp.yaml
-│
-├─ ide/
-│  ├─ codex/
-│  │  ├─ native/
-│  │  └─ metadata.yaml
-│  ├─ claude-code/
-│  └─ gemini/
-│
-├─ overrides/
-│  ├─ macos/
-│  └─ windows/
-│
-├─ presets/
-│  └─ .gitkeep
-│
-├─ .gitignore
-└─ README.md
+└─ ide/
+   ├─ codex/native/config.toml
+   ├─ claude-code/native/
+   │  ├─ settings.json
+   │  └─ .claude.json
+   └─ gemini/native/
+      ├─ gemini-cli/settings.json
+      └─ antigravity/
+         ├─ config.json
+         ├─ mcp_config.json
+         └─ ide-settings.json
 ```
 
 空目录不应全部预生成。只有存在对应数据时才创建。
@@ -1428,30 +1352,17 @@ IDE 原生配置优先使用 IDE 自己的格式和 Schema，不在 MCV 内重�
 ### 27.2 模块划分
 
 ```text
-packages/
-├─ cli/
-│  ├─ commands/
-│  ├─ prompts/
-│  └─ renderer/
-│
-├─ core/
-│  ├─ repository/
-│  ├─ binding/
-│  ├─ capture/
-│  ├─ deploy/
-│  ├─ diff/
-│  ├─ backup/
-│  ├─ variables/
-│  └─ merge/
-│
-├─ adapters/
-│  ├─ codex/
-│  ├─ claude-code/
-│  ├─ cursor/
-│  ├─ gemini-cli/
-│  └─ antigravity/
-│
-└─ schemas/
+src/
+├─ adapters/     # Codex、Claude Code、Gemini；Gemini 内含两个 Surface
+├─ commands/     # 一次性命令执行与写入边界
+├─ operations/   # Report、Plan、Apply 与稳定 JSON contracts
+├─ core/         # Canonical MCP/Skill 语义与设备布局
+├─ renderers/    # plain/JSON 输出
+├─ tui/          # 统一 Ink Shell 与终端生命周期
+└─ utils/        # Repository、state、变量、结构化配置与文件事务
+
+schemas/
+└─ mcv.schema.json
 ```
 
 ### 27.3 核心层与交互层分离
@@ -1509,8 +1420,10 @@ MCV 应检测 Git 状态，但不默认控制 Git 工作流。
 
 - 当前目录是否为 Git 仓库；
 - 是否存在未提交变化；
-- 是否检测到疑似密钥；
-- 是否建议用户提交。
+- Repository 可能包含明文配置的固定责任边界提示；
+- 是否建议用户在完整审阅后自行提交。
+
+MCV 不扫描内容以判断是否存在密钥，也不把 Git 与“Repository 安全”画等号。
 
 不默认执行：
 
@@ -1534,7 +1447,7 @@ MCV 应检测 Git 状态，但不默认控制 Git 工作流。
 - 全局配置目录；
 - 可收集文件；
 - 排除目录；
-- 敏感字段规则；
+- managed/local 数据所有权规则；
 - MCV 生成文件；
 - Native 文件；
 - Merged 文件；
@@ -1606,7 +1519,7 @@ Choose an action:
 
 ## 31. 测试要求
 
-MCV v0.1 至少覆盖以下测试。
+当前 beta 至少覆盖以下测试。
 
 ### 31.1 核心行为
 
@@ -1617,7 +1530,7 @@ MCV v0.1 至少覆盖以下测试。
 5. 删除项默认不被接受。
 6. 未知 Native 字段在收集和部署后仍然保留。
 7. MCV 管理字段不会被 Native Capture 重复导入。
-8. 缺少密钥时不会写入明文或空凭据。
+8. `${env:*}` 引用在缺少环境变量时不会被静默解析为空字符串，已审阅明文保持不变。
 9. 恢复后文件与部署前一致。
 10. 仓库移动后可以通过仓库 ID 重新绑定。
 
@@ -1633,14 +1546,14 @@ MCV v0.1 至少覆盖以下测试。
 8. 配置文件使用不同换行符。
 9. JSON、YAML、TOML 编码和格式保留。
 
-### 31.3 安全测试
+### 31.3 数据忠实度与所有权边界测试
 
-1. API Key 不得写入仓库。
-2. Token 不得出现在 Capture 候选文件中。
-3. 私钥文件不得被收集。
-4. 认证文件默认被排除。
-5. 密钥扫描失败时应阻止危险写入。
-6. 备份目录不得被误收集回仓库。
+1. 支持结构化配置中的明文 Key/Token 在 Capture、Repository、Deploy、Diff、plain 和 JSON 中保持不变。
+2. `${env:*}` 引用保持引用，未解析时不会被替换为空值。
+3. Adapter 未声明的缓存、日志、会话和任意 HOME 文件不得被收集。
+4. 格式错误诊断不得回显尚未解析的完整源文件内容。
+5. Skill 包内符号链接被拒绝，外部链接不会被遍历、写穿或静默认领。
+6. 备份和本机 state 不得被误收集回 Repository。
 
 ### 31.4 交互测试
 
@@ -1700,7 +1613,7 @@ MCV 默认遵循：
 - IDE 原生配置白名单收集；
 - Capture 人工确认；
 - 路径参数化；
-- 密钥扫描和排除；
+- 配置数据中立责任边界与完整预览；
 - 部署预览；
 - 自动备份；
 - 原子写入；
@@ -1717,51 +1630,29 @@ MCV 默认遵循：
 - 不提供复杂 Capture 历史；
 - 不提供图形界面；
 - 不自动操作 Git；
-- 不提供自定义 Preset；
+- 不提供命名 Profile/Preset 资产管理；
 - 不安装 IDE；
-- 不同步凭据。
+- 不提供独立的凭据清单、Vault 或凭据生命周期；支持配置中的同类值仍忠实传输。
 
 ---
 
 ## 35. 后续路线
 
-### v0.2：体验和配置能力增强
+`0.2.0-beta.1` 之后的路线尚未承诺版本。先用 beta 验证首次成功、跨设备恢复、失败可诊断性和支持矩阵，再从以下候选主题中选择一个主目标：
 
-- 部署 Preset；
-- 多仓库切换；
-- 更完整的 TOML/YAML Overlay；
-- Git 辅助提交；
-- 原生配置 Schema 自动校验；
-- IDE 版本兼容性提示；
-- 配置迁移报告；
-- MCP 权限说明。
+- 可靠性与可诊断性：`doctor`/support bundle、兼容性证据、恢复演练和更清晰的错误行动建议；
+- 配置组织：命名且有明确作用域的资产，但必须先验证用户是在解决设备、项目、身份还是团队环境问题；
+- 支持面扩展：新的 IDE、Surface 或开发工具，必须以实际配置所有权与 loader evidence 为准；
+- 分发体验：独立二进制、安装升级与发布通道；
+- 外部安全集成：用户自选的加密、访问控制或 Secret Provider，不改变 MCV 的配置数据中立边界。
 
-### v0.3：完整开发环境扩展
-
-- Git 全局配置；
-- Shell 配置；
-- Cursor 和 VS Code 扩展；
-- Node、包管理器和常用 CLI；
-- Windows Terminal；
-- WSL；
-- Docker；
-- Cloudflare 和 GitHub CLI。
-
-### v1.0：个人生产力基础设施
-
-- 稳定数据格式；
-- 完整跨平台测试矩阵；
-- 独立二进制分发；
-- 用户自选的外部加密、访问控制或 Secret Provider 集成（不改变 MCV 数据中立边界）；
-- 可选 GUI；
-- 配置模块市场或共享模板；
-- 更丰富的个人开发环境蓝图。
+候选进入开发前必须补充对应 PRD/ADR、成功指标、迁移策略和双平台验收。尤其不得在没有作用域定义时预先固化 `Profile`/`Preset` 名称或 Repository 目录。
 
 ---
 
 ## 36. 验收标准
 
-MCV v0.1 达到可发布状态，需要满足：
+MCV `0.2.0-beta.1` 达到预发布状态，需要满足：
 
 1. 用户可以在自选目录成功初始化数据仓库。
 2. 初始化后可以在任意目录调用 MCV。

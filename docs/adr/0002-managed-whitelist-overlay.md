@@ -1,6 +1,6 @@
 # Managed-whitelist overlay strategy
 
-When a single config file contains both MCV-managed and IDE-native fields (e.g. Cursor's `settings.json`), only `managedPaths` are explicitly declared in the Adapter source code. Every undeclared field defaults to Native ownership and is preserved untouched during deploy and eligible for capture. A small `localPaths` exclusion list filters out known device-bound fields (e.g. `$.preferredTerminal`). This means new fields added by IDE updates are automatically safe — MCV won't overwrite them and won't require Adapter changes to accommodate them.
+When a single supported config file contains both MCV-managed and IDE-native fields, only `managedPaths` are explicitly declared in the Adapter source code. Every undeclared field defaults to Native ownership and is preserved untouched during deploy and eligible for capture. A small `localPaths` exclusion list filters out known device-bound fields (for example a device-specific terminal preference). This means new fields added by IDE updates are preserved by default: MCV will not overwrite them and does not require an Adapter change merely to tolerate them.
 
 ## Considered Options
 

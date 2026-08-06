@@ -1,3 +1,5 @@
+**实现状态（2026-08-05）：已实现。** 本文是 TUI 重构的历史实施方案；当前用户与运行契约以 `README.md`、主 PRD 和 `TUI-Spec.md` 为准。下文保留当时的基线、缺口与本地路径引用，仅作为设计背景，不代表当前仓库状态。
+
 ## 结论
 
 最可行的路线是：
@@ -87,7 +89,7 @@ TUI 与非交互 CLI / JSON Renderer 只负责：
 | ------------ | ------------------------------------------------------------- | ---------------------------------------------------------------- |
 | P0：协议收敛 | 提取结构化 Plan、Report、Result；拆分计划与执行；统一错误对象 | 所有核心流程可以在没有 TTY、没有 `console.log` mock 的情况下测试 |
 | P1：CLI 优化 | 完善 JSON、退出码、错误建议、颜色和终端宽度适配               | CLI 可稳定用于脚本、CI 和 Agent                                  |
-| P2：可用 TUI | 首页状态面板；Repository、Capture、Deploy、Restore 向导；文件选择和 Diff；终端恢复和基本 PTY 中断测试 | 普通用户无需记命令或编辑 `mcv.yaml` 即可完成 v0.1 闭环，且所有退出路径都恢复终端 |
+| P2：可用 TUI | 首页状态面板；Repository、Capture、Deploy、Restore 向导；文件选择和 Diff；终端恢复和基本 PTY 中断测试 | 普通用户无需记命令或编辑 `mcv.yaml` 即可完成当前 beta 闭环，且所有退出路径都恢复终端 |
 | P3：体验打磨 | 补充快捷键、帮助面板、更完整的进度反馈、错误详情和响应式布局 | Windows Terminal/macOS 常见尺寸下稳定运行 |
 
 ### P0：先建立统一操作模型
@@ -121,7 +123,7 @@ src/
 - 删除继续默认不选中。
 - Capture Diff 展示路径参数化后的忠实内容；原始配置含明文密钥时，界面和 JSON 也完整展示。
 
-Restore 应拆成预览和执行，但首期保持当前安全策略：部署后发生的文件变化统一称为 Restore Conflict（恢复冲突），v0.1 必须拒绝恢复，列出冲突路径并建议先备份或手动处理，不提供二次确认强制覆盖。该概念与按照 Baseline Snapshot 判定的 Drift（漂移）不同。
+Restore 应拆成预览和执行，但当前 beta 保持保守恢复策略：部署后发生的文件变化统一称为 Restore Conflict（恢复冲突），必须拒绝恢复，列出冲突路径并建议先备份或手动处理，不提供二次确认强制覆盖。该概念与按照 Baseline Snapshot 判定的 Drift（漂移）不同。
 
 ### P1：把 CLI 变成稳定协议
 
@@ -196,7 +198,7 @@ JSON 顶层结构：
 
 ## TUI 首期范围
 
-TUI、CLI help、提示、错误、进度和结果摘要全部使用英文。命令名、参数名、JSON 字段名和 `error.code` 保持英文。README 继续使用中文；v0.1 不引入 i18n 框架，不展示中英双语界面。
+TUI、CLI help、提示、错误、进度和结果摘要全部使用英文。命令名、参数名、JSON 字段名和 `error.code` 保持英文。README 继续使用中文；当前 beta 不引入 i18n 框架，不展示中英双语界面。
 
 首页只展示当前真实能力：
 
@@ -260,10 +262,10 @@ Init Apply 只负责创建合法空数据仓库并绑定当前设备。成功后
 ### Capture 流程
 
 ```text
-扫描 → 处理冲突 → 展示安全计划 → 按文件选择 → 确认 → 写入 → 验证
+扫描 → 处理冲突 → 展示完整计划 → 按文件选择 → 确认 → 写入 → 验证
 ```
 
-需要补齐当前缺失的分层选择：顶层按 IDE 选择，展开后按配置文件、Skill 或 MCP 选择；支持 “Accept all safe changes” 和 “Cancel all changes”，但不做字段级编辑。设备端已删除而仓库仍存在的配置作为删除候选展示，默认不选中。Rules 去重合并和最新 Skill 选择属于安全自动决策；无法自动解决的同名 MCP 核心定义冲突继续支持 “Choose authoritative source” 或 “Skip”。
+需要补齐当前缺失的分层选择：顶层按 IDE 选择，展开后按配置文件、Skill 或 MCP 选择；支持接受全部默认选中的变化和取消全部变化，但不做字段级编辑。设备端已删除而仓库仍存在的配置作为删除候选展示，默认不选中。Rules 去重合并和最新 Skill 选择属于确定性自动决策；无法自动解决的同名 MCP 核心定义冲突继续支持 “Choose authoritative source” 或 “Skip”。
 
 ### Deploy 流程
 
@@ -279,9 +281,9 @@ Init Apply 只负责创建合法空数据仓库并绑定当前设备。成功后
 - 没有遗留临时文件；
 - 基线和 managed inventory 写入成功。
 
-Deploy 使用与 Capture 一致的分层选择：按 IDE 筛选，再按 Shared Rules、Skills、MCP 和 IDE-specific Configuration 展开到文件。已安装且仓库中存在配置的 IDE 及其安全变化默认选中；删除候选收纳在折叠的 Advanced Cleanup 区，默认不选中，且不得被 `--yes` 执行。
+Deploy 使用与 Capture 一致的分层选择：按 IDE 筛选，再按 Shared Rules、Skills、MCP 和 IDE-specific Configuration 展开到文件。已安装且仓库中存在配置的 IDE，以及不需要额外决策或 warning confirmation 的变化默认选中；删除候选收纳在折叠的 Advanced Cleanup 区，默认不选中，且不得被 `--yes` 执行。
 
-每次 Deploy 成功后，在本机状态中记录本次选中的 IDE 和能力范围。下次 Deploy 可选择 “Use this device's previous selection”；已不存在或已不受支持的项自动忽略，新增项按当前安全默认值处理。这只是本机交互便利状态，不命名为 Preset，不写入数据仓库，不在设备间共享。
+每次 Deploy 成功后，在本机状态中记录本次选中的 IDE 和能力范围。下次 Deploy 可选择 “Use this device's previous selection”；已不存在或已不受支持的项自动忽略，新增项按当前保守默认值处理。这只是本机交互便利状态，不命名为 Preset，不写入数据仓库，不在设备间共享。
 
 Deploy 不提供全局 “Overwrite local configuration” 开关。对 Overlay 文件，计划只能修改 `managedPaths`，未声明的 Native 字段必须保留，`localPaths` 始终排除。对 MCV 完整拥有的文件，如果操作会替换全文，文件详情和 Diff 必须明确标注 “Replace entire file”。
 
