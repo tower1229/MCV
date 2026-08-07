@@ -105,6 +105,8 @@ mcv deploy
 
 MCV 会显示按 IDE/capability 分组的写入计划并请求确认，只执行该 Plan 中选中的 selection ID。Apply 会重新验证 operation ID、Repository 来源哈希和目标前置哈希；warning 必须交互确认，decision required 或 error 会阻止写入。per-package divergent 外部 Skill 链接必须选择 Preserve 或 Replace：Replace 只备份并移除链接节点，再创建 managed link 或 copy，绝不写穿外部目标；shared-root divergent 只能 Preserve。`--yes` 不会执行这些决策或拓扑替换。仓库是经过用户确认的配置事实源，不是本机回滚备份。
 
+Project-scope Deploy（`mcv deploy <profile> --target <path>`）把选中的 Skills 以完整目录复制写入项目：Codex 与 Gemini CLI 共用 `<target>/.agents/skills/<name>/`，Claude Code 使用 `<target>/.claude/skills/<name>/`，不建立指向 Repository 或 HOME 的链接；相同内容视为已满足，未知或 divergent 包需要 Preserve/Replace，`--yes` 不会覆盖。写入记入 `<target>/.mcv/managed.json`，并参与备份与回滚。
+
 每个选中变化都会在首次写入前备份并验证；写入或本机状态提交失败时，已写入变化会从验证过的备份回滚。成功后只更新实际 Apply 范围的 Baseline Snapshot、managed inventory，以及仅保存在本机、按 IDE/capability 记录的最近 Deploy selection。再次部署相同内容不会创建新备份。
 
 Deploy TTY workflow 会复用最近一次成功的 IDE/capability selection。按 `↑` / `↓` 浏览可见树，按 `→` 展开分组或打开焦点文件 Diff，按 `←` 关闭 Diff、回到父节点、折叠分组或从树根返回 Overview；`Home`、`End`、`Page Up` 和 `Page Down` 用于长 Plan 和 warning 列表，`Space` 切换选择或确认 warning。Diff 明确标注 managed merge 或 whole-file replacement。删除候选只在默认折叠、带 `× Destructive` 状态的 Advanced Cleanup 中显示且默认不选；最终 Apply 只能由 `Enter` 启动。Apply 或 rollback 期间输入被禁用；Plan 过期时必须重新生成并重新审阅。结果页按 `Enter` 返回刷新后的 Overview，按 `q` 退出。

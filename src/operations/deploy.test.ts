@@ -2293,14 +2293,13 @@ describe('Deploy operations', () => {
     });
     const projectRoot = path.join(testRoot, 'project-empty-apply');
     fs.mkdirSync(projectRoot, { recursive: true });
-    // Profile with only deferred Skills selected would still notice; use a Profile
-    // that references skills so empty Rules selection still surfaces pending notices.
+    // Profile with MCP only — Skills are active; MCP still emits a pending notice.
     writeProfilesDocument(repositoryPath, {
       schemaVersion: 1,
       profiles: {
         global: {
           title: 'Global',
-          assets: ['skill:review'],
+          assets: ['mcp:docs'],
         },
       },
     });
@@ -2320,7 +2319,7 @@ describe('Deploy operations', () => {
       profileIds: ['global'],
     });
     expect(result.issues).toContainEqual(expect.objectContaining({
-      code: PROJECT_SKILL_PROJECTION_PENDING_CODE,
+      code: PROJECT_MCP_PROJECTION_PENDING_CODE,
     }));
   });
 
@@ -2476,7 +2475,7 @@ describe('Deploy operations', () => {
     expect(plan.changes.some((change) => change.targetPath === path.join(projectRoot, 'CLAUDE.md'))).toBe(false);
   });
 
-  it('returns pending notices for project Skills/MCP while still planning Rules', async () => {
+  it('returns a pending notice for project MCP while planning Rules and Skills', async () => {
     writeState(context, {
       schemaVersion: 2,
       defaultRepositoryId: 'deploy-operation-test',
@@ -2493,18 +2492,195 @@ describe('Deploy operations', () => {
 
     const plan = await createDeployPlan(context, built.request);
 
-    expect(plan.issues).toContainEqual(expect.objectContaining({
+    expect(plan.issues).not.toContainEqual(expect.objectContaining({
       code: PROJECT_SKILL_PROJECTION_PENDING_CODE,
     }));
     expect(plan.issues).toContainEqual(expect.objectContaining({
       code: PROJECT_MCP_PROJECTION_PENDING_CODE,
     }));
     expect(plan.changes.some((change) => change.targetPath.endsWith('CLAUDE.md'))).toBe(true);
+    expect(plan.changes.some((change) =>
+      change.deploymentKind === 'project-skill-package'
+      && change.targetPath === path.join(projectRoot, '.claude', 'skills', 'review'))).toBe(true);
     expect(plan).toMatchObject({
       scope: 'project',
       profileIds: ['global'],
-      assetIds: expect.arrayContaining(['rule:canonical']),
+      assetIds: expect.arrayContaining(['rule:canonical', 'skill:review']),
     });
+  });
+
+  it('copies selected Skills into project skill directories and records the Managed Receipt', async () => {
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'deploy-operation-test',
+      repositoryPath,
+    });
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 4',
+      'repositoryId: deploy-operation-test',
+      'initializedAt: 2026-07-22T00:00:00.000Z',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets:',
+      '  codex: { enabled: true }',
+      '  claudeCode: { enabled: true }',
+      '  gemini:',
+      '    enabled: true',
+      '    surfaces: { geminiCli: true, antigravity: false }',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'review', 'scripts'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md'),
+      '---\nname: review\n---\n# Review\n',
+    );
+    fs.writeFileSync(
+      path.join(repositoryPath, 'common', 'skills', 'review', 'scripts', 'run.sh'),
+      '#!/bin/sh\necho review\n',
+    );
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: {
+        global: {
+          title: 'Global',
+          assets: ['skill:review'],
+        },
+        dev: {
+          title: 'Dev',
+          assets: ['skill:review'],
+        },
+      },
+    });
+    const projectRoot = path.join(testRoot, 'project-skills');
+    fs.mkdirSync(projectRoot, { recursive: true });
+
+    const built = buildDeployRequest(repositoryPath, {
+      profileIds: ['dev'],
+      scope: 'project',
+      targetRoot: projectRoot,
+    });
+    if ('error' in built) throw new Error(built.error.message);
+    const plan = await createDeployPlan(context, built.request);
+    expect(plan.status).toBe('planned');
+    expect(plan.changes.filter((change) => change.deploymentKind === 'project-skill-package')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetPath: path.join(projectRoot, '.agents', 'skills', 'review'),
+          name: 'review',
+          defaultSelected: true,
+        }),
+        expect.objectContaining({
+          targetPath: path.join(projectRoot, '.claude', 'skills', 'review'),
+          name: 'review',
+          defaultSelected: true,
+        }),
+      ]),
+    );
+    expect(plan.changes.filter((change) => change.deploymentKind === 'project-skill-package')).toHaveLength(2);
+    expect(plan.changes.at(-1)?.targetPath).toBe(path.join(projectRoot, '.mcv', 'managed.json'));
+
+    const result = await applyDeployPlan(context, plan, {
+      changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+    });
+    expect(result.status).toBe('succeeded');
+    expect(fs.lstatSync(path.join(projectRoot, '.agents', 'skills', 'review')).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(path.join(projectRoot, '.agents', 'skills', 'review', 'SKILL.md'), 'utf8'))
+      .toContain('# Review');
+    expect(fs.readFileSync(path.join(projectRoot, '.agents', 'skills', 'review', 'scripts', 'run.sh'), 'utf8'))
+      .toContain('echo review');
+    expect(fs.readFileSync(path.join(projectRoot, '.claude', 'skills', 'review', 'SKILL.md'), 'utf8'))
+      .toContain('# Review');
+    // Codex + Gemini share one .agents copy — no Gemini-only second tree.
+    expect(fs.existsSync(path.join(projectRoot, '.gemini', 'skills'))).toBe(false);
+
+    const receipt = JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcv', 'managed.json'), 'utf8'));
+    expect(receipt.managed['.agents/skills/review']).toMatchObject({
+      assetId: 'skill:review',
+      hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(receipt.managed['.claude/skills/review']).toMatchObject({
+      assetId: 'skill:review',
+      hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(JSON.stringify(receipt)).not.toContain(projectRoot);
+
+    // Identical content is satisfied and not rewritten.
+    const built2 = buildDeployRequest(repositoryPath, {
+      profileIds: ['dev'],
+      scope: 'project',
+      targetRoot: projectRoot,
+    });
+    if ('error' in built2) throw new Error(built2.error.message);
+    const plan2 = await createDeployPlan(context, built2.request);
+    expect(plan2.changes.some((change) => change.deploymentKind === 'project-skill-package')).toBe(false);
+
+    // Divergent unknown package requires Preserve/Replace; --yes cannot clear it.
+    fs.writeFileSync(path.join(projectRoot, '.claude', 'skills', 'review', 'SKILL.md'), '# Local\n');
+    const built3 = buildDeployRequest(repositoryPath, {
+      profileIds: ['dev'],
+      scope: 'project',
+      targetRoot: projectRoot,
+    });
+    if ('error' in built3) throw new Error(built3.error.message);
+    const plan3 = await createDeployPlan(context, built3.request);
+    expect(plan3.decisions).toEqual([expect.objectContaining({
+      kind: 'project-skill-divergence',
+      packageNames: ['review'],
+      choices: ['preserve-external', 'replace-with-repository'],
+    })]);
+    expect(plan3.issues).toContainEqual(expect.objectContaining({
+      severity: 'decisionRequired',
+      decisionId: plan3.decisions[0].id,
+    }));
+    const blockedYes = await applyDeployPlan(
+      context,
+      plan3,
+      { changeIds: plan3.changes.filter((change) => change.defaultSelected).map((change) => change.id) },
+      { nonInteractive: true },
+    );
+    expect(blockedYes.status).toBe('blocked');
+
+    const replace = await applyDeployPlan(context, plan3, {
+      changeIds: [
+        ...plan3.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+        ...plan3.decisions[0].replacementChangeIds,
+      ],
+      decisions: { [plan3.decisions[0].id]: 'replace-with-repository' },
+    });
+    expect(replace.status).toBe('succeeded');
+    expect(fs.readFileSync(path.join(projectRoot, '.claude', 'skills', 'review', 'SKILL.md'), 'utf8'))
+      .toContain('# Review');
+
+    // Package write failure rolls the directory copy back.
+    fs.writeFileSync(
+      path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md'),
+      '---\nname: review\n---\n# Review v2\n',
+    );
+    const built4 = buildDeployRequest(repositoryPath, {
+      profileIds: ['dev'],
+      scope: 'project',
+      targetRoot: projectRoot,
+    });
+    if ('error' in built4) throw new Error(built4.error.message);
+    const plan4 = await createDeployPlan(context, built4.request);
+    const agentsPackage = path.join(projectRoot, '.agents', 'skills', 'review');
+    const beforeAgents = fs.readFileSync(path.join(agentsPackage, 'SKILL.md'), 'utf8');
+    const result4 = await applyDeployPlan(
+      context,
+      plan4,
+      { changeIds: plan4.changes.filter((change) => change.defaultSelected).map((change) => change.id) },
+      {
+        writeFile: (targetPath, content) => {
+          if (targetPath === path.join(agentsPackage, 'SKILL.md')) {
+            throw new Error('simulated skill package write failure');
+          }
+          atomicWriteFile(targetPath, content);
+        },
+      },
+    );
+    expect(result4.status).toBe('failed');
+    expect(fs.readFileSync(path.join(agentsPackage, 'SKILL.md'), 'utf8')).toBe(beforeAgents);
   });
 });
 

@@ -124,6 +124,8 @@ function deploymentLabel(kind) {
         case 'managed-link-projection': return 'Managed-link projection';
         case 'topology-migration': return 'Topology migration';
         case 'copy-projection': return 'Copy projection';
+        case 'project-skill-package': return 'Project Skill package';
+        case 'external-link-replacement': return 'External link replacement';
         default: return 'Ordinary file';
     }
 }

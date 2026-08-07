@@ -848,14 +848,21 @@ function DeployDecision({ workflow, }) {
     const decision = workflow.plan.decisions[workflow.decisionIndex];
     if (!decision)
         return null;
+    const projectSkill = decision.kind === 'project-skill-divergence';
     const labels = {
-        'preserve-external': 'Preserve external link and target',
-        'replace-with-repository': 'Replace link node with Repository version',
+        'preserve-external': projectSkill
+            ? 'Preserve local project Skill package'
+            : 'Preserve external link and target',
+        'replace-with-repository': projectSkill
+            ? 'Replace with Repository Skill package'
+            : 'Replace link node with Repository version',
     };
-    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(StatusLine, { tone: "warning", label: "Needs decision", children: "divergent external Skill link" }), _jsxs(Text, { children: [workflow.decisionIndex + 1, "/", workflow.plan.decisions.length, " \u00B7 ", decision.packageNames.join(', ')] }), decision.linkPaths.map((linkPath) => (_jsx(Text, { wrap: "truncate-middle", children: linkPath }, linkPath))), _jsx(Text, { children: " " }), decision.choices.map((choice, index) => {
+    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(StatusLine, { tone: "warning", label: "Needs decision", children: projectSkill ? 'divergent project Skill package' : 'divergent external Skill link' }), _jsxs(Text, { children: [workflow.decisionIndex + 1, "/", workflow.plan.decisions.length, " \u00B7 ", decision.packageNames.join(', ')] }), decision.linkPaths.map((linkPath) => (_jsx(Text, { wrap: "truncate-middle", children: linkPath }, linkPath))), _jsx(Text, { children: " " }), decision.choices.map((choice, index) => {
                 const selected = workflow.decisions[decision.id] === choice;
                 return (_jsxs(Text, { color: index === workflow.cursor ? 'cyan' : undefined, children: [index === workflow.cursor ? '›' : ' ', " ", selected ? '[x]' : '[ ]', " ", labels[choice]] }, choice));
-            }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: "Replace backs up and removes only the link node; it never writes through the external target." })] }));
+            }), _jsx(Text, { children: " " }), _jsx(Text, { dimColor: true, children: projectSkill
+                    ? 'Replace copies the whole Repository Skill package into the project; Preserve leaves the local package unchanged.'
+                    : 'Replace backs up and removes only the link node; it never writes through the external target.' })] }));
 }
 function DeploySelection({ workflow, terminalRows, }) {
     const tree = buildDeploySelectionTree(workflow.plan);
@@ -929,6 +936,8 @@ function deployLayoutLabel(kind) {
         case 'managed-link-projection': return 'Managed-link projection';
         case 'topology-migration': return 'Topology migration';
         case 'copy-projection': return 'Copy projection';
+        case 'project-skill-package': return 'Project Skill package';
+        case 'external-link-replacement': return 'External link replacement';
         default: return 'Ordinary file';
     }
 }

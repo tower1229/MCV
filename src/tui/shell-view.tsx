@@ -1736,14 +1736,19 @@ function DeployDecision({
 }): ReactNode {
   const decision = workflow.plan.decisions[workflow.decisionIndex];
   if (!decision) return null;
+  const projectSkill = decision.kind === 'project-skill-divergence';
   const labels = {
-    'preserve-external': 'Preserve external link and target',
-    'replace-with-repository': 'Replace link node with Repository version',
+    'preserve-external': projectSkill
+      ? 'Preserve local project Skill package'
+      : 'Preserve external link and target',
+    'replace-with-repository': projectSkill
+      ? 'Replace with Repository Skill package'
+      : 'Replace link node with Repository version',
   } as const;
   return (
     <Box flexDirection="column">
       <StatusLine tone="warning" label="Needs decision">
-        divergent external Skill link
+        {projectSkill ? 'divergent project Skill package' : 'divergent external Skill link'}
       </StatusLine>
       <Text>{workflow.decisionIndex + 1}/{workflow.plan.decisions.length} · {decision.packageNames.join(', ')}</Text>
       {decision.linkPaths.map((linkPath) => (
@@ -1760,7 +1765,9 @@ function DeployDecision({
       })}
       <Text> </Text>
       <Text dimColor>
-        Replace backs up and removes only the link node; it never writes through the external target.
+        {projectSkill
+          ? 'Replace copies the whole Repository Skill package into the project; Preserve leaves the local package unchanged.'
+          : 'Replace backs up and removes only the link node; it never writes through the external target.'}
       </Text>
     </Box>
   );
@@ -1956,6 +1963,8 @@ function deployLayoutLabel(kind: DeployPlan['changes'][number]['deploymentKind']
     case 'managed-link-projection': return 'Managed-link projection';
     case 'topology-migration': return 'Topology migration';
     case 'copy-projection': return 'Copy projection';
+    case 'project-skill-package': return 'Project Skill package';
+    case 'external-link-replacement': return 'External link replacement';
     default: return 'Ordinary file';
   }
 }

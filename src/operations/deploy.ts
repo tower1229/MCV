@@ -31,7 +31,7 @@ import {
   hashFile,
 } from '../utils/files.js';
 import { isRecord } from '../utils/objects.js';
-import { readManifest, resolveBoundRepository } from '../utils/repository.js';
+import { readManifest, resolveBoundRepository, type McvManifest } from '../utils/repository.js';
 import {
   hashSkillPackageContent,
   resolveSkillPackageStorePath,
@@ -60,6 +60,11 @@ import {
   projectCanonicalRulesFile,
   type ProjectRulesFileName,
 } from '../core/project-rules.js';
+import {
+  projectSkillDestinationRoots,
+  projectSkillPackage,
+  type ProjectSkillRelativeRoot,
+} from '../core/project-skills.js';
 import {
   managedReceiptPath,
   readManagedReceipt,
@@ -127,7 +132,8 @@ export type DeployDeploymentKind =
   | 'managed-link-projection'
   | 'copy-projection'
   | 'topology-migration'
-  | 'external-link-replacement';
+  | 'external-link-replacement'
+  | 'project-skill-package';
 
 export type DeployIde = CanonicalSkillIde;
 
@@ -161,7 +167,7 @@ export type DeployLinkOutcome = CanonicalSkillLinkOutcome;
 export interface DeployDecision {
   id: string;
   factId: string;
-  kind: 'external-skill-divergence';
+  kind: 'external-skill-divergence' | 'project-skill-divergence';
   packageNames: string[];
   linkPaths: string[];
   choices: ['preserve-external', 'replace-with-repository'];
@@ -206,7 +212,7 @@ export type DeployResult = Result<DeployResultData, DeployChange> & Partial<Depl
 };
 
 /**
- * Skills/MCP project writers land in #55/#57. Rules project projection is active (#54).
+ * MCP project writers land in #57. Rules (#54) and Skills (#55) project projection are active.
  */
 export const PROJECT_SKILL_PROJECTION_PENDING_CODE = 'deploy.projectSkillProjectionPending' as const;
 export const PROJECT_MCP_PROJECTION_PENDING_CODE = 'deploy.projectMcpProjectionPending' as const;
@@ -409,6 +415,8 @@ async function buildDeployPlan(
 
   let desired: SourcedDeployFile[] = [];
   const receiptEntries = new Map<string, { assetId: string; hash: string }>();
+  const projectSkillChanges: DeployChange[] = [];
+  const projectSkillDecisions: DeployDecision[] = [];
   if (activeRequest.scope === 'project') {
     const validated = validateProjectTargetRoot(activeRequest.targetRoot, context, {
       boundRepositoryPath: repositoryPath,
@@ -445,13 +453,6 @@ async function buildDeployPlan(
       deployContext,
     );
     const assetIds = activeRequest.selection.assetIds;
-    if (assetIds.some((id) => id.startsWith('skill:'))) {
-      selectionIssues.push({
-        severity: 'notice',
-        code: PROJECT_SKILL_PROJECTION_PENDING_CODE,
-        message: 'Project-scope Skill projection is not active yet; selected Skills were skipped.',
-      });
-    }
     if (assetIds.some((id) => id.startsWith('mcp:'))) {
       selectionIssues.push({
         severity: 'notice',
@@ -533,6 +534,18 @@ async function buildDeployPlan(
         }));
       });
     }))).flat();
+
+    appendProjectSkillPlan(
+      activeRequest.targetRoot,
+      selectedView.skills,
+      manifest,
+      receipt,
+      receiptEntries,
+      projectSkillChanges,
+      projectSkillDecisions,
+      mutations,
+      selectionIssues,
+    );
 
     if (selectionIssues.some((issue) => issue.severity === 'error')) {
       const errorIssue = selectionIssues.find((issue) => issue.severity === 'error')!;
@@ -653,16 +666,20 @@ async function buildDeployPlan(
     }];
   });
   changes.push(...layout.projectionChanges);
-  const decisions = addExternalLinkReplacementDecisions(
-    linkedSkills.facts,
-    linkedSkills.outcomes,
-    layout.desiredForExternalReplacement,
-    manifest.deploy.useSymlinks,
-    context,
-    changes,
-    mutations,
-    issues,
-  );
+  const decisions = [
+    ...addExternalLinkReplacementDecisions(
+      linkedSkills.facts,
+      linkedSkills.outcomes,
+      layout.desiredForExternalReplacement,
+      manifest.deploy.useSymlinks,
+      context,
+      changes,
+      mutations,
+      issues,
+    ),
+    ...projectSkillDecisions,
+  ];
+  changes.push(...projectSkillChanges);
 
   const legacyDuplicates = findLegacyCodexSkillDuplicates(
     context,
@@ -1117,10 +1134,11 @@ export async function applyDeployPlan(
     const receiptChange = plan.changes.find((change) =>
       change.name === 'Managed Receipt'
       && change.targetPath === managedReceiptPath(plan.targetRoot));
-    const rulesSelected = plan.changes.some((change) =>
+    const managedSelected = plan.changes.some((change) =>
       selected.has(change.id)
-      && asProjectRulesFileName(path.relative(plan.targetRoot, change.targetPath)) !== undefined);
-    if (receiptChange && rulesSelected && !selected.has(receiptChange.id)) {
+      && (asProjectRulesFileName(path.relative(plan.targetRoot, change.targetPath)) !== undefined
+        || change.deploymentKind === 'project-skill-package'));
+    if (receiptChange && managedSelected && !selected.has(receiptChange.id)) {
       selected.add(receiptChange.id);
       selectedIds.push(receiptChange.id);
     }
@@ -1196,6 +1214,7 @@ export async function applyDeployPlan(
     return failedDeployResult(plan.repositoryPath, stalePlanError(), undefined, deployContextFromPlan(plan));
   }
 
+  applyProjectSkillReceiptDecisions(plan, selection, selected, selectedIds, active.mutations);
   const selectedChanges = plan.changes.filter((change) => selected.has(change.id));
   const prepared = prepareDeployWrites(selectedChanges, active.mutations);
   if (selectedChanges.length === 0) {
@@ -1421,7 +1440,9 @@ function prepareDeployWrites(
         linkTarget: mutation.linkTarget,
       };
     }
-    if (targetChanges.some((change) => change.deploymentKind === 'external-link-replacement')) {
+    if (targetChanges.some((change) =>
+      change.deploymentKind === 'external-link-replacement'
+      || change.deploymentKind === 'project-skill-package')) {
       if (mutation?.linkTarget) {
         return { targetPath, change: 'migrate-link' as const, linkTarget: mutation.linkTarget };
       }
@@ -2246,9 +2267,6 @@ function appendManagedReceiptChange(
   issues: Issue[],
 ): void {
   if (request.scope !== 'project' || receiptEntries.size === 0) return;
-  const rulesWritten = changes.some((change) =>
-    asProjectRulesFileName(path.relative(request.targetRoot, change.targetPath)) !== undefined);
-  if (!rulesWritten) return;
 
   const existing = readManagedReceipt(request.targetRoot);
   const next: ManagedReceipt = {
@@ -2298,6 +2316,180 @@ function appendManagedReceiptChange(
         : `Update Managed Receipt at ${receiptPath}`,
     },
   });
+}
+
+function appendProjectSkillPlan(
+  targetRoot: string,
+  skills: Array<{ id: string; name: string; files: Array<{ relativePath: string; content: Buffer }> }>,
+  manifest: McvManifest,
+  receipt: ManagedReceipt | undefined,
+  receiptEntries: Map<string, { assetId: string; hash: string }>,
+  changes: DeployChange[],
+  decisions: DeployDecision[],
+  mutations: Map<string, DeployMutation>,
+  issues: Issue[],
+): void {
+  if (skills.length === 0) return;
+  const roots = projectSkillDestinationRoots({
+    codex: manifest.targets.codex.enabled,
+    claudeCode: manifest.targets.claudeCode.enabled,
+    geminiCli: manifest.targets.gemini.enabled
+      && manifest.targets.gemini.surfaces.geminiCli !== false,
+  });
+  if (roots.length === 0) return;
+
+  for (const skill of skills) {
+    for (const relativeRoot of roots) {
+      let projection;
+      try {
+        projection = projectSkillPackage(targetRoot, relativeRoot, skill, receipt);
+      } catch (error) {
+        issues.push({
+          severity: 'error',
+          code: 'deploy.containmentFailed',
+          message: errorMessage(error),
+        });
+        continue;
+      }
+
+      receiptEntries.set(projection.receiptKey, {
+        assetId: projection.assetId,
+        hash: projection.packageHash,
+      });
+
+      if (projection.status === 'identical') continue;
+
+      const owner = projectSkillOwner(relativeRoot, manifest);
+      const id = selectionId(canonicalSkillTargetKey(owner), 'skills', projection.targetPath);
+      const packageFiles = projection.files.map((file) => ({
+        relativePath: file.relativePath,
+        content: file.content,
+      }));
+      const packageChange: DeployChange = {
+        id,
+        ...owner,
+        capability: 'skills',
+        name: skill.name,
+        targetPath: projection.targetPath,
+        change: projection.status === 'absent' ? 'add' : 'modify',
+        defaultSelected: projection.status !== 'conflict',
+        group: 'standard',
+        strategy: 'replace-entire-file',
+        deploymentKind: 'project-skill-package',
+        preview: {
+          targetPath: projection.targetPath,
+          kind: 'package',
+          files: packageFiles.map((file) => {
+            const filePath = path.join(projection.targetPath, file.relativePath);
+            const previous = fs.existsSync(filePath) ? fs.readFileSync(filePath) : undefined;
+            const item = preview(
+              filePath,
+              canonicalSkillTargetKey(owner),
+              'skills',
+              file.content,
+              previous,
+              issues,
+            );
+            return item.kind === 'text' || item.kind === 'binary'
+              ? item
+              : {
+                targetPath: filePath,
+                kind: 'binary' as const,
+                bytes: file.content.byteLength,
+                sha256: hashBuffer(file.content),
+              };
+          }),
+        },
+      };
+
+      if (projection.status === 'conflict') {
+        const decisionId = selectionId(
+          canonicalSkillTargetKey(owner),
+          'skills',
+          `${projection.targetPath}\0project-skill-divergence`,
+        );
+        decisions.push({
+          id: decisionId,
+          factId: decisionId,
+          kind: 'project-skill-divergence',
+          packageNames: [skill.name],
+          linkPaths: [projection.targetPath],
+          choices: ['preserve-external', 'replace-with-repository'],
+          replacementChangeIds: [id],
+        });
+        issues.push({
+          severity: 'decisionRequired',
+          code: 'deploy.projectSkillDivergence',
+          decisionId,
+          message: `Unknown or divergent project Skill package blocks silent overwrite: ${projection.targetPath}`,
+          details: 'Choose Preserve to keep the local package, or Replace to copy the Repository Skill package.',
+        });
+        mutations.set(id, { packageFiles });
+        changes.push(packageChange);
+        continue;
+      }
+
+      mutations.set(id, { packageFiles });
+      changes.push(packageChange);
+    }
+  }
+}
+
+function projectSkillOwner(
+  relativeRoot: ProjectSkillRelativeRoot,
+  manifest: McvManifest,
+): { owner: 'ide'; ide: IdeId; surface: SkillSurfaceId } {
+  if (relativeRoot === '.claude/skills') {
+    return { owner: 'ide', ide: 'claude-code', surface: 'claude-code' };
+  }
+  if (manifest.targets.codex.enabled) {
+    return { owner: 'ide', ide: 'codex', surface: 'codex' };
+  }
+  return { owner: 'ide', ide: 'gemini', surface: 'gemini-cli' };
+}
+
+function applyProjectSkillReceiptDecisions(
+  plan: DeployPlan,
+  selection: DeploySelection,
+  selected: Set<string>,
+  selectedIds: string[],
+  mutations: Map<string, DeployMutation>,
+): void {
+  if (plan.scope !== 'project') return;
+  const receiptChange = plan.changes.find((change) =>
+    change.name === 'Managed Receipt'
+    && change.targetPath === managedReceiptPath(plan.targetRoot));
+  if (!receiptChange) return;
+  const mutation = mutations.get(receiptChange.id);
+  if (!mutation?.content) return;
+
+  const preservedKeys = new Set<string>();
+  for (const decision of plan.decisions) {
+    if (decision.kind !== 'project-skill-divergence') continue;
+    const choice = selection.decisions?.[decision.id];
+    if (choice === 'preserve-external') {
+      for (const linkPath of decision.linkPaths) {
+        preservedKeys.add(path.relative(plan.targetRoot, linkPath).split(path.sep).join('/'));
+      }
+    }
+  }
+  if (preservedKeys.size === 0) return;
+
+  const parsed = JSON.parse(mutation.content.toString('utf8')) as ManagedReceipt;
+  for (const key of preservedKeys) {
+    delete parsed.managed[key];
+  }
+  const nextContent = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+  const previous = fs.existsSync(receiptChange.targetPath)
+    ? fs.readFileSync(receiptChange.targetPath)
+    : undefined;
+  if (previous?.equals(nextContent)) {
+    selected.delete(receiptChange.id);
+    const index = selectedIds.indexOf(receiptChange.id);
+    if (index >= 0) selectedIds.splice(index, 1);
+    return;
+  }
+  mutations.set(receiptChange.id, { content: nextContent });
 }
 
 function compareChanges(left: DeployChange, right: DeployChange): number {
