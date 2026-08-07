@@ -43,14 +43,14 @@ describe('mcv init', () => {
       changes: [],
       issues: [],
       nextActions: [],
-      data: { repositoryId: expect.any(String), repositorySchemaVersion: 3 },
+      data: { repositoryId: expect.any(String), repositorySchemaVersion: 4 },
     });
 
     const manifest = parseYaml(
       fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8'),
     );
     expect(manifest).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       repositoryId: expect.any(String),
       initializedAt: expect.any(String),
       targets: {
@@ -65,6 +65,13 @@ describe('mcv init', () => {
       deploy: {
         backupBeforeWrite: true,
         useSymlinks: false,
+      },
+    });
+
+    expect(parseYaml(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8'))).toEqual({
+      schemaVersion: 1,
+      profiles: {
+        global: { assets: [] },
       },
     });
 
@@ -101,10 +108,12 @@ describe('mcv init', () => {
       repositoryPath,
       changes: expect.arrayContaining([
         expect.objectContaining({ id: 'repository-manifest', kind: 'add' }),
+        expect.objectContaining({ id: 'repository-profiles', kind: 'add' }),
         expect.objectContaining({ id: 'repository-binding', kind: 'bind' }),
       ]),
     });
     expect(fs.existsSync(path.join(repositoryPath, 'mcv.yaml'))).toBe(false);
+    expect(fs.existsSync(path.join(repositoryPath, 'profiles.yaml'))).toBe(false);
     expect(fs.existsSync(path.join(stateRoot, 'mcv', 'config.json'))).toBe(false);
   });
 

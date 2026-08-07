@@ -53,7 +53,7 @@ describe('inspectEnvironment', () => {
     fs.mkdirSync(path.join(repositoryPath, 'common', 'rules'), { recursive: true });
     fs.mkdirSync(path.join(repositoryPath, 'ide', 'claude-code', 'native'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: repository-id',
       'initializedAt: 2026-08-03T00:00:00.000Z',
       'targets:',

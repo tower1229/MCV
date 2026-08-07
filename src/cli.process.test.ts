@@ -167,7 +167,7 @@ describe('packaged mcv CLI', () => {
         : path.join(isolatedRoot, '.config', 'mcv', 'config.json');
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: process-binding-id',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -380,11 +380,11 @@ describe('packaged mcv CLI', () => {
         repositoryPath: resolvedRepositoryPath,
         data: expect.objectContaining({
           previousSchemaVersion: 1,
-          repositorySchemaVersion: 3,
+          repositorySchemaVersion: 4,
           backupVerified: true,
         }),
       }));
-      expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).toContain('schemaVersion: 3');
+      expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).toContain('schemaVersion: 4');
     } finally {
       fs.rmSync(isolatedRoot, { recursive: true, force: true });
     }
@@ -398,7 +398,7 @@ describe('packaged mcv CLI', () => {
     const resolvedRepositoryPath = fs.realpathSync(repositoryPath);
     fs.mkdirSync(claudeRoot);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: process-capture-id',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -475,7 +475,7 @@ describe('packaged mcv CLI', () => {
     const repositoryPath = path.join(isolatedRoot, 'repository');
     fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: process-deploy-id',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -549,7 +549,7 @@ describe('packaged mcv CLI', () => {
     fs.mkdirSync(path.dirname(externalSkill), { recursive: true });
     fs.mkdirSync(path.dirname(linkedRoot), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: process-linked-skill-id',
       'initializedAt: 2026-07-29T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -630,7 +630,7 @@ describe('packaged mcv CLI', () => {
       const projection = path.join(isolatedRoot, '.claude', 'skills', 'review');
       fs.mkdirSync(path.dirname(sourceSkill), { recursive: true });
       fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-        'schemaVersion: 3',
+        'schemaVersion: 4',
         'repositoryId: process-managed-skill-id',
         'initializedAt: 2026-07-30T00:00:00.000Z',
         'capture: { preserveUnknownNativeFields: true }',
@@ -730,7 +730,7 @@ describe('packaged mcv CLI', () => {
     fs.mkdirSync(path.join(backupDirectory, 'files'), { recursive: true });
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: restore-interrupt-id',
       'initializedAt: 2026-07-27T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',

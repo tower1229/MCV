@@ -20,7 +20,7 @@ describe('mcv capture', () => {
     fs.mkdirSync(path.join(homeDir, '.claude'), { recursive: true });
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 3\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  claudeCode:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 4\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  claudeCode:\n    enabled: true\nvariables: {}\n',
     );
     fs.writeFileSync(
       path.join(homeDir, '.claude', 'settings.json'),
@@ -257,7 +257,7 @@ describe('mcv capture', () => {
   it('captures Gemini merged settings while preserving repository-only fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 3\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 4\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
     );
     const geminiRoot = path.join(homeDir, '.gemini');
     fs.mkdirSync(geminiRoot, { recursive: true });
@@ -302,7 +302,7 @@ describe('mcv capture', () => {
   it('structurally merges captured Codex TOML with repository-native fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 3\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 4\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
     );
     const codexRoot = path.join(homeDir, '.codex');
     fs.mkdirSync(codexRoot, { recursive: true });
@@ -329,7 +329,7 @@ describe('mcv capture', () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 3',
+        'schemaVersion: 4',
         'repositoryId: test',
         'initializedAt: test',
         'capture: { preserveUnknownNativeFields: true }',
@@ -370,7 +370,7 @@ describe('mcv capture', () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 3',
+        'schemaVersion: 4',
         'repositoryId: test',
         'initializedAt: test',
         'capture: { preserveUnknownNativeFields: true }',

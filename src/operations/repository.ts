@@ -15,6 +15,10 @@ import {
   type McvManifest,
 } from '../utils/repository.js';
 import {
+  emptyProfilesDocument,
+  writeProfilesDocument,
+} from '../profiles/store.js';
+import {
   getStateFilePath,
   readState,
   writeState,
@@ -82,7 +86,7 @@ export type UnbindPlan = Plan<RepositoryBindingChange> & {
 };
 
 export interface InitChange {
-  id: 'repository-manifest' | 'repository-binding';
+  id: 'repository-manifest' | 'repository-profiles' | 'repository-binding';
   kind: 'add' | 'bind';
   path?: string;
   repositoryPath: string;
@@ -105,7 +109,7 @@ export type InitResult = Result<InitData, never> & {
 
 export interface MigrationChange {
   id: string;
-  kind: 'backup' | 'modify' | 'move';
+  kind: 'backup' | 'modify' | 'move' | 'add';
   path?: string;
   sourcePath?: string;
   targetPath?: string;
@@ -372,6 +376,12 @@ export function createInitPlan(
       initializedAt,
       schemaVersion: CURRENT_SCHEMA_VERSION,
     }, {
+      id: 'repository-profiles',
+      kind: 'add',
+      path: path.join(resolvedPath, 'profiles.yaml'),
+      repositoryPath: resolvedPath,
+      repositoryId,
+    }, {
       id: 'repository-binding',
       kind: 'bind',
       repositoryPath: resolvedPath,
@@ -387,11 +397,12 @@ export function applyInitPlan(context: DeviceContext, plan: InitPlan): InitResul
   const validation = validateLifecyclePlan(context, plan);
   if ('error' in validation) return failedInitResult(plan.repositoryPath, validation.error);
   const manifestChange = plan.changes.find((change) => change.id === 'repository-manifest');
+  const profilesChange = plan.changes.find((change) => change.id === 'repository-profiles');
   const bindingChange = plan.changes.find((change) => change.id === 'repository-binding');
-  if (!manifestChange?.path || !manifestChange.initializedAt || !bindingChange) {
+  if (!manifestChange?.path || !manifestChange.initializedAt || !profilesChange?.path || !bindingChange) {
     return failedInitResult(plan.repositoryPath, {
       code: 'operation.invalidPlan',
-      message: 'The Init Plan does not contain the required manifest and binding changes.',
+      message: 'The Init Plan does not contain the required manifest, profiles, and binding changes.',
       nextActions: ['Generate a new Init Plan.'],
     });
   }
@@ -404,11 +415,17 @@ export function applyInitPlan(context: DeviceContext, plan: InitPlan): InitResul
   state.repositoryPath = bindingChange.repositoryPath;
   state.baselineSnapshot = { recordedAt: manifestChange.initializedAt, files: {} };
   let manifestWritten = false;
+  let profilesWritten = false;
   try {
     atomicWriteTextFile(manifestChange.path, yaml.stringify(manifest));
     manifestWritten = true;
+    writeProfilesDocument(bindingChange.repositoryPath, emptyProfilesDocument());
+    profilesWritten = true;
     writeState(context, state);
   } catch (error) {
+    if (profilesWritten) {
+      try { fs.rmSync(profilesChange.path, { force: true }); } catch { /* best effort rollback */ }
+    }
     if (manifestWritten) {
       try { fs.rmSync(manifestChange.path, { force: true }); } catch { /* best effort rollback */ }
     }
@@ -518,6 +535,11 @@ export function createMigrationPlan(
       changes.push({ id: 'mcp-registry', kind: 'modify', path: registryPath });
     }
   }
+  changes.push({
+    id: 'repository-profiles',
+    kind: 'add',
+    path: path.join(resolvedPath, 'profiles.yaml'),
+  });
   return registerLifecyclePlan({
     schemaVersion: OPERATION_SCHEMA_VERSION,
     operation: 'migrate',
@@ -576,7 +598,7 @@ export function applyMigrationPlan(
     if (!isRecord(raw) || (raw.schemaVersion !== 1 && raw.schemaVersion !== 2)) {
       throw new Error('The Repository is no longer at the planned older schema.');
     }
-    const migrated = migrateManifestToV3(raw);
+    const migrated = migrateManifestToCurrent(raw);
     validateManifest(
       structuredClone(migrated) as unknown as Record<string, unknown>,
       manifestPath,
@@ -593,6 +615,7 @@ export function applyMigrationPlan(
       }
     }
     atomicWriteTextFile(manifestPath, yaml.stringify(migrated));
+    writeProfilesDocument(repositoryPath, emptyProfilesDocument());
     readManifest(repositoryPath);
   } catch (error) {
     if (backupVerified && backupPath && fs.existsSync(backupPath)) {
@@ -1107,7 +1130,7 @@ function createEmptyManifest(repositoryId: string, initializedAt: string): McvMa
   };
 }
 
-function migrateManifestToV3(raw: Record<string, unknown>): McvManifest {
+function migrateManifestToCurrent(raw: Record<string, unknown>): McvManifest {
   if (raw.schemaVersion === 2) {
     const migrated: Record<string, unknown> = { ...raw, schemaVersion: CURRENT_SCHEMA_VERSION };
     delete migrated.security;

@@ -84,7 +84,7 @@ describe('inspectStatus', () => {
       repositoryPath,
       repository: {
         id: 'repository-id',
-        schemaVersion: 3,
+        schemaVersion: 4,
       },
       pendingDeployment: { add: 1, modify: 1, delete: 0, total: 2 },
       postDeployLocalState: {
@@ -443,7 +443,7 @@ function seedManagedSkillRepository(
   context: DeviceContext,
 ): void {
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 3',
+    'schemaVersion: 4',
     'repositoryId: repository-id',
     'initializedAt: 2026-07-21T00:00:00.000Z',
     'targets:',
@@ -477,7 +477,7 @@ function seedManagedSkillRepository(
 
 function createRepository(repositoryPath: string, codexEnabled = true): void {
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 3',
+    'schemaVersion: 4',
     'repositoryId: repository-id',
     'initializedAt: 2026-07-21T00:00:00.000Z',
     'targets:',

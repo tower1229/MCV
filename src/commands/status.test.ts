@@ -16,7 +16,7 @@ describe('mcv status', () => {
     stateRoot = path.join(testRoot, 'device');
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: repository-id',
       'initializedAt: 2026-07-19T00:00:00.000Z',
       'targets:',
@@ -72,7 +72,7 @@ describe('mcv status', () => {
     expect(vi.mocked(console.log).mock.calls.map(([line]) => line)).toEqual([
       `Repository: ${repositoryPath}`,
       'Repository ID: repository-id',
-      'Repository schema: 3',
+      'Repository schema: 4',
       'Pending deployment: 0 changes (0 add, 0 modify, 0 delete; 0 recommended, 0 optional; 0 Advanced Cleanup excluded)',
       'Post-deploy local state: 1 unchanged, 0 content Drift, 0 topology Drift, 1 Drift, 1 missing',
       'Environment: 0 missing variables',
@@ -99,7 +99,7 @@ describe('mcv status', () => {
       status: 'reported',
       ready: true,
       repositoryPath,
-      repository: { path: repositoryPath, id: 'repository-id', schemaVersion: 3 },
+      repository: { path: repositoryPath, id: 'repository-id', schemaVersion: 4 },
       pendingDeployment: {
         add: 0,
         modify: 0,

@@ -274,7 +274,7 @@ function createDeployTreeRepository(testRoot: string): string {
   );
   fs.mkdirSync(skillPath, { recursive: true });
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 3',
+    'schemaVersion: 4',
     'repositoryId: deploy-tree-conpty',
     'initializedAt: 2026-07-27T00:00:00.000Z',
     'capture: { preserveUnknownNativeFields: true }',
@@ -317,7 +317,7 @@ function createRestoreRepository(
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   fs.mkdirSync(path.join(backupDirectory, 'files'), { recursive: true });
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 3',
+    'schemaVersion: 4',
     'repositoryId: restore-conpty',
     'initializedAt: 2026-07-29T00:00:00.000Z',
     'capture: { preserveUnknownNativeFields: true }',

@@ -1563,7 +1563,7 @@ function statusReport(): StatusReport {
     repository: {
       path: '/tmp/mcv',
       id: 'repository-id',
-      schemaVersion: 3,
+      schemaVersion: 4,
     },
     pendingDeployment: {
       add: 0,
@@ -1643,7 +1643,7 @@ function initPlan(): InitPlan {
       repositoryPath: '/tmp/empty',
       repositoryId: 'repository-id',
       initializedAt: '2026-07-27T00:00:00.000Z',
-      schemaVersion: 3,
+      schemaVersion: 4,
     }],
     issues: [],
     nextActions: [],
@@ -1661,7 +1661,7 @@ function initResult(): InitResult {
     nextActions: [],
     data: {
       repositoryId: 'repository-id',
-      repositorySchemaVersion: 3,
+      repositorySchemaVersion: 4,
     },
   };
 }
@@ -1721,7 +1721,7 @@ function bindResult(): BindResult {
     nextActions: [],
     data: {
       repositoryId: 'repository-id',
-      repositorySchemaVersion: 3,
+      repositorySchemaVersion: 4,
       previousRepositoryPath: '/tmp/old-repository',
     },
   };
@@ -1777,7 +1777,7 @@ function migrationResult(): MigrationResult {
     data: {
       repositoryId: 'repository-id',
       previousSchemaVersion: 1,
-      repositorySchemaVersion: 3,
+      repositorySchemaVersion: 4,
       backupPath: '/tmp/repository-backup',
       backupVerified: true,
     },

@@ -24,7 +24,7 @@ describe('mcv deploy', () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 3',
+        'schemaVersion: 4',
         'repositoryId: test',
         'initializedAt: test',
         'capture: { preserveUnknownNativeFields: true }',
@@ -291,7 +291,7 @@ describe('mcv deploy', () => {
   it('prunes only exact duplicate Codex skills from the legacy directory', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 3\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 4\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
     );
     const canonicalSkill = path.join(repositoryPath, 'common', 'skills', 'grill-me');
     fs.mkdirSync(path.join(canonicalSkill, 'references'), { recursive: true });
@@ -500,7 +500,7 @@ describe('mcv deploy', () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 3',
+        'schemaVersion: 4',
         'repositoryId: test',
         'initializedAt: test',
         'capture: { preserveUnknownNativeFields: true }',
@@ -582,7 +582,7 @@ describe('mcv deploy', () => {
   it('deploys Gemini merged settings without replacing unknown local fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 3\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 4\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
     );
     const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native');
     fs.mkdirSync(nativeRoot, { recursive: true });
@@ -624,7 +624,7 @@ describe('mcv deploy', () => {
   it('deploys Codex canonical content and preserves unknown TOML fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 3\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 4\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
     );
     const nativeRoot = path.join(repositoryPath, 'ide', 'codex', 'native');
     fs.mkdirSync(nativeRoot, { recursive: true });

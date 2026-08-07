@@ -49,7 +49,7 @@ describe('mcv Repository routes', () => {
       ready: true,
       repositoryPath,
       repositoryId: 'repository-command-id',
-      repositorySchemaVersion: 3,
+      repositorySchemaVersion: 4,
       valid: true,
       issues: [],
       nextActions: [],
@@ -143,7 +143,7 @@ describe('mcv Repository routes', () => {
       repositoryPath: oldRepository,
       changes: expect.arrayContaining([
         expect.objectContaining({ id: 'repository-backup', kind: 'backup' }),
-        expect.objectContaining({ id: 'schema-version', before: 1, after: 3 }),
+        expect.objectContaining({ id: 'schema-version', before: 1, after: 4 }),
       ]),
     });
     expect(yaml.parse(fs.readFileSync(path.join(oldRepository, 'mcv.yaml'), 'utf8')).schemaVersion).toBe(1);
@@ -155,7 +155,7 @@ describe('mcv Repository routes', () => {
       operation: 'migrate',
       status: 'succeeded',
       repositoryPath: oldRepository,
-      data: { previousSchemaVersion: 1, repositorySchemaVersion: 3, backupVerified: true },
+      data: { previousSchemaVersion: 1, repositorySchemaVersion: 4, backupVerified: true },
     });
   });
 
@@ -179,7 +179,7 @@ function createRepository(root: string, name: string, repositoryId: string): str
   const repositoryPath = path.join(root, name);
   fs.mkdirSync(repositoryPath);
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), yaml.stringify({
-    schemaVersion: 3,
+    schemaVersion: 4,
     repositoryId,
     initializedAt: '2026-07-22T00:00:00.000Z',
     targets: {

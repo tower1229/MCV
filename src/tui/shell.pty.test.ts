@@ -526,7 +526,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
 
     expect(migration.code).toBe(0);
     expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8'))
-      .toContain('schemaVersion: 3');
+      .toContain('schemaVersion: 4');
     expect(fs.existsSync(path.join(repositoryPath, 'mcv.yaml'))).toBe(true);
     expect(readBinding()).not.toHaveProperty('repositoryPath');
     expectRestoredTerminal(migration.output);
@@ -1047,7 +1047,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     const repositoryPath = path.join(testRoot, 'repository');
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: tui-capture-test',
       'initializedAt: 2026-07-27T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -1063,7 +1063,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     const repositoryPath = path.join(testRoot, 'status-tone-repository');
     fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: tui-status-tone-test',
       'initializedAt: 2026-07-27T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -1133,7 +1133,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     );
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: tui-restore-test',
       'initializedAt: 2026-07-27T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -1323,7 +1323,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     );
     fs.mkdirSync(skillPath, { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: deploy-tree-pty',
       'initializedAt: 2026-07-27T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',

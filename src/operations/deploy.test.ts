@@ -23,7 +23,7 @@ describe('Deploy operations', () => {
     fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'review'), { recursive: true });
     fs.mkdirSync(path.join(repositoryPath, 'ide', 'claude-code', 'native'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: deploy-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -1554,7 +1554,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 3',
+        'schemaVersion: 4',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
         'capture: { preserveUnknownNativeFields: true }',
@@ -1602,7 +1602,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 3',
+        'schemaVersion: 4',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
         'capture: { preserveUnknownNativeFields: true }',
@@ -1659,7 +1659,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 3',
+        'schemaVersion: 4',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
         'capture: { preserveUnknownNativeFields: true }',
@@ -2049,7 +2049,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 3',
+        'schemaVersion: 4',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
         'capture: { preserveUnknownNativeFields: true }',
@@ -2118,7 +2118,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 3',
+        'schemaVersion: 4',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
         'capture: { preserveUnknownNativeFields: true }',

@@ -21,7 +21,7 @@ describe('Capture operations', () => {
     fs.mkdirSync(path.join(homeDir, '.claude'), { recursive: true });
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -148,7 +148,7 @@ describe('Capture operations', () => {
 
   it('captures Antigravity keybindings arrays by replacing the Repository file', async () => {
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -257,7 +257,7 @@ describe('Capture operations', () => {
 
   it('reports ambiguous MCP core conflicts as decisionRequired', async () => {
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -311,7 +311,7 @@ describe('Capture operations', () => {
   it('captures one Skill candidate from managed projection aliases of one physical package', async () => {
     if (process.platform === 'win32') return;
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -406,7 +406,7 @@ describe('Capture operations', () => {
 
   it('keeps a hand-created alias into the Store externally owned during Capture', async () => {
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -440,7 +440,7 @@ describe('Capture operations', () => {
   it('invalidates Capture Plan when Skill projection topology changes before Apply', async () => {
     if (process.platform === 'win32') return;
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -500,7 +500,7 @@ describe('Capture operations', () => {
     const older = path.join(homeDir, '.codex', 'skills', 'review');
     const newer = path.join(homeDir, '.claude', 'skills', 'review');
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -533,7 +533,7 @@ describe('Capture operations', () => {
 
   it('merges Repository-first Canonical Rules and chooses the newest complete Skill copy deterministically', async () => {
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -773,7 +773,7 @@ describe('Capture operations', () => {
 
   it('applies one selected MCP decision and blocks an unresolved error', async () => {
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 3',
+      'schemaVersion: 4',
       'repositoryId: capture-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',

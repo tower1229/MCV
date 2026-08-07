@@ -5,7 +5,7 @@
   "additionalProperties": true,
   "required": ["schemaVersion", "repositoryId", "initializedAt", "targets", "variables", "capture", "deploy"],
   "properties": {
-    "schemaVersion": { "const": 3 },
+    "schemaVersion": { "const": 4 },
     "repositoryId": { "type": "string", "minLength": 1 },
     "initializedAt": { "type": "string" },
     "targets": {
