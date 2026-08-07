@@ -25,6 +25,7 @@ import {
   listProfiles,
   showProfile,
 } from './commands/profile.js';
+import { startMcpServer } from './commands/mcp.js';
 import {
   runTuiShell,
   type RepositoryEntry,
@@ -310,6 +311,13 @@ export function createProgram(
         expectedRevision: options.expectedRevision,
         json: options.json,
       });
+    });
+
+  program
+    .command('mcp', { hidden: true })
+    .description('Start the local stdio MCP server for Profile and Asset inspection')
+    .action(async () => {
+      await startMcpServer(context);
     });
 
   program.action(async () => {

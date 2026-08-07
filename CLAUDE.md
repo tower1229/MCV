@@ -13,7 +13,7 @@ MCV（Mobile Configuration Vehicle）是一个 TypeScript/Node.js CLI，面向�
 ## 当前运行契约
 
 - CLI 入口：`src/index.ts`；发布入口：`dist/index.js`。
-- 已实现命令：`init`、`repo`、`bind`、`unbind`、`migrate`、`discover`、`capture`、`deploy`、`status`、`restore`、`profile`。
+- 已实现命令：`init`、`repo`、`bind`、`unbind`、`migrate`、`discover`、`capture`、`deploy`、`status`、`restore`、`profile`；集成入口（不在日常顶层提示中展示）：`mcp`。
 - 已支持 Adapter：Codex、Claude Code、Gemini；不要把 Cursor 或规划中的命令描述为已实现。
 - Canonical 数据位于 `common/`；Native 数据位于 `ide/<ide>/native/`；Local/Runtime 数据不得进入仓库。
 - Overlay 使用 managed whitelist：仅显式 managed paths 由 Canonical 覆盖，未知字段默认保留为 Native。

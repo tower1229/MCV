@@ -11,6 +11,7 @@ import { showStatus } from './commands/status.js';
 import { restoreLatestBackup } from './commands/restore.js';
 import { bind, migrate, showRepository, unbind } from './commands/binding.js';
 import { createProfile, deleteProfile, editProfile, listProfiles, showProfile, } from './commands/profile.js';
+import { startMcpServer } from './commands/mcp.js';
 import { runTuiShell, } from './tui/shell.js';
 // package.json is the single version source for both npm and the CLI.
 const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -262,6 +263,12 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
             expectedRevision: options.expectedRevision,
             json: options.json,
         });
+    });
+    program
+        .command('mcp', { hidden: true })
+        .description('Start the local stdio MCP server for Profile and Asset inspection')
+        .action(async () => {
+        await startMcpServer(context);
     });
     program.action(async () => {
         if (!process.stdin.isTTY || !process.stdout.isTTY) {
