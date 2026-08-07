@@ -10,16 +10,48 @@ export interface BaselineSnapshot {
   files: Record<string, string>;
 }
 
+export const CURRENT_DEVICE_STATE_SCHEMA_VERSION = 3 as const;
+
+export type ManagedInventoryScope = 'global';
+
+export interface ManagedInventoryEntry {
+  source: string;
+  hash: string;
+  scope: ManagedInventoryScope;
+}
+
 export interface McvState {
-  schemaVersion?: 2;
+  schemaVersion?: typeof CURRENT_DEVICE_STATE_SCHEMA_VERSION | 2;
   deviceId?: string;
   defaultRepositoryId?: string;
   repositoryPath?: string;
   baselineSnapshot?: BaselineSnapshot;
-  managedInventory?: Record<string, { source: string; hash: string }>;
+  managedInventory?: Record<string, ManagedInventoryEntry | LegacyManagedInventoryEntry>;
   managedSkillLayout?: ManagedSkillLayout;
   lastDeploySelection?: Partial<Record<'codex' | 'claude-code' | 'gemini', ConfigurationCapability[]>>;
   lastOperation?: { kind: 'capture' | 'deploy' | 'restore'; time: string; success: boolean };
+}
+
+/** Schema 2 inventory entries omit scope; migration stamps them as global. */
+export interface LegacyManagedInventoryEntry {
+  source: string;
+  hash: string;
+  scope?: undefined;
+}
+
+export function mapManagedInventoryToGlobalScope(
+  inventory: Record<string, ManagedInventoryEntry | LegacyManagedInventoryEntry> | undefined,
+): Record<string, ManagedInventoryEntry> | undefined {
+  if (!inventory) return undefined;
+  const mapped: Record<string, ManagedInventoryEntry> = {};
+  for (const [targetPath, entry] of Object.entries(inventory)) {
+    mapped[targetPath] = {
+      source: entry.source,
+      hash: entry.hash,
+      scope: 'global',
+    };
+  }
+  return mapped;
 }
 
 export function getStateFilePath(context: DeviceContext): string {

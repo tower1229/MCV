@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DeviceContext } from '../adapters/types.js';
-import { getStateFilePath, readState } from './state.js';
+import { getStateFilePath, mapManagedInventoryToGlobalScope, readState } from './state.js';
 
 describe('device state compatibility', () => {
   const roots: string[] = [];
@@ -58,6 +58,14 @@ describe('device state compatibility', () => {
     expect(readState(context).managedSkillLayout?.projections[antigravityPath]).toMatchObject({
       ide: 'gemini',
       surface: 'antigravity',
+    });
+  });
+
+  it('maps schema 2 managed inventory entries to global-scope history', () => {
+    expect(mapManagedInventoryToGlobalScope({
+      '/tmp/config.toml': { source: '/repo', hash: 'abc' },
+    })).toEqual({
+      '/tmp/config.toml': { source: '/repo', hash: 'abc', scope: 'global' },
     });
   });
 });

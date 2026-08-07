@@ -28,7 +28,14 @@ import {
   hashSkillPackageContent,
   resolveSkillPackageStorePath,
 } from '../core/managed-skill-layout.js';
-import { getStateFilePath, readState, writeState, type McvState } from '../utils/state.js';
+import {
+  CURRENT_DEVICE_STATE_SCHEMA_VERSION,
+  getStateFilePath,
+  mapManagedInventoryToGlobalScope,
+  readState,
+  writeState,
+  type McvState,
+} from '../utils/state.js';
 import {
   parseStructuredObject,
   stringifyStructuredObject,
@@ -1462,7 +1469,9 @@ function updateDeployState(
 ): void {
   const state = readState(context);
   const baselineFiles = { ...(state.baselineSnapshot?.files ?? {}) };
-  const managedInventory = { ...(state.managedInventory ?? {}) };
+  const managedInventory = {
+    ...(mapManagedInventoryToGlobalScope(state.managedInventory) ?? {}),
+  };
   const managedSkillLayout = {
     packages: { ...(state.managedSkillLayout?.packages ?? {}) },
     projections: { ...(state.managedSkillLayout?.projections ?? {}) },
@@ -1490,7 +1499,7 @@ function updateDeployState(
     } else {
       const hash = hashDeviceTopologyNode(change.targetPath);
       baselineFiles[change.targetPath] = hash;
-      managedInventory[change.targetPath] = { source: repositoryPath, hash };
+      managedInventory[change.targetPath] = { source: repositoryPath, hash, scope: 'global' };
       if (change.deploymentKind === 'physical-materialization') {
         touchedPackages.add(resolveSkillPackageStorePath(change.targetPath));
       }
@@ -1534,6 +1543,7 @@ function updateDeployState(
   }
   state.baselineSnapshot = { recordedAt: new Date().toISOString(), files: baselineFiles };
   state.managedInventory = managedInventory;
+  state.schemaVersion = CURRENT_DEVICE_STATE_SCHEMA_VERSION;
   if (Object.keys(managedSkillLayout.packages).length > 0
     || Object.keys(managedSkillLayout.projections).length > 0) {
     state.managedSkillLayout = managedSkillLayout;

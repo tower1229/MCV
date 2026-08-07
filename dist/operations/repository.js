@@ -9,7 +9,9 @@ import { atomicWriteTextFile } from '../utils/files.js';
 import { isRecord } from '../utils/objects.js';
 import { CURRENT_SCHEMA_VERSION, readManifest, validateManifest, } from '../utils/repository.js';
 import { emptyProfilesDocument, writeProfilesDocument, } from '../profiles/store.js';
-import { getStateFilePath, readState, writeState, } from '../utils/state.js';
+import { GLOBAL_PROFILE_ID } from '../profiles/contracts.js';
+import { deriveAssetCatalog } from '../assets/catalog.js';
+import { CURRENT_DEVICE_STATE_SCHEMA_VERSION, getStateFilePath, mapManagedInventoryToGlobalScope, readState, writeState, } from '../utils/state.js';
 import { OPERATION_SCHEMA_VERSION, } from './contracts.js';
 const activeRepositoryPlans = new WeakMap();
 const activeLifecyclePlans = new WeakMap();
@@ -40,7 +42,7 @@ export function inspectRepository(context, explicitPath) {
     const inspectedSchemaVersion = identity.schemaVersion;
     if (inspectedSchemaVersion !== null
         && inspectedSchemaVersion !== CURRENT_SCHEMA_VERSION) {
-        const migratable = inspectedSchemaVersion === 1 || inspectedSchemaVersion === 2;
+        const migratable = isMigratableSchema(inspectedSchemaVersion);
         const code = migratable
             ? 'repository.migrationRequired'
             : 'repository.unsupportedSchema';
@@ -268,7 +270,7 @@ export function applyInitPlan(context, plan) {
     }
     const manifest = createEmptyManifest(manifestChange.repositoryId, manifestChange.initializedAt);
     const state = validation.state;
-    state.schemaVersion = 2;
+    state.schemaVersion = CURRENT_DEVICE_STATE_SCHEMA_VERSION;
     state.deviceId ??= uuidv4();
     state.defaultRepositoryId = bindingChange.repositoryId;
     state.repositoryPath = bindingChange.repositoryPath;
@@ -356,7 +358,7 @@ export function createMigrationPlan(context, repositoryPath = process.cwd()) {
             nextActions: ['Choose a Repository containing a supported older mcv.yaml manifest.'],
         });
     }
-    if (raw.schemaVersion !== 1 && raw.schemaVersion !== 2) {
+    if (!isMigratableSchema(raw.schemaVersion)) {
         const current = raw.schemaVersion === CURRENT_SCHEMA_VERSION;
         return failed({
             code: current ? 'repository.migrationNotRequired' : 'repository.unsupportedSchema',
@@ -375,10 +377,16 @@ export function createMigrationPlan(context, repositoryPath = process.cwd()) {
             nextActions: ['Repair repositoryId in mcv.yaml before migrating.'],
         });
     }
+    const catalogAssetIds = deriveAssetCatalog(resolvedPath).assets.map((asset) => asset.id);
+    const deviceState = readState(context);
     const changes = [{
             id: 'repository-backup',
             kind: 'backup',
             path: path.join(path.dirname(getStateFilePath(context)), 'repository-backups'),
+        }, {
+            id: 'catalog-scan',
+            kind: 'scan',
+            assetIds: catalogAssetIds,
         }, {
             id: 'schema-version',
             kind: 'modify',
@@ -402,7 +410,17 @@ export function createMigrationPlan(context, repositoryPath = process.cwd()) {
         id: 'repository-profiles',
         kind: 'add',
         path: path.join(resolvedPath, 'profiles.yaml'),
+        assetIds: catalogAssetIds,
     });
+    if (deviceState.schemaVersion !== CURRENT_DEVICE_STATE_SCHEMA_VERSION) {
+        changes.push({
+            id: 'device-state',
+            kind: 'modify',
+            path: getStateFilePath(context),
+            before: deviceState.schemaVersion ?? 2,
+            after: CURRENT_DEVICE_STATE_SCHEMA_VERSION,
+        });
+    }
     return registerLifecyclePlan({
         schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'migrate',
@@ -432,7 +450,7 @@ export function applyMigrationPlan(context, plan) {
     const repositoryPath = plan.repositoryPath;
     const backupRoot = path.join(path.dirname(getStateFilePath(context)), 'repository-backups');
     const sourceSchemaVersion = plan.changes.find((change) => change.id === 'schema-version')?.before;
-    if (sourceSchemaVersion !== 1 && sourceSchemaVersion !== 2) {
+    if (!isMigratableSchema(sourceSchemaVersion)) {
         return failedMigrationResult(repositoryPath, {
             code: 'operation.invalidPlan',
             message: 'The Migration Plan does not identify a supported source schema.',
@@ -441,6 +459,8 @@ export function applyMigrationPlan(context, plan) {
     }
     let backupPath;
     let backupVerified = false;
+    const deviceStateBefore = structuredClone(readState(context));
+    let deviceStateWritten = false;
     try {
         fs.mkdirSync(backupRoot, { recursive: true });
         const backupDirectory = fs.mkdtempSync(path.join(backupRoot, `schema-v${sourceSchemaVersion}-`));
@@ -452,7 +472,7 @@ export function applyMigrationPlan(context, plan) {
         backupVerified = true;
         const manifestPath = path.join(repositoryPath, 'mcv.yaml');
         const raw = yaml.parse(fs.readFileSync(manifestPath, 'utf8'));
-        if (!isRecord(raw) || (raw.schemaVersion !== 1 && raw.schemaVersion !== 2)) {
+        if (!isRecord(raw) || !isMigratableSchema(raw.schemaVersion)) {
             throw new Error('The Repository is no longer at the planned older schema.');
         }
         const migrated = migrateManifestToCurrent(raw);
@@ -469,11 +489,37 @@ export function applyMigrationPlan(context, plan) {
                 atomicWriteTextFile(change.path, content);
             }
         }
+        const layoutChanged = plan.changes.some((change) => change.kind === 'move' || change.id === 'mcp-registry');
+        const plannedAssetIds = plan.changes.find((change) => change.id === 'repository-profiles')?.assetIds;
+        const catalogAssetIds = layoutChanged || plannedAssetIds === undefined
+            ? deriveAssetCatalog(repositoryPath).assets.map((asset) => asset.id)
+            : plannedAssetIds;
+        const profilesDocument = emptyProfilesDocument();
+        profilesDocument.profiles[GLOBAL_PROFILE_ID] = { assets: catalogAssetIds };
+        writeProfilesDocument(repositoryPath, profilesDocument);
         atomicWriteTextFile(manifestPath, yaml.stringify(migrated));
-        writeProfilesDocument(repositoryPath, emptyProfilesDocument());
+        if (plan.changes.some((change) => change.id === 'device-state')) {
+            const nextState = {
+                ...deviceStateBefore,
+                schemaVersion: CURRENT_DEVICE_STATE_SCHEMA_VERSION,
+            };
+            const mappedInventory = mapManagedInventoryToGlobalScope(deviceStateBefore.managedInventory);
+            if (mappedInventory)
+                nextState.managedInventory = mappedInventory;
+            else
+                delete nextState.managedInventory;
+            writeState(context, nextState);
+            deviceStateWritten = true;
+        }
         readManifest(repositoryPath);
     }
     catch (error) {
+        if (deviceStateWritten) {
+            try {
+                writeState(context, deviceStateBefore);
+            }
+            catch { /* preserve verified repository backup */ }
+        }
         if (backupVerified && backupPath && fs.existsSync(backupPath)) {
             try {
                 fs.rmSync(repositoryPath, { recursive: true, force: true });
@@ -525,7 +571,7 @@ export function createBindPlan(context, repositoryPath = process.cwd()) {
     const identity = manifestSnapshot.identity;
     if (identity.schemaVersion !== null
         && identity.schemaVersion !== CURRENT_SCHEMA_VERSION) {
-        const migratable = identity.schemaVersion === 1 || identity.schemaVersion === 2;
+        const migratable = isMigratableSchema(identity.schemaVersion);
         const code = migratable
             ? 'repository.migrationRequired'
             : 'repository.unsupportedSchema';
@@ -644,9 +690,14 @@ export function applyBindPlan(context, plan) {
         });
     }
     const state = validation.state;
-    state.schemaVersion = 2;
+    state.schemaVersion = CURRENT_DEVICE_STATE_SCHEMA_VERSION;
     state.repositoryPath = change.repositoryPath;
     state.defaultRepositoryId = change.repositoryId;
+    const mappedInventory = mapManagedInventoryToGlobalScope(state.managedInventory);
+    if (mappedInventory)
+        state.managedInventory = mappedInventory;
+    else
+        delete state.managedInventory;
     try {
         writeState(context, state);
     }
@@ -940,6 +991,9 @@ function createEmptyManifest(repositoryId, initializedAt) {
     };
 }
 function migrateManifestToCurrent(raw) {
+    if (raw.schemaVersion === 3) {
+        return { ...raw, schemaVersion: CURRENT_SCHEMA_VERSION };
+    }
     if (raw.schemaVersion === 2) {
         const migrated = { ...raw, schemaVersion: CURRENT_SCHEMA_VERSION };
         delete migrated.security;
@@ -979,6 +1033,14 @@ function migrateManifestToCurrent(raw) {
     delete migrated.allowPlaintextSecrets;
     delete migrated.security;
     return migrated;
+}
+function isMigratableSchema(schemaVersion) {
+    return schemaVersion === 1 || schemaVersion === 2 || schemaVersion === 3;
+}
+function hasLegacyManagedInventory(state) {
+    if (!state.managedInventory)
+        return false;
+    return Object.values(state.managedInventory).some((entry) => entry.scope !== 'global');
 }
 function geminiLayoutMappings(repositoryPath) {
     const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native');

@@ -2205,7 +2205,7 @@ describe('Deploy operations', () => {
     const state = readState(context);
     expect(state.baselineSnapshot?.files).toEqual({ [targetPath]: expect.any(String) });
     expect(state.managedInventory).toEqual(expect.objectContaining({
-      [targetPath]: { source: repositoryPath, hash: expect.any(String) },
+      [targetPath]: { source: repositoryPath, hash: expect.any(String), scope: 'global' },
     }));
     expect(state.managedInventory).not.toHaveProperty(path.join(homeDir, '.claude', 'CLAUDE.md'));
     expect(state.lastDeploySelection).toEqual({ 'claude-code': ['native'] });

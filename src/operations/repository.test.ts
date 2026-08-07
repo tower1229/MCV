@@ -563,13 +563,17 @@ describe('Repository operations', () => {
     expect(readManifestForTest(repositoryPath).schemaVersion).toBe(4);
     expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8'))).toEqual({
       schemaVersion: 1,
-      profiles: { global: { assets: [] } },
+      profiles: {
+        global: {
+          assets: expect.arrayContaining(['mcp:user', 'native:gemini/gemini-cli-settings']),
+        },
+      },
     });
     expect(fs.existsSync(path.join(repositoryPath, 'ide', 'gemini', 'native', 'gemini-cli', 'settings.json'))).toBe(true);
     expect(Object.keys(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'common', 'mcp.yaml'), 'utf8')).servers)).toEqual(['user']);
   });
 
-  it('migrates v2 to v3 by removing only the retired security field', () => {
+  it('migrates v2 through v4 by removing only the retired security field', () => {
     const repositoryPath = path.join(testRoot, 'migration-v2');
     fs.mkdirSync(repositoryPath);
     const manifestPath = path.join(repositoryPath, 'mcv.yaml');
@@ -609,6 +613,112 @@ describe('Repository operations', () => {
     expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8'))).toEqual({
       schemaVersion: 1,
       profiles: { global: { assets: [] } },
+    });
+  });
+
+  it('migrates a v3 Repository into v4 with every Catalog Asset in global and device state schema 3', () => {
+    const repositoryPath = createV3Repository(testRoot, 'migration-v3');
+    const agentsPath = path.join(repositoryPath, 'common', 'AGENTS.md');
+    const skillDir = path.join(repositoryPath, 'common', 'skills', 'code-review');
+    const mcpPath = path.join(repositoryPath, 'common', 'mcp.yaml');
+    const nativePath = path.join(repositoryPath, 'ide', 'codex', 'native', 'config.toml');
+    const mcpOverridePath = path.join(repositoryPath, 'ide', 'codex', 'mcp-overrides.yaml');
+    const platformOverridePath = path.join(
+      repositoryPath,
+      'overrides',
+      'macos',
+      'common',
+      'AGENTS.md',
+    );
+    const contentBefore = {
+      agents: fs.readFileSync(agentsPath),
+      skill: fs.readFileSync(path.join(skillDir, 'SKILL.md')),
+      mcp: fs.readFileSync(mcpPath),
+      native: fs.readFileSync(nativePath),
+      mcpOverride: fs.readFileSync(mcpOverridePath),
+      platformOverride: fs.readFileSync(platformOverridePath),
+    };
+    const idePath = path.join(homeDir, '.codex', 'config.toml');
+    writeState(context, {
+      schemaVersion: 2,
+      deviceId: 'device-id',
+      repositoryPath,
+      managedInventory: {
+        [idePath]: { source: repositoryPath, hash: 'deployed-hash' },
+      },
+    });
+
+    const plan = createMigrationPlan(context, repositoryPath);
+
+    expect(plan).toMatchObject({
+      status: 'planned',
+      readyToApply: true,
+      changes: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'catalog-scan',
+          kind: 'scan',
+          assetIds: [
+            'mcp:context7',
+            'native:codex/user-settings',
+            'rule:canonical',
+            'skill:code-review',
+          ],
+        }),
+        expect.objectContaining({
+          id: 'repository-profiles',
+          kind: 'add',
+          path: path.join(repositoryPath, 'profiles.yaml'),
+          assetIds: [
+            'mcp:context7',
+            'native:codex/user-settings',
+            'rule:canonical',
+            'skill:code-review',
+          ],
+        }),
+        expect.objectContaining({ id: 'schema-version', before: 3, after: 4 }),
+        expect.objectContaining({ id: 'device-state', kind: 'modify', before: 2, after: 3 }),
+      ]),
+    });
+    expect(fs.existsSync(path.join(repositoryPath, 'profiles.yaml'))).toBe(false);
+    expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).schemaVersion).toBe(3);
+
+    const result = applyMigrationPlan(context, plan);
+
+    expect(result).toMatchObject({
+      status: 'succeeded',
+      data: {
+        previousSchemaVersion: 3,
+        repositorySchemaVersion: 4,
+        backupVerified: true,
+      },
+    });
+    expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).schemaVersion).toBe(4);
+    expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8'))).toEqual({
+      schemaVersion: 1,
+      profiles: {
+        global: {
+          assets: [
+            'mcp:context7',
+            'native:codex/user-settings',
+            'rule:canonical',
+            'skill:code-review',
+          ],
+        },
+      },
+    });
+    expect(fs.readFileSync(agentsPath)).toEqual(contentBefore.agents);
+    expect(fs.readFileSync(path.join(skillDir, 'SKILL.md'))).toEqual(contentBefore.skill);
+    expect(fs.readFileSync(mcpPath)).toEqual(contentBefore.mcp);
+    expect(fs.readFileSync(nativePath)).toEqual(contentBefore.native);
+    expect(fs.readFileSync(mcpOverridePath)).toEqual(contentBefore.mcpOverride);
+    expect(fs.readFileSync(platformOverridePath)).toEqual(contentBefore.platformOverride);
+    expect(readState(context)).toEqual({
+      schemaVersion: 3,
+      deviceId: 'device-id',
+      repositoryPath,
+      managedInventory: {
+        [idePath]: { source: repositoryPath, hash: 'deployed-hash', scope: 'global' },
+      },
     });
   });
 
@@ -657,6 +767,49 @@ function createV1Repository(root: string, name: string): string {
       user: { command: 'server' },
     },
   }));
+  return repositoryPath;
+}
+
+function createV3Repository(root: string, name: string): string {
+  const repositoryPath = path.join(root, name);
+  fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'code-review'), { recursive: true });
+  fs.mkdirSync(path.join(repositoryPath, 'ide', 'codex', 'native'), { recursive: true });
+  fs.mkdirSync(path.join(repositoryPath, 'overrides', 'macos', 'common'), { recursive: true });
+  fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), yaml.stringify({
+    schemaVersion: 3,
+    repositoryId: `${name}-id`,
+    initializedAt: '2026-07-22T00:00:00.000Z',
+    targets: {
+      codex: { enabled: true },
+      claudeCode: { enabled: true },
+      gemini: {
+        enabled: true,
+        surfaces: { geminiCli: 'auto', antigravity: 'auto' },
+      },
+    },
+    variables: {},
+    capture: { preserveUnknownNativeFields: true },
+    deploy: { backupBeforeWrite: true, useSymlinks: false },
+  }));
+  fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Canonical rules\n');
+  fs.writeFileSync(
+    path.join(repositoryPath, 'common', 'skills', 'code-review', 'SKILL.md'),
+    '---\nname: code-review\ndescription: Review pull requests\n---\n# Review\n',
+  );
+  fs.writeFileSync(path.join(repositoryPath, 'common', 'mcp.yaml'), yaml.stringify({
+    servers: {
+      context7: { command: 'npx', args: ['-y', '@upstash/context7-mcp'], transport: 'stdio' },
+    },
+  }));
+  fs.writeFileSync(path.join(repositoryPath, 'ide', 'codex', 'native', 'config.toml'), 'model = "gpt"\n');
+  fs.writeFileSync(
+    path.join(repositoryPath, 'ide', 'codex', 'mcp-overrides.yaml'),
+    yaml.stringify({ context7: { timeout: 30 } }),
+  );
+  fs.writeFileSync(
+    path.join(repositoryPath, 'overrides', 'macos', 'common', 'AGENTS.md'),
+    '# macos override\n',
+  );
   return repositoryPath;
 }
 

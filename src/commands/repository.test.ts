@@ -143,7 +143,9 @@ describe('mcv Repository routes', () => {
       repositoryPath: oldRepository,
       changes: expect.arrayContaining([
         expect.objectContaining({ id: 'repository-backup', kind: 'backup' }),
+        expect.objectContaining({ id: 'catalog-scan', kind: 'scan' }),
         expect.objectContaining({ id: 'schema-version', before: 1, after: 4 }),
+        expect.objectContaining({ id: 'repository-profiles', kind: 'add' }),
       ]),
     });
     expect(yaml.parse(fs.readFileSync(path.join(oldRepository, 'mcv.yaml'), 'utf8')).schemaVersion).toBe(1);

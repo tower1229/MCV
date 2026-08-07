@@ -1,6 +1,20 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { atomicWriteTextFile } from './files.js';
+export const CURRENT_DEVICE_STATE_SCHEMA_VERSION = 3;
+export function mapManagedInventoryToGlobalScope(inventory) {
+    if (!inventory)
+        return undefined;
+    const mapped = {};
+    for (const [targetPath, entry] of Object.entries(inventory)) {
+        mapped[targetPath] = {
+            source: entry.source,
+            hash: entry.hash,
+            scope: 'global',
+        };
+    }
+    return mapped;
+}
 export function getStateFilePath(context) {
     if (context.platform === 'win32') {
         return path.join(context.env.APPDATA || path.join(context.homeDir, 'AppData', 'Roaming'), 'mcv', 'config.json');

@@ -9,7 +9,7 @@ import { atomicWriteFile, findSymbolicLinkAncestor, hashDirectoryTree, hashFile,
 import { isRecord } from '../utils/objects.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
 import { hashSkillPackageContent, resolveSkillPackageStorePath, } from '../core/managed-skill-layout.js';
-import { getStateFilePath, readState, writeState } from '../utils/state.js';
+import { CURRENT_DEVICE_STATE_SCHEMA_VERSION, getStateFilePath, mapManagedInventoryToGlobalScope, readState, writeState, } from '../utils/state.js';
 import { parseStructuredObject, stringifyStructuredObject, } from '../utils/structured-config.js';
 import { resolveVariableDefinitions } from '../utils/variables.js';
 import { findLegacyCodexSkillDuplicates } from '../utils/deploy-skills.js';
@@ -1066,7 +1066,9 @@ function readDeployBackupManifest(backupPath) {
 function updateDeployState(context, repositoryPath, changes, updateState = writeState) {
     const state = readState(context);
     const baselineFiles = { ...(state.baselineSnapshot?.files ?? {}) };
-    const managedInventory = { ...(state.managedInventory ?? {}) };
+    const managedInventory = {
+        ...(mapManagedInventoryToGlobalScope(state.managedInventory) ?? {}),
+    };
     const managedSkillLayout = {
         packages: { ...(state.managedSkillLayout?.packages ?? {}) },
         projections: { ...(state.managedSkillLayout?.projections ?? {}) },
@@ -1098,7 +1100,7 @@ function updateDeployState(context, repositoryPath, changes, updateState = write
         else {
             const hash = hashDeviceTopologyNode(change.targetPath);
             baselineFiles[change.targetPath] = hash;
-            managedInventory[change.targetPath] = { source: repositoryPath, hash };
+            managedInventory[change.targetPath] = { source: repositoryPath, hash, scope: 'global' };
             if (change.deploymentKind === 'physical-materialization') {
                 touchedPackages.add(resolveSkillPackageStorePath(change.targetPath));
             }
@@ -1144,6 +1146,7 @@ function updateDeployState(context, repositoryPath, changes, updateState = write
     }
     state.baselineSnapshot = { recordedAt: new Date().toISOString(), files: baselineFiles };
     state.managedInventory = managedInventory;
+    state.schemaVersion = CURRENT_DEVICE_STATE_SCHEMA_VERSION;
     if (Object.keys(managedSkillLayout.packages).length > 0
         || Object.keys(managedSkillLayout.projections).length > 0) {
         state.managedSkillLayout = managedSkillLayout;

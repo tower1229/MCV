@@ -75,7 +75,24 @@ export function renderMigrationPlain(contract: MigrationPlan | MigrationResult):
       `Migration Plan: ${contract.repositoryPath}`,
       ...contract.changes.map((change) => {
         if (change.kind === 'move') return `[move] ${change.sourcePath} -> ${change.targetPath}`;
-        if (change.id === 'schema-version') return `[modify] ${change.path}: schema v${change.before} -> v${change.after}`;
+        if (change.kind === 'scan') {
+          const assets = change.assetIds?.length
+            ? change.assetIds.join(', ')
+            : '(empty catalog)';
+          return `[scan] Asset Catalog: ${assets}`;
+        }
+        if (change.id === 'schema-version') {
+          return `[modify] ${change.path}: schema v${change.before} -> v${change.after}`;
+        }
+        if (change.id === 'device-state') {
+          return `[modify] device state schema v${change.before} -> v${change.after}`;
+        }
+        if (change.id === 'repository-profiles') {
+          const assets = change.assetIds?.length
+            ? change.assetIds.join(', ')
+            : '(empty)';
+          return `[add] ${change.path} (global: ${assets})`;
+        }
         return `[${change.kind}] ${change.path}`;
       }),
     ];
