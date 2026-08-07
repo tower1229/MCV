@@ -15,6 +15,8 @@ export interface RestoreOptions {
   dryRun?: boolean;
   json?: boolean;
   yes?: boolean;
+  global?: boolean;
+  target?: string;
 }
 
 export async function restoreLatestBackup(
@@ -22,7 +24,14 @@ export async function restoreLatestBackup(
   dependencies: RestoreDependencies = {},
   options: RestoreOptions = {},
 ): Promise<void> {
-  const reviewPlan = createRestorePlan(context);
+  if (options.global === true && typeof options.target === 'string' && options.target.length > 0) {
+    console.error('options --target and --global cannot be used together');
+    process.exitCode = 2;
+    return;
+  }
+  const reviewPlan = createRestorePlan(context, options.global === true
+    ? { scope: 'global' }
+    : { scope: 'project', targetRoot: options.target ?? process.cwd() });
   if (options.dryRun) {
     if (options.json) console.log(renderJson(reviewPlan));
     else for (const line of renderRestorePlanPlain(reviewPlan)) console.log(line);

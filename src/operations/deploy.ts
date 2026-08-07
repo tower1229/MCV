@@ -52,6 +52,20 @@ import {
 import { resolveVariableDefinitions } from '../utils/variables.js';
 import { findLegacyCodexSkillDuplicates } from '../utils/deploy-skills.js';
 import {
+  assertPathContainedInProjectRoot,
+  validateProjectTargetRoot,
+} from '../core/project-target.js';
+import {
+  CANONICAL_RULES_ASSET_ID,
+  projectCanonicalRulesFile,
+  type ProjectRulesFileName,
+} from '../core/project-rules.js';
+import {
+  managedReceiptPath,
+  readManagedReceipt,
+  type ManagedReceipt,
+} from '../core/managed-receipt.js';
+import {
   classifyCanonicalSkillLinks,
   canonicalDeviceSkillStoreRoot,
   canonicalSkillTargetKey,
@@ -192,11 +206,10 @@ export type DeployResult = Result<DeployResultData, DeployChange> & Partial<Depl
 };
 
 /**
- * Checkpoint for #54/#55/#57: project-scope writers are intentionally deferred.
- * When those land, remove the empty-projection short-circuit in buildDeployPlan
- * and re-verify `mcv deploy <profile>` writes Rules/Skills/MCP under targetRoot.
+ * Skills/MCP project writers land in #55/#57. Rules project projection is active (#54).
  */
-export const PROJECT_PROJECTION_PENDING_CODE = 'deploy.projectProjectionPending' as const;
+export const PROJECT_SKILL_PROJECTION_PENDING_CODE = 'deploy.projectSkillProjectionPending' as const;
+export const PROJECT_MCP_PROJECTION_PENDING_CODE = 'deploy.projectMcpProjectionPending' as const;
 
 export function buildDeployRequest(
   repositoryPath: string,
@@ -257,6 +270,8 @@ interface DeployBackupManifest {
   createdAt: string;
   status: 'pending' | 'complete' | 'failed';
   files: DeployBackupEntry[];
+  scope?: DeployRequest['scope'];
+  targetRoot?: string;
   completedAt?: string;
   failedAt?: string;
   error?: string;
@@ -393,14 +408,155 @@ async function buildDeployPlan(
   };
 
   let desired: SourcedDeployFile[] = [];
+  const receiptEntries = new Map<string, { assetId: string; hash: string }>();
   if (activeRequest.scope === 'project') {
-    // #54/#55/#57: project writers not active yet — structure + notice only.
-    if (activeRequest.selection.assetIds.length > 0) {
+    const validated = validateProjectTargetRoot(activeRequest.targetRoot, context, {
+      boundRepositoryPath: repositoryPath,
+    });
+    if (!validated.ok) {
+      return {
+        schemaVersion: OPERATION_SCHEMA_VERSION,
+        operation: 'deploy',
+        status: 'failed',
+        readyToApply: false,
+        operationId,
+        preconditions: {},
+        repositoryPath,
+        changes: [],
+        linkOutcomes: [],
+        linkFacts: [],
+        decisions: [],
+        issues: [{
+          severity: 'error',
+          code: validated.error.code,
+          message: validated.error.message,
+        }],
+        nextActions: validated.error.nextActions,
+        error: validated.error,
+        ...activeFields,
+      };
+    }
+    activeRequest.targetRoot = validated.targetRoot;
+    Object.assign(activeFields, deployContextFieldsFromRequest(activeRequest));
+
+    const selectedView = buildSelectedRepositoryView(
+      repositoryPath,
+      activeRequest.selection,
+      deployContext,
+    );
+    const assetIds = activeRequest.selection.assetIds;
+    if (assetIds.some((id) => id.startsWith('skill:'))) {
       selectionIssues.push({
         severity: 'notice',
-        code: PROJECT_PROJECTION_PENDING_CODE,
-        message: 'Project-scope Rules, Skills, and MCP projection is not active yet; Deploy Plan is empty until those writers land.',
+        code: PROJECT_SKILL_PROJECTION_PENDING_CODE,
+        message: 'Project-scope Skill projection is not active yet; selected Skills were skipped.',
       });
+    }
+    if (assetIds.some((id) => id.startsWith('mcp:'))) {
+      selectionIssues.push({
+        severity: 'notice',
+        code: PROJECT_MCP_PROJECTION_PENDING_CODE,
+        message: 'Project-scope MCP projection is not active yet; selected MCP servers were skipped.',
+      });
+    }
+
+    const receipt = readManagedReceipt(activeRequest.targetRoot);
+    desired = (await Promise.all(definitions.map(async (definition) => {
+      const operation = await definition.adapter.project(
+        selectedView,
+        activeRequest,
+        deployContext,
+      );
+      return operation.files.flatMap((file): SourcedDeployFile[] => {
+        try {
+          assertPathContainedInProjectRoot(activeRequest.targetRoot, file.targetPath);
+        } catch (error) {
+          selectionIssues.push({
+            severity: 'error',
+            code: 'deploy.containmentFailed',
+            message: errorMessage(error),
+          });
+          return [];
+        }
+        const relative = path.relative(activeRequest.targetRoot, file.targetPath);
+        const rulesName = asProjectRulesFileName(relative);
+        if (rulesName && selectedView.rules) {
+          const projection = projectCanonicalRulesFile(
+            activeRequest.targetRoot,
+            rulesName,
+            selectedView.rules.content,
+            receipt,
+          );
+          if (projection.drifted) {
+            selectionIssues.push({
+              severity: 'decisionRequired',
+              code: 'deploy.managedBlockDrift',
+              message: `Managed Block Drift blocks silent overwrite: ${projection.targetPath}`,
+              details: 'Local edits inside the mcv:begin/mcv:end block must be resolved before Deploy can update that block.',
+            });
+            return [];
+          }
+          if (projection.unchanged) {
+            receiptEntries.set(projection.receiptKey, {
+              assetId: CANONICAL_RULES_ASSET_ID,
+              hash: projection.bodyHash,
+            });
+            return [];
+          }
+          receiptEntries.set(projection.receiptKey, {
+            assetId: CANONICAL_RULES_ASSET_ID,
+            hash: projection.bodyHash,
+          });
+          return [{
+            targetPath: projection.targetPath,
+            content: projection.content,
+            owner: 'ide' as const,
+            ide: ideName(definition.targetId),
+            capability: 'rules' as const,
+            strategy: 'replace-entire-file' as const,
+            deploymentKind: 'ordinary-file' as const,
+          }];
+        }
+        const semantics = inferDeploymentSemantics(
+          file.targetPath,
+          definition.targetId,
+          repositoryPath,
+          context,
+        );
+        return semantics.capabilities.map((capability) => ({
+          ...file,
+          owner: 'ide' as const,
+          ide: ideName(definition.targetId),
+          capability,
+          strategy: semantics.strategy,
+          deploymentKind: capability === 'skills' ? 'copy-projection' as const : 'ordinary-file' as const,
+        }));
+      });
+    }))).flat();
+
+    if (selectionIssues.some((issue) => issue.severity === 'error')) {
+      const errorIssue = selectionIssues.find((issue) => issue.severity === 'error')!;
+      return {
+        schemaVersion: OPERATION_SCHEMA_VERSION,
+        operation: 'deploy',
+        status: 'failed',
+        readyToApply: false,
+        operationId,
+        preconditions: {},
+        repositoryPath,
+        changes: [],
+        linkOutcomes: [],
+        linkFacts: [],
+        decisions: [],
+        issues: selectionIssues,
+        nextActions: ['Fix the reported project target problem, then regenerate the Deploy Plan.'],
+        error: {
+          code: errorIssue.code,
+          message: errorIssue.message,
+          nextActions: ['Fix the reported project target problem, then regenerate the Deploy Plan.'],
+        },
+        ...activeFields,
+      };
     }
   } else {
     const selectedView = buildSelectedRepositoryView(
@@ -654,6 +810,14 @@ async function buildDeployPlan(
   }
 
   changes.sort(compareChanges);
+  appendManagedReceiptChange(
+    activeRequest,
+    manifest.repositoryId,
+    receiptEntries,
+    changes,
+    mutations,
+    issues,
+  );
   const repositorySourceHash = hashRepositoryInputs(repositoryPath);
   const preconditions = Object.fromEntries(changes.flatMap((change) => {
     return [
@@ -949,6 +1113,18 @@ export async function applyDeployPlan(
   }
 
   const selected = new Set(selectedIds);
+  if (plan.scope === 'project') {
+    const receiptChange = plan.changes.find((change) =>
+      change.name === 'Managed Receipt'
+      && change.targetPath === managedReceiptPath(plan.targetRoot));
+    const rulesSelected = plan.changes.some((change) =>
+      selected.has(change.id)
+      && asProjectRulesFileName(path.relative(plan.targetRoot, change.targetPath)) !== undefined);
+    if (receiptChange && rulesSelected && !selected.has(receiptChange.id)) {
+      selected.add(receiptChange.id);
+      selectedIds.push(receiptChange.id);
+    }
+  }
   const decisionChoices = selection.decisions ?? {};
   const knownDecisionIds = new Set(plan.decisions.map((decision) => decision.id));
   if (Object.keys(decisionChoices).some((id) => !knownDecisionIds.has(id))) {
@@ -1024,7 +1200,9 @@ export async function applyDeployPlan(
   const prepared = prepareDeployWrites(selectedChanges, active.mutations);
   if (selectedChanges.length === 0) {
     try {
-      updateDeployState(context, plan.repositoryPath, selectedChanges, options.updateState);
+      if (plan.scope !== 'project') {
+        updateDeployState(context, plan.repositoryPath, selectedChanges, options.updateState);
+      }
     } catch (error) {
       activeDeployPlans.delete(plan);
       return failedDeployResult(plan.repositoryPath, {
@@ -1086,12 +1264,15 @@ export async function applyDeployPlan(
       options.createSymbolicLink ?? ((target, linkPath) => fs.symlinkSync(target, linkPath, 'dir')),
       () => {
         finalizeDeployBackup(backupPath as string);
-        updateDeployState(
-          context,
-          plan.repositoryPath as string,
-          selectedChanges,
-          options.updateState,
-        );
+        // Project ownership lives in the Managed Receipt, not device-global state.
+        if (plan.scope !== 'project') {
+          updateDeployState(
+            context,
+            plan.repositoryPath as string,
+            selectedChanges,
+            options.updateState,
+          );
+        }
       },
     );
     activeDeployPlans.delete(plan);
@@ -1368,6 +1549,8 @@ function createDeployBackup(
       createdAt: new Date().toISOString(),
       status: 'pending',
       files,
+      scope: plan.scope,
+      targetRoot: plan.targetRoot,
     };
     atomicWriteFile(
       path.join(backupPath, 'manifest.json'),
@@ -2044,6 +2227,77 @@ function displayName(targetPath: string, capability: ConfigurationCapability): s
   }
   if (capability === 'mcp') return 'MCP';
   return path.basename(targetPath);
+}
+
+function asProjectRulesFileName(relativePath: string): ProjectRulesFileName | undefined {
+  const normalized = relativePath.split(path.sep).join('/');
+  if (normalized === 'AGENTS.md' || normalized === 'CLAUDE.md' || normalized === 'GEMINI.md') {
+    return normalized;
+  }
+  return undefined;
+}
+
+function appendManagedReceiptChange(
+  request: DeployRequest,
+  repositoryId: string,
+  receiptEntries: Map<string, { assetId: string; hash: string }>,
+  changes: DeployChange[],
+  mutations: Map<string, DeployMutation>,
+  issues: Issue[],
+): void {
+  if (request.scope !== 'project' || receiptEntries.size === 0) return;
+  const rulesWritten = changes.some((change) =>
+    asProjectRulesFileName(path.relative(request.targetRoot, change.targetPath)) !== undefined);
+  if (!rulesWritten) return;
+
+  const existing = readManagedReceipt(request.targetRoot);
+  const next: ManagedReceipt = {
+    schemaVersion: 1,
+    repositoryId,
+    managed: { ...(existing?.managed ?? {}) },
+  };
+  for (const [key, entry] of receiptEntries) {
+    next.managed[key] = entry;
+  }
+  const receiptPath = managedReceiptPath(request.targetRoot);
+  try {
+    assertPathContainedInProjectRoot(request.targetRoot, receiptPath);
+  } catch (error) {
+    issues.push({
+      severity: 'error',
+      code: 'deploy.containmentFailed',
+      message: errorMessage(error),
+    });
+    return;
+  }
+  const nextContent = Buffer.from(`${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  const previous = fs.existsSync(receiptPath) ? fs.readFileSync(receiptPath) : undefined;
+  if (previous?.equals(nextContent)) return;
+
+  const id = selectionId('project', 'native', receiptPath);
+  mutations.set(id, { content: nextContent });
+  changes.push({
+    id,
+    owner: 'ide',
+    ide: 'codex',
+    capability: 'native',
+    name: 'Managed Receipt',
+    targetPath: receiptPath,
+    change: previous === undefined ? 'add' : 'modify',
+    defaultSelected: true,
+    group: 'standard',
+    strategy: 'replace-entire-file',
+    deploymentKind: 'ordinary-file',
+    preview: {
+      targetPath: receiptPath,
+      kind: 'text',
+      bytes: nextContent.byteLength,
+      sha256: hashBuffer(nextContent),
+      diff: previous === undefined
+        ? `--- /dev/null\n+++ ${receiptPath}\n${nextContent.toString('utf8')}`
+        : `Update Managed Receipt at ${receiptPath}`,
+    },
+  });
 }
 
 function compareChanges(left: DeployChange, right: DeployChange): number {

@@ -75,6 +75,15 @@ export function repositoryFileForPlatform(repositoryPath, relativePath, context)
     const override = path.join(repositoryPath, 'overrides', platformDirectory, ...relativePath.split('/'));
     return fs.existsSync(override) ? override : path.join(repositoryPath, ...relativePath.split('/'));
 }
+export function projectRulesManagedFile(targetRoot, relativePath, source) {
+    if (!source.rules)
+        return [];
+    // Deploy rebuilds Managed Block content (and Drift checks) via projectCanonicalRulesFile.
+    return [{
+            targetPath: path.join(targetRoot, relativePath),
+            content: source.rules.content,
+        }];
+}
 function readFilesRecursively(sourceRoot, currentDirectory) {
     return fs.readdirSync(currentDirectory, { withFileTypes: true }).flatMap((entry) => {
         const sourcePath = path.join(currentDirectory, entry.name);

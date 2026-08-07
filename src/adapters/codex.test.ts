@@ -77,11 +77,26 @@ describe('CodexAdapter', () => {
     }));
   });
 
-  it('returns no files for project scope', async () => {
+  it('projects Canonical Rules as a Managed Block for project scope', async () => {
+    const projectRoot = path.join(homeDir, 'project');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), '# Local intro\n');
     const adapter = new CodexAdapter();
     const context = { homeDir, platform: 'darwin' as const, env: {} };
-    const operation = await adapter.project(emptyView(), projectRequest(), context);
-    expect(operation.files).toEqual([]);
+    const view: SelectedRepositoryView = {
+      rules: { id: 'rule:canonical', content: '# Rules\n' },
+      skills: [],
+      mcpServers: {},
+      mcpOverrides: {},
+      nativeAssets: new Map(),
+    };
+    const operation = await adapter.project(view, {
+      ...projectRequest(),
+      targetRoot: projectRoot,
+    }, context);
+    expect(operation.files).toHaveLength(1);
+    expect(operation.files[0].targetPath).toBe(path.join(projectRoot, 'AGENTS.md'));
+    expect(operation.files[0].content.toString()).toBe('# Rules\n');
   });
 
   it('projects selected native config for global scope', async () => {

@@ -317,7 +317,7 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
     try {
       dispatch({
         type: 'restore.loaded',
-        plan: (dependencies.createRestorePlan ?? createRestorePlan)(context),
+        plan: (dependencies.createRestorePlan ?? ((ctx) => createRestorePlan(ctx, { scope: 'global' })))(context),
       });
     } catch (error) {
       dispatch({
@@ -1061,7 +1061,7 @@ function loadRoute(
   }
   if (route === 'restore') {
     return Promise.resolve(
-      (dependencies.createRestorePlan ?? createRestorePlan)(context),
+      (dependencies.createRestorePlan ?? ((ctx) => createRestorePlan(ctx, { scope: 'global' })))(context),
     );
   }
   return (dependencies.createCapturePlan ?? createCapturePlan)(context);

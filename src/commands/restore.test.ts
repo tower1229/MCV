@@ -32,7 +32,7 @@ describe('mcv restore', () => {
     createBackup('latest', '2026-07-19T00:00:00.000Z', 'restored content');
 
     await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
-      .parseAsync(['node', 'mcv', 'restore', '--yes']);
+      .parseAsync(['node', 'mcv', 'restore', '--global', '--yes']);
 
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('restored content');
     expect(vi.mocked(console.log)).toHaveBeenCalledWith('Restored 1 change(s) from the latest backup.');
@@ -84,7 +84,7 @@ describe('mcv restore', () => {
       }));
     }
     await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
-      .parseAsync(['node', 'mcv', 'restore', '--yes']);
+      .parseAsync(['node', 'mcv', 'restore', '--global', '--yes']);
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('safe backup');
   });
 
@@ -99,7 +99,7 @@ describe('mcv restore', () => {
       defaultRepositoryId: 'old-repository-id',
     });
 
-    await createProgram(context).parseAsync(['node', 'mcv', 'restore', '--yes']);
+    await createProgram(context).parseAsync(['node', 'mcv', 'restore', '--global', '--yes']);
 
     expect(process.exitCode).toBe(1);
     expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain('Restore failed.');
@@ -110,7 +110,7 @@ describe('mcv restore', () => {
     createCompleteBackup(targetPath, 'deployed content', 'original content');
 
     await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
-      .parseAsync(['node', 'mcv', 'restore', '--dry-run']);
+      .parseAsync(['node', 'mcv', 'restore', '--global', '--dry-run']);
 
     expect(vi.mocked(console.log).mock.calls.map(([line]) => line)).toEqual(expect.arrayContaining([
       'Backup time: 2026-07-19T00:00:00.000Z',
@@ -129,7 +129,7 @@ describe('mcv restore', () => {
     createCompleteBackup(targetPath, 'deployed content', 'original content');
 
     await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
-      .parseAsync(['node', 'mcv', 'restore', '--dry-run', '--json']);
+      .parseAsync(['node', 'mcv', 'restore', '--global', '--dry-run', '--json']);
 
     expect(console.log).toHaveBeenCalledOnce();
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
@@ -154,7 +154,7 @@ describe('mcv restore', () => {
     createCompleteBackup(targetPath, 'deployed content', 'original content');
 
     await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
-      .parseAsync(['node', 'mcv', 'restore', '--yes', '--json']);
+      .parseAsync(['node', 'mcv', 'restore', '--global', '--yes', '--json']);
 
     expect(console.log).toHaveBeenCalledOnce();
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({

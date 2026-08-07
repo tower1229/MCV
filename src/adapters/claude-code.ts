@@ -9,6 +9,7 @@ import {
   parseStructuredObject,
   stringifyStructuredObject,
 } from '../utils/structured-config.js';
+import { projectRulesManagedFile } from './adapter-utils.js';
 import { ClaudeCodeNativeFileHandler, projectClaudeCodeNativeAsset } from './claude-code-native-file-handler.js';
 import { ClaudeCodeCanonicalTransformer } from './claude-code-canonical-transformer.js';
 import type {
@@ -73,7 +74,7 @@ export class ClaudeCodeAdapter implements IdeAdapter {
   ): Promise<DeployOperation> {
     const write = (file: DeployFile) => atomicWriteFile(file.targetPath, file.content);
     if (request.scope === 'project') {
-      return { files: [], write };
+      return { files: projectRulesManagedFile(request.targetRoot, 'CLAUDE.md', source), write };
     }
 
     const canonicalSource = toCanonicalDeploySource(source);

@@ -156,11 +156,19 @@ export function createProgram(
   const restoreCommand = program
     .command('restore')
     .description('Restore local configuration from the latest deployment backup')
+    .option('--global', 'Restore from the latest global Deploy backup')
+    .option('--target <path>', 'Project root whose latest Deploy backup to restore (default: process.cwd())')
     .option('--dry-run', 'Show the Restore Plan without writing')
     .option('--yes', 'Restore without prompting after reviewing a dry-run')
     .option('--json', 'Print one machine-readable Restore Plan or Result')
     .action(async (options) => {
       validateWriteOutputOptions(restoreCommand, options);
+      if (options.global && options.target) {
+        restoreCommand.error(
+          "options '--target' and '--global' cannot be used together",
+          { exitCode: 2, code: 'mcv.conflictingRestoreScope' },
+        );
+      }
       if (shouldUseWriteTui(options)) {
         await runShell(context, 'restore', true);
       } else {

@@ -10,7 +10,8 @@ import {
   applyDeployPlan,
   buildDeployRequest,
   createDeployPlan,
-  PROJECT_PROJECTION_PENDING_CODE,
+  PROJECT_MCP_PROJECTION_PENDING_CODE,
+  PROJECT_SKILL_PROJECTION_PENDING_CODE,
 } from './deploy.js';
 import { createGlobalDeployPlan, seedGlobalProfileWithCatalog } from './deploy-request-helpers.js';
 import { writeProfilesDocument } from '../profiles/store.js';
@@ -2290,10 +2291,23 @@ describe('Deploy operations', () => {
       defaultRepositoryId: 'deploy-operation-test',
       repositoryPath,
     });
+    const projectRoot = path.join(testRoot, 'project-empty-apply');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    // Profile with only deferred Skills selected would still notice; use a Profile
+    // that references skills so empty Rules selection still surfaces pending notices.
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: {
+        global: {
+          title: 'Global',
+          assets: ['skill:review'],
+        },
+      },
+    });
     const built = buildDeployRequest(repositoryPath, {
       profileIds: ['global'],
       scope: 'project',
-      targetRoot: path.join(testRoot, 'project-empty-apply'),
+      targetRoot: projectRoot,
     });
     if ('error' in built) throw new Error(built.error.message);
     const plan = await createDeployPlan(context, built.request);
@@ -2306,29 +2320,186 @@ describe('Deploy operations', () => {
       profileIds: ['global'],
     });
     expect(result.issues).toContainEqual(expect.objectContaining({
-      code: PROJECT_PROJECTION_PENDING_CODE,
+      code: PROJECT_SKILL_PROJECTION_PENDING_CODE,
     }));
   });
 
-  it('returns an empty project-scope plan with projection pending notice when assets remain', async () => {
+  it('deploys Canonical Rules Managed Blocks and a Managed Receipt for project scope', async () => {
     writeState(context, {
       schemaVersion: 2,
       defaultRepositoryId: 'deploy-operation-test',
       repositoryPath,
     });
+    // Enable all three IDEs for this integration slice.
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 4',
+      'repositoryId: deploy-operation-test',
+      'initializedAt: 2026-07-22T00:00:00.000Z',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets:',
+      '  codex: { enabled: true }',
+      '  claudeCode: { enabled: true }',
+      '  gemini:',
+      '    enabled: true',
+      '    surfaces: { geminiCli: true, antigravity: false }',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: {
+        global: {
+          title: 'Global',
+          assets: ['rule:canonical'],
+        },
+        dev: {
+          title: 'Dev',
+          description: 'project rules',
+          assets: ['rule:canonical'],
+        },
+      },
+    });
+    const projectRoot = path.join(testRoot, 'project-rules');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), '# Local intro\n');
+
+    const built = buildDeployRequest(repositoryPath, {
+      profileIds: ['dev'],
+      scope: 'project',
+      targetRoot: projectRoot,
+    });
+    if ('error' in built) throw new Error(built.error.message);
+    const plan = await createDeployPlan(context, built.request);
+    expect(plan.status).toBe('planned');
+    expect(plan.changes.some((change) => change.targetPath.endsWith('AGENTS.md'))).toBe(true);
+    expect(plan.changes.some((change) => change.targetPath.endsWith('CLAUDE.md'))).toBe(true);
+    expect(plan.changes.some((change) => change.targetPath.endsWith('GEMINI.md'))).toBe(true);
+    expect(plan.changes.at(-1)?.targetPath).toBe(path.join(projectRoot, '.mcv', 'managed.json'));
+
+    const result = await applyDeployPlan(context, plan, {
+      changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+    });
+    expect(result.status).toBe('succeeded');
+
+    const agents = fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8');
+    expect(agents.startsWith('# Local intro\n')).toBe(true);
+    expect(agents).toContain('<!-- mcv:begin rule:canonical -->');
+    expect(agents).toContain('# Repository rules');
+    expect(fs.readFileSync(path.join(projectRoot, 'CLAUDE.md'), 'utf8')).toContain('<!-- mcv:begin rule:canonical -->');
+    expect(fs.readFileSync(path.join(projectRoot, 'GEMINI.md'), 'utf8')).toContain('<!-- mcv:begin rule:canonical -->');
+
+    const receipt = JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcv', 'managed.json'), 'utf8'));
+    expect(receipt.schemaVersion).toBe(1);
+    expect(receipt.repositoryId).toBe('deploy-operation-test');
+    expect(receipt.managed['AGENTS.md#mcv:rule:canonical']).toMatchObject({
+      assetId: 'rule:canonical',
+      hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(JSON.stringify(receipt)).not.toContain(projectRoot);
+
+    // Receipt failure rolls file writes back.
+    const built2 = buildDeployRequest(repositoryPath, {
+      profileIds: ['dev'],
+      scope: 'project',
+      targetRoot: projectRoot,
+    });
+    if ('error' in built2) throw new Error(built2.error.message);
+    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Repository rules v2\n');
+    const plan2 = await createDeployPlan(context, built2.request);
+    const receiptChange = plan2.changes.find((change) =>
+      change.targetPath === path.join(projectRoot, '.mcv', 'managed.json'));
+    expect(receiptChange).toBeDefined();
+    const result2 = await applyDeployPlan(
+      context,
+      plan2,
+      { changeIds: plan2.changes.filter((c) => c.defaultSelected).map((c) => c.id) },
+      {
+        writeFile: (targetPath, content) => {
+          if (targetPath === path.join(projectRoot, '.mcv', 'managed.json')) {
+            throw new Error('simulated receipt failure');
+          }
+          atomicWriteFile(targetPath, content);
+        },
+      },
+    );
+    expect(result2.status).toBe('failed');
+    expect(fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8')).toBe(agents);
+  });
+
+  it('treats locally modified Managed Blocks as Drift that blocks overwrite', async () => {
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'deploy-operation-test',
+      repositoryPath,
+    });
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: {
+        global: {
+          title: 'Global',
+          assets: ['rule:canonical'],
+        },
+      },
+    });
+    const projectRoot = path.join(testRoot, 'project-drift');
+    fs.mkdirSync(path.join(projectRoot, '.mcv'), { recursive: true });
+    const block = [
+      '<!-- mcv:begin rule:canonical -->',
+      '# Deployed',
+      '<!-- mcv:end rule:canonical -->',
+      '',
+    ].join('\n');
+    fs.writeFileSync(path.join(projectRoot, 'CLAUDE.md'), block);
+    const { createHash } = await import('crypto');
+    const hash = createHash('sha256').update('# Deployed\n', 'utf8').digest('hex');
+    fs.writeFileSync(path.join(projectRoot, '.mcv', 'managed.json'), `${JSON.stringify({
+      schemaVersion: 1,
+      repositoryId: 'deploy-operation-test',
+      managed: {
+        'CLAUDE.md#mcv:rule:canonical': { assetId: 'rule:canonical', hash },
+      },
+    }, null, 2)}\n`);
+    fs.writeFileSync(path.join(projectRoot, 'CLAUDE.md'), block.replace('# Deployed\n', '# Local edit\n'));
+
     const built = buildDeployRequest(repositoryPath, {
       profileIds: ['global'],
       scope: 'project',
-      targetRoot: path.join(testRoot, 'project'),
+      targetRoot: projectRoot,
+    });
+    if ('error' in built) throw new Error(built.error.message);
+    const plan = await createDeployPlan(context, built.request);
+    expect(plan.issues).toContainEqual(expect.objectContaining({
+      code: 'deploy.managedBlockDrift',
+      severity: 'decisionRequired',
+    }));
+    expect(plan.changes.some((change) => change.targetPath === path.join(projectRoot, 'CLAUDE.md'))).toBe(false);
+  });
+
+  it('returns pending notices for project Skills/MCP while still planning Rules', async () => {
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'deploy-operation-test',
+      repositoryPath,
+    });
+    const projectRoot = path.join(testRoot, 'project');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    const built = buildDeployRequest(repositoryPath, {
+      profileIds: ['global'],
+      scope: 'project',
+      targetRoot: projectRoot,
     });
     if ('error' in built) throw new Error(built.error.message);
 
     const plan = await createDeployPlan(context, built.request);
 
-    expect(plan.changes).toEqual([]);
     expect(plan.issues).toContainEqual(expect.objectContaining({
-      code: PROJECT_PROJECTION_PENDING_CODE,
+      code: PROJECT_SKILL_PROJECTION_PENDING_CODE,
     }));
+    expect(plan.issues).toContainEqual(expect.objectContaining({
+      code: PROJECT_MCP_PROJECTION_PENDING_CODE,
+    }));
+    expect(plan.changes.some((change) => change.targetPath.endsWith('CLAUDE.md'))).toBe(true);
     expect(plan).toMatchObject({
       scope: 'project',
       profileIds: ['global'],

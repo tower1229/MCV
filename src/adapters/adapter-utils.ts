@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
+import type { SelectedRepositoryView } from '../assets/selected-repository-view.js';
 import type {
   CanonicalDeploySource,
   DeployFile,
@@ -93,6 +94,19 @@ export function repositoryFileForPlatform(
   const platformDirectory = context.platform === 'win32' ? 'windows' : 'macos';
   const override = path.join(repositoryPath, 'overrides', platformDirectory, ...relativePath.split('/'));
   return fs.existsSync(override) ? override : path.join(repositoryPath, ...relativePath.split('/'));
+}
+
+export function projectRulesManagedFile(
+  targetRoot: string,
+  relativePath: 'AGENTS.md' | 'CLAUDE.md' | 'GEMINI.md',
+  source: SelectedRepositoryView,
+): DeployFile[] {
+  if (!source.rules) return [];
+  // Deploy rebuilds Managed Block content (and Drift checks) via projectCanonicalRulesFile.
+  return [{
+    targetPath: path.join(targetRoot, relativePath),
+    content: source.rules.content,
+  }];
 }
 
 function readFilesRecursively(

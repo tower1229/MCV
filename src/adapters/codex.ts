@@ -4,7 +4,7 @@ import type { DeployRequest } from '../assets/deploy-request.js';
 import { toCanonicalDeploySource, type SelectedRepositoryView } from '../assets/selected-repository-view.js';
 import { atomicWriteFile } from '../utils/files.js';
 import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObject } from '../utils/structured-config.js';
-import { hasExecutable } from './adapter-utils.js';
+import { hasExecutable, projectRulesManagedFile } from './adapter-utils.js';
 import { CodexCanonicalTransformer } from './codex-canonical-transformer.js';
 import { CodexNativeFileHandler, projectCodexNativeUserSettings } from './codex-native-file-handler.js';
 import { CODEX_MANAGED_PATHS } from './overlay-policies.js';
@@ -63,7 +63,7 @@ export class CodexAdapter implements IdeAdapter {
   ): Promise<DeployOperation> {
     const write = (file: DeployFile) => atomicWriteFile(file.targetPath, file.content);
     if (request.scope === 'project') {
-      return { files: [], write };
+      return { files: projectRulesManagedFile(request.targetRoot, 'AGENTS.md', source), write };
     }
 
     const canonicalSource = toCanonicalDeploySource(source);

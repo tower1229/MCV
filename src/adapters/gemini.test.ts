@@ -87,11 +87,26 @@ describe('GeminiAdapter', () => {
     });
   });
 
-  it('returns no files for project scope', async () => {
+  it('projects Canonical Rules as a Managed Block for project scope', async () => {
+    const projectRoot = path.join(homeDir, 'project');
+    fs.mkdirSync(projectRoot, { recursive: true });
     const adapter = new GeminiAdapter();
     const context = { homeDir, platform: 'darwin' as const, env: {} };
-    const operation = await adapter.project(emptyView(), projectRequest(), context);
-    expect(operation.files).toEqual([]);
+    const view: SelectedRepositoryView = {
+      rules: { id: 'rule:canonical', content: '# Rules\n' },
+      skills: [],
+      mcpServers: {},
+      mcpOverrides: {},
+      nativeAssets: new Map(),
+    };
+    const operation = await adapter.project(view, {
+      ...projectRequest(),
+      targetRoot: projectRoot,
+    }, context);
+    expect(operation.files).toEqual([expect.objectContaining({
+      targetPath: path.join(projectRoot, 'GEMINI.md'),
+      content: '# Rules\n',
+    })]);
   });
 
   it('projects selected native settings for global scope', async () => {

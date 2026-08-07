@@ -318,6 +318,7 @@ describe('mcv deploy', () => {
     await restoreLatestBackup(
       deviceContext('win32'),
       { confirmRestore: async () => true },
+      { global: true, yes: true },
     );
     expect(fs.readFileSync(path.join(duplicateLegacySkill, 'SKILL.md'), 'utf8')).toBe('# Grill Me\n');
     expect(fs.readFileSync(path.join(duplicateLegacySkill, 'references', 'questions.md'), 'utf8')).toBe('# Questions\n');
@@ -474,6 +475,7 @@ describe('mcv deploy', () => {
     await restoreLatestBackup(
       deviceContext('win32'),
       { confirmRestore: async () => true },
+      { global: true, yes: true },
     );
     expect(fs.existsSync(targetPath)).toBe(true);
   });

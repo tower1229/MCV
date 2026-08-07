@@ -40,12 +40,19 @@ interface DeployBackupManifest {
   createdAt: string;
   status: 'complete';
   files: DeployBackupFile[];
+  scope?: 'project' | 'global';
+  targetRoot?: string;
 }
 
 export interface VerifiedDeployBackup {
   directory: string;
   manifest: DeployBackupManifest;
   manifestHash: string;
+}
+
+export interface RestorePlanOptions {
+  scope?: 'project' | 'global';
+  targetRoot?: string;
 }
 
 export type RestoreLayoutKind =
@@ -116,21 +123,32 @@ const MISSING_HASH = hashText('<missing>');
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const activeRestorePlans = new WeakMap<RestorePlan, ActiveRestorePlan>();
 
-export function createRestorePlan(context: DeviceContext): RestorePlan {
+export function createRestorePlan(
+  context: DeviceContext,
+  options: RestorePlanOptions = {},
+): RestorePlan {
   const operationId = uuidv4();
   const state = readState(context);
   const repositoryPath = state.repositoryPath ?? null;
+  const scope = options.scope ?? 'project';
+  const targetRoot = scope === 'project'
+    ? path.resolve(options.targetRoot ?? process.cwd())
+    : undefined;
   try {
     if (repositoryPath) readManifest(repositoryPath);
     const backupRoot = path.join(path.dirname(getStateFilePath(context)), 'backups');
-    const backup = findLatestVerifiedBackup(backupRoot);
+    const backup = findLatestVerifiedBackup(backupRoot, { scope, targetRoot });
     if (!backup) {
       return freezeRestorePlan(failedRestorePlan(
         operationId,
         repositoryPath,
         'restore.backupNotFound',
-        'No complete and verified deployment backup is available.',
-        ['Run a successful Deploy before trying Restore again.'],
+        scope === 'global'
+          ? 'No complete and verified global deployment backup is available.'
+          : 'No complete and verified project deployment backup is available for this targetRoot.',
+        scope === 'global'
+          ? ['Run a successful Deploy with --global before trying Restore again.']
+          : ['Run a successful project Deploy for this directory before trying Restore again.'],
       ));
     }
     const plan = freezeRestorePlan(buildRestorePlan(operationId, repositoryPath, backup));
@@ -632,16 +650,30 @@ function restoreLayoutKind(
 
 export function findLatestVerifiedBackup(
   backupRoot: string,
+  filter: { scope: 'project' | 'global'; targetRoot?: string },
 ): VerifiedDeployBackup | undefined {
   if (!fs.existsSync(backupRoot)) return undefined;
   return fs.readdirSync(backupRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .flatMap((entry) => {
       const verified = verifyDeployBackup(path.join(backupRoot, entry.name));
-      return verified ? [verified] : [];
+      return verified && backupMatchesRestoreFilter(verified, filter) ? [verified] : [];
     })
     .sort((left, right) =>
       Date.parse(right.manifest.createdAt) - Date.parse(left.manifest.createdAt))[0];
+}
+
+function backupMatchesRestoreFilter(
+  backup: VerifiedDeployBackup,
+  filter: { scope: 'project' | 'global'; targetRoot?: string },
+): boolean {
+  const scope = backup.manifest.scope ?? 'global';
+  if (filter.scope === 'global') return scope === 'global';
+  if (scope !== 'project') return false;
+  if (typeof filter.targetRoot !== 'string' || typeof backup.manifest.targetRoot !== 'string') {
+    return false;
+  }
+  return path.resolve(filter.targetRoot) === path.resolve(backup.manifest.targetRoot);
 }
 
 function verifyDeployBackup(directory: string): VerifiedDeployBackup | undefined {
@@ -668,7 +700,13 @@ function verifyDeployBackup(directory: string): VerifiedDeployBackup | undefined
     }
     return {
       directory,
-      manifest: { createdAt: value.createdAt, status: 'complete', files },
+      manifest: {
+        createdAt: value.createdAt,
+        status: 'complete',
+        files,
+        ...(value.scope === 'project' || value.scope === 'global' ? { scope: value.scope } : {}),
+        ...(typeof value.targetRoot === 'string' ? { targetRoot: value.targetRoot } : {}),
+      },
       manifestHash: hashBuffer(manifestContent),
     };
   } catch {

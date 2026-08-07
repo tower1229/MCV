@@ -3,7 +3,7 @@ import { parseAssetId } from '../assets/ids.js';
 import { toCanonicalDeploySource } from '../assets/selected-repository-view.js';
 import { atomicWriteFile } from '../utils/files.js';
 import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObject } from '../utils/structured-config.js';
-import { hasExecutable } from './adapter-utils.js';
+import { hasExecutable, projectRulesManagedFile } from './adapter-utils.js';
 import { GeminiCanonicalTransformer } from './gemini-canonical-transformer.js';
 import { GeminiNativeFileHandler, projectGeminiNativeAsset } from './gemini-native-file-handler.js';
 import { GEMINI_MANAGED_PATHS } from './overlay-policies.js';
@@ -46,7 +46,7 @@ export class GeminiAdapter {
     async project(source, request, context) {
         const write = (file) => atomicWriteFile(file.targetPath, file.content);
         if (request.scope === 'project') {
-            return { files: [], write };
+            return { files: projectRulesManagedFile(request.targetRoot, 'GEMINI.md', source), write };
         }
         const canonicalSource = toCanonicalDeploySource(source);
         const [nativeFiles, canonicalFiles] = await Promise.all([

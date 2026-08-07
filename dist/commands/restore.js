@@ -3,7 +3,14 @@ import { applyRestorePlan, createRestorePlan, } from '../operations/restore.js';
 import { renderJson } from '../renderers/json.js';
 import { renderRestorePlanPlain, renderRestoreResultPlain } from '../renderers/restore.js';
 export async function restoreLatestBackup(context, dependencies = {}, options = {}) {
-    const reviewPlan = createRestorePlan(context);
+    if (options.global === true && typeof options.target === 'string' && options.target.length > 0) {
+        console.error('options --target and --global cannot be used together');
+        process.exitCode = 2;
+        return;
+    }
+    const reviewPlan = createRestorePlan(context, options.global === true
+        ? { scope: 'global' }
+        : { scope: 'project', targetRoot: options.target ?? process.cwd() });
     if (options.dryRun) {
         if (options.json)
             console.log(renderJson(reviewPlan));

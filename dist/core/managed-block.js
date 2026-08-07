@@ -1,0 +1,68 @@
+import { createHash } from 'crypto';
+const BEGIN_PREFIX = '<!-- mcv:begin ';
+const END_PREFIX = '<!-- mcv:end ';
+const MARKER_SUFFIX = ' -->';
+export function formatManagedBlock(assetId, body) {
+    const normalized = normalizeBlockBody(body);
+    return [
+        `${BEGIN_PREFIX}${assetId}${MARKER_SUFFIX}`,
+        normalized.replace(/\n$/, ''),
+        `${END_PREFIX}${assetId}${MARKER_SUFFIX}`,
+    ].join('\n');
+}
+export function upsertManagedBlock(existingContent, assetId, body) {
+    const block = formatManagedBlock(assetId, body);
+    if (existingContent === undefined || existingContent.length === 0) {
+        return `${block}\n`;
+    }
+    const range = findManagedBlockRange(existingContent, assetId);
+    if (!range) {
+        const separator = existingContent.endsWith('\n') ? '' : '\n';
+        return `${existingContent}${separator}${block}\n`;
+    }
+    return (existingContent.slice(0, range.start)
+        + block
+        + existingContent.slice(range.end));
+}
+export function extractManagedBlock(content, assetId) {
+    const range = findManagedBlockRange(content, assetId);
+    if (!range)
+        return undefined;
+    const inner = content.slice(range.bodyStart, range.bodyEnd);
+    return normalizeBlockBody(inner);
+}
+export function managedBlockDrifted(content, assetId, expectedBody) {
+    const current = extractManagedBlock(content, assetId);
+    if (current === undefined)
+        return false;
+    return current !== normalizeBlockBody(expectedBody);
+}
+export function managedReceiptKey(relativePath, assetId) {
+    return `${relativePath.split(pathSep()).join('/')}#mcv:${assetId}`;
+}
+export function hashManagedBlockBody(body) {
+    return createHash('sha256').update(normalizeBlockBody(body), 'utf8').digest('hex');
+}
+function findManagedBlockRange(content, assetId) {
+    const beginMarker = `${BEGIN_PREFIX}${assetId}${MARKER_SUFFIX}`;
+    const endMarker = `${END_PREFIX}${assetId}${MARKER_SUFFIX}`;
+    const start = content.indexOf(beginMarker);
+    if (start < 0)
+        return undefined;
+    const afterBegin = start + beginMarker.length;
+    const endMarkerIndex = content.indexOf(endMarker, afterBegin);
+    if (endMarkerIndex < 0)
+        return undefined;
+    const end = endMarkerIndex + endMarker.length;
+    const bodyStart = content[afterBegin] === '\n' ? afterBegin + 1 : afterBegin;
+    const bodyEnd = endMarkerIndex > bodyStart && content[endMarkerIndex - 1] === '\n'
+        ? endMarkerIndex - 1
+        : endMarkerIndex;
+    return { start, end, bodyStart, bodyEnd };
+}
+function normalizeBlockBody(body) {
+    return body.replace(/\r\n/g, '\n').replace(/([^\n])$/, '$1\n');
+}
+function pathSep() {
+    return process.platform === 'win32' ? '\\' : '/';
+}

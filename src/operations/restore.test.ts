@@ -43,7 +43,7 @@ describe('Restore operations', () => {
     });
     const before = hashDirectory(testRoot);
 
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
 
     expect(plan).toMatchObject({
       schemaVersion: 3,
@@ -73,7 +73,7 @@ describe('Restore operations', () => {
     createBackup('valid', '2026-07-19T00:00:00.000Z', 'original content');
     fs.writeFileSync(targetPath, 'changed after deploy');
 
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
 
     expect(plan).toMatchObject({
       status: 'planned',
@@ -103,7 +103,7 @@ describe('Restore operations', () => {
       }],
     }, null, 2)}\n`);
 
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
 
     expect(plan).toMatchObject({
       status: 'planned',
@@ -137,7 +137,7 @@ describe('Restore operations', () => {
       ],
     }, null, 2)}\n`);
 
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
     const result = applyRestorePlan(context, plan, {
       changeIds: plan.changes.map((change) => change.id),
     });
@@ -162,7 +162,7 @@ describe('Restore operations', () => {
 
   it('rejects an incomplete selection before creating a current-state backup', () => {
     createBackup('valid', '2026-07-19T00:00:00.000Z', 'original content');
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
 
     const result = applyRestorePlan(context, plan, { changeIds: [] });
 
@@ -186,7 +186,7 @@ describe('Restore operations', () => {
         afterHash: hash('latest deployed content'),
       }],
     }));
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
 
     const result = applyRestorePlan(
       context,
@@ -205,7 +205,7 @@ describe('Restore operations', () => {
 
   it('rejects stale source or target hashes before creating a current-state backup', () => {
     createBackup('valid', '2026-07-19T00:00:00.000Z', 'original content');
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
     fs.writeFileSync(targetPath, 'changed after review');
 
     const result = applyRestorePlan(context, plan, {
@@ -219,7 +219,7 @@ describe('Restore operations', () => {
 
   it('rejects a changed Restore source before creating a current-state backup', () => {
     createBackup('valid', '2026-07-19T00:00:00.000Z', 'original content');
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
     fs.writeFileSync(path.join(backupRoot, 'valid', 'files', 'settings.json'), 'changed backup');
 
     const result = applyRestorePlan(context, plan, {
@@ -234,7 +234,7 @@ describe('Restore operations', () => {
   it('blocks a Restore Conflict before creating a current-state backup', () => {
     createBackup('valid', '2026-07-19T00:00:00.000Z', 'original content');
     fs.writeFileSync(targetPath, 'changed after deploy');
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
 
     const result = applyRestorePlan(context, plan, {
       changeIds: plan.changes.map((change) => change.id),
@@ -249,7 +249,7 @@ describe('Restore operations', () => {
 
   it('fails before the first target write when the current-state backup fails', () => {
     createBackup('valid', '2026-07-19T00:00:00.000Z', 'original content');
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
 
     const result = applyRestorePlan(
       context,
@@ -288,7 +288,7 @@ describe('Restore operations', () => {
         },
       ],
     }));
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
 
     const result = applyRestorePlan(
       context,
@@ -313,7 +313,7 @@ describe('Restore operations', () => {
       managedInventory: { [targetPath]: { source: 'repository', hash: hash('latest deployed content') } },
     };
     writeState(context, originalState);
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
 
     const result = applyRestorePlan(
       context,
@@ -337,7 +337,7 @@ describe('Restore operations', () => {
 
   it('preserves the verified recovery path when automatic rollback is incomplete', () => {
     createBackup('valid', '2026-07-19T00:00:00.000Z', 'original content');
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
 
     const result = applyRestorePlan(
       context,
@@ -421,7 +421,7 @@ describe('Restore operations', () => {
       },
     });
 
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
     expect(plan).toMatchObject({
       status: 'planned',
       readyToApply: true,
@@ -483,7 +483,7 @@ describe('Restore operations', () => {
       }],
     }, null, 2)}\n`);
 
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
     expect(plan).toMatchObject({
       status: 'planned',
       readyToApply: false,
@@ -528,7 +528,7 @@ describe('Restore operations', () => {
       }],
     }, null, 2)}\n`);
 
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
     expect(plan).toMatchObject({
       status: 'planned',
       readyToApply: false,
@@ -576,7 +576,7 @@ describe('Restore operations', () => {
       }],
     }, null, 2)}\n`);
 
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
     const result = applyRestorePlan(
       context,
       plan,
@@ -621,7 +621,7 @@ describe('Restore operations', () => {
       }],
     }, null, 2)}\n`);
 
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
     expect(plan.changes[0]).toMatchObject({
       action: 'restore',
       nodeKind: 'directory',
@@ -638,7 +638,7 @@ describe('Restore operations', () => {
 
   it('accepts older backups without topology entries as plain file restores', () => {
     createBackup('legacy', '2026-07-19T00:00:00.000Z', 'original content');
-    const plan = createRestorePlan(context);
+    const plan = createRestorePlan(context, { scope: 'global' });
     expect(plan).toMatchObject({
       status: 'planned',
       readyToApply: true,
@@ -658,7 +658,7 @@ describe('Restore operations', () => {
 
   it('honors cancellation before backup and ignores it once commit starts', () => {
     createBackup('valid', '2026-07-19T00:00:00.000Z', 'original content');
-    const cancelledPlan = createRestorePlan(context);
+    const cancelledPlan = createRestorePlan(context, { scope: 'global' });
     const cancelled = new AbortController();
     cancelled.abort();
 
@@ -672,7 +672,7 @@ describe('Restore operations', () => {
     expect(cancelledResult).toMatchObject({ status: 'blocked', issues: [{ code: 'restore.cancelled' }] });
     expect(fs.existsSync(path.join(homeDir, 'mcv', 'restore-backups'))).toBe(false);
 
-    const activePlan = createRestorePlan(context);
+    const activePlan = createRestorePlan(context, { scope: 'global' });
     const duringCommit = new AbortController();
     const result = applyRestorePlan(
       context,
@@ -691,6 +691,40 @@ describe('Restore operations', () => {
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('original content');
   });
 
+  it('selects the latest project backup for the current targetRoot by default', () => {
+    createScopedBackup('older-project', '2026-07-18T00:00:00.000Z', 'older project', {
+      scope: 'project',
+      targetRoot: path.join(testRoot, 'app'),
+    });
+    createScopedBackup('latest-project', '2026-07-20T00:00:00.000Z', 'latest project', {
+      scope: 'project',
+      targetRoot: path.join(testRoot, 'app'),
+    });
+    createScopedBackup('other-project', '2026-07-21T00:00:00.000Z', 'other project', {
+      scope: 'project',
+      targetRoot: path.join(testRoot, 'other'),
+    });
+    createScopedBackup('latest-global', '2026-07-22T00:00:00.000Z', 'latest global', {
+      scope: 'global',
+      targetRoot: homeDir,
+    });
+
+    const projectPlan = createRestorePlan(context, {
+      scope: 'project',
+      targetRoot: path.join(testRoot, 'app'),
+    });
+    expect(projectPlan).toMatchObject({
+      status: 'planned',
+      backup: { createdAt: '2026-07-20T00:00:00.000Z' },
+    });
+
+    const globalPlan = createRestorePlan(context, { scope: 'global' });
+    expect(globalPlan).toMatchObject({
+      status: 'planned',
+      backup: { createdAt: '2026-07-22T00:00:00.000Z' },
+    });
+  });
+
   function createBackup(
     name: string,
     createdAt: string,
@@ -698,20 +732,39 @@ describe('Restore operations', () => {
     status: 'complete' | 'failed' | 'pending' = 'complete',
     overrides: Record<string, unknown> = {},
   ): void {
+    createScopedBackup(name, createdAt, originalContent, {
+      status,
+      fileOverrides: overrides,
+    });
+  }
+
+  function createScopedBackup(
+    name: string,
+    createdAt: string,
+    originalContent: string,
+    options: {
+      status?: 'complete' | 'failed' | 'pending';
+      scope?: 'project' | 'global';
+      targetRoot?: string;
+      fileOverrides?: Record<string, unknown>;
+    } = {},
+  ): void {
     const directory = path.join(backupRoot, name);
     const relativeBackupPath = path.join('files', 'settings.json');
     fs.mkdirSync(path.join(directory, 'files'), { recursive: true });
     fs.writeFileSync(path.join(directory, relativeBackupPath), originalContent);
     fs.writeFileSync(path.join(directory, 'manifest.json'), `${JSON.stringify({
       createdAt,
-      status,
+      status: options.status ?? 'complete',
+      ...(options.scope !== undefined ? { scope: options.scope } : {}),
+      ...(options.targetRoot !== undefined ? { targetRoot: options.targetRoot } : {}),
       files: [{
         action: 'modify',
         originalPath: targetPath,
         backupPath: relativeBackupPath,
         beforeHash: hash(originalContent),
         afterHash: hash('latest deployed content'),
-        ...overrides,
+        ...(options.fileOverrides ?? {}),
       }],
     }, null, 2)}\n`);
   }

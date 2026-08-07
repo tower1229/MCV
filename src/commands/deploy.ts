@@ -1,4 +1,3 @@
-import * as path from 'path';
 import type { DeviceContext } from '../adapters/types.js';
 import { GLOBAL_PROFILE_ID } from '../profiles/contracts.js';
 import {
@@ -8,6 +7,7 @@ import {
   type DeployApplyOptions,
   type DeploySelection,
 } from '../operations/deploy.js';
+import { validateProjectTargetRoot } from '../core/project-target.js';
 import { renderDeployPlanPlain, renderDeployResultPlain } from '../renderers/deploy.js';
 import { renderJson } from '../renderers/json.js';
 import { createAdapterDefinitions } from '../adapters/index.js';
@@ -57,9 +57,38 @@ export async function deployConfigurations(
   const repositoryPath = resolveBoundRepository(context);
   const profileIds = profileArgs.length > 0 ? profileArgs : [GLOBAL_PROFILE_ID];
   const scope = wantsGlobal ? 'global' : 'project';
-  const targetRoot = wantsGlobal
-    ? context.homeDir
-    : path.resolve(options.target ?? process.cwd());
+  let targetRoot: string;
+  if (wantsGlobal) {
+    targetRoot = context.homeDir;
+  } else {
+    const rawTarget = typeof options.target === 'string' ? options.target : process.cwd();
+    const validated = validateProjectTargetRoot(rawTarget, context, {
+      boundRepositoryPath: repositoryPath,
+    });
+    if (!validated.ok) {
+      if (options.json) {
+        console.log(renderJson({
+          schemaVersion: 3,
+          operation: 'deploy',
+          status: 'failed',
+          repositoryPath,
+          changes: [],
+          issues: [{
+            severity: 'error',
+            code: validated.error.code,
+            message: validated.error.message,
+          }],
+          nextActions: validated.error.nextActions,
+          error: validated.error,
+        }));
+      } else {
+        console.error(validated.error.message);
+      }
+      process.exitCode = 2;
+      return;
+    }
+    targetRoot = validated.targetRoot;
+  }
 
   const built = buildDeployRequest(repositoryPath, { profileIds, scope, targetRoot });
   if ('error' in built) {

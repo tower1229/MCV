@@ -124,8 +124,8 @@ mcv restore
 ```
 
 - `status --plain` 从同一份只读 Overview Report 汇总 Repository、限定在 MCV Repository 路径内的可选 Git 状态、Pending Deployment Change、相对 Baseline Snapshot 的 unchanged/Drift/missing、IDE/Surface、实际配置缺失变量和本设备最近操作。Pending 对同一 Surface 的多文件 Skill projection 按 package 聚合，Canonical materialization 不重复计数，默认未选拓扑迁移进入 `optional`，Advanced Cleanup 只进入 `advancedCleanupExcluded`。Environment 只解释 manifest、MCP 和 Native structured configuration；Rules、Skills、references 和普通 Markdown 中的示例变量不检查。`status --json` 完全省略 `changes`，完整候选由 `deploy --dry-run --json` 提供。所有 JSON operation 使用 schema v2。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
-- `restore --dry-run` 只选择最近一次完整且内容可验证的 Deploy backup，展示备份时间、将恢复或删除的路径，并区分 ordinary file、managed-link projection、copy projection 与 physical package；内容或拓扑（链接重定向、目录/链接互换等）在部署后发生变化时，以独立的 Restore Conflict 阻止覆盖。
-- `restore` 默认在终端确认完整 Plan；自动化场景可在审阅后使用 `restore --yes`，并可组合 `--json` 取得结构化 Result。为避免无监督删除，包含删除的 Plan 必须交互确认，`--yes` 会在写入前阻断。Apply 会重验 operation ID、完整 selection、backup 来源、当前节点类型、链接目标和物理身份；事务开始时先创建并验证当前状态 backup（含目录与符号链接拓扑）。事务前按 Ctrl+C 以 130 退出；写入、删除或本机状态提交失败时仅回滚已尝试路径，backup/commit/rollback 期间忽略普通取消；不完整回滚会保留并报告 recovery backup。成功 Restore 会清除 Baseline Snapshot、managed inventory 与 managed Skill layout，需重新 Deploy 或 Capture 建立事实基线。
+- `restore --dry-run` 默认选择当前项目（`--target` 或 `process.cwd()`）最近一次完整且内容可验证的 project-scope Deploy backup；`--global` 选择最近一次全局 Deploy backup。展示备份时间、将恢复或删除的路径，并区分 ordinary file、managed-link projection、copy projection 与 physical package；内容或拓扑（链接重定向、目录/链接互换等）在部署后发生变化时，以独立的 Restore Conflict 阻止覆盖。
+- `restore` 默认在终端确认完整 Plan；自动化场景可在审阅后使用 `restore --yes`，并可组合 `--json` 取得结构化 Result。`--target` 与 `--global` 互斥。为避免无监督删除，包含删除的 Plan 必须交互确认，`--yes` 会在写入前阻断。Apply 会重验 operation ID、完整 selection、backup 来源、当前节点类型、链接目标和物理身份；事务开始时先创建并验证当前状态 backup（含目录与符号链接拓扑）。事务前按 Ctrl+C 以 130 退出；写入、删除或本机状态提交失败时仅回滚已尝试路径，backup/commit/rollback 期间忽略普通取消；不完整回滚会保留并报告 recovery backup。成功 Restore 会清除 Baseline Snapshot、managed inventory 与 managed Skill layout，需重新 Deploy 或 Capture 建立事实基线。
 - Restore TTY workflow 展示最近完整 backup 的时间、投影与物理 package 区分后的 write/delete 影响和 Restore Conflict 路径；按 `↑` / `↓` 浏览影响，按 `→` 打开焦点详情，按 `←` 关闭详情或返回 Overview，最终 Apply 仍只能由 `Enter` 启动。冲突或无可用 backup 时 Apply 被禁用，且不提供 force restore。Plan 过期会自动重新生成并要求重新审阅；成功或失败结果页按 `Enter` 或 `←` 返回刷新后的 Overview，按 `q` 退出。
 
 ## 命令
@@ -216,7 +216,7 @@ MCV 对配置内容保持中立，不提供保密保证。
 
 - 仅支持 Codex、Claude Code 和 Gemini。
 - 没有 `doctor`、命名的 Profile/Preset 资产管理或 GUI；当前诊断通过各命令的 `--dry-run`、`--plain`、`--json` 输出。
-- `restore` 只恢复最近一次有效的本机部署前备份，不读取仓库。
+- `restore` 只恢复本机 Deploy backup（默认当前项目；`--global` 选择全局），不读取仓库。
 - 没有变化的重复 deploy 不生成新备份。
 - restore 后清除部署基线，要求重新 deploy 或 capture 后再建立事实基线。
 - Capture 默认不传播删除操作。
