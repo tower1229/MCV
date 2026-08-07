@@ -2270,6 +2270,46 @@ describe('Deploy operations', () => {
     });
   });
 
+  it('returns stale when Catalog revision changes after plan', async () => {
+    const plan = await globalPlan(context);
+    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Repository rules changed\n');
+
+    const result = await applyDeployPlan(context, plan, {
+      changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'operation.stalePlan' },
+    });
+  });
+
+  it('preserves notice Issues on a successful empty Apply Result', async () => {
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'deploy-operation-test',
+      repositoryPath,
+    });
+    const built = buildDeployRequest(repositoryPath, {
+      profileIds: ['global'],
+      scope: 'project',
+      targetRoot: path.join(testRoot, 'project-empty-apply'),
+    });
+    if ('error' in built) throw new Error(built.error.message);
+    const plan = await createDeployPlan(context, built.request);
+
+    const result = await applyDeployPlan(context, plan, { changeIds: [] });
+
+    expect(result).toMatchObject({
+      status: 'succeeded',
+      scope: 'project',
+      profileIds: ['global'],
+    });
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: PROJECT_PROJECTION_PENDING_CODE,
+    }));
+  });
+
   it('returns an empty project-scope plan with projection pending notice when assets remain', async () => {
     writeState(context, {
       schemaVersion: 2,

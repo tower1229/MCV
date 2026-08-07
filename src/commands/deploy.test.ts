@@ -664,4 +664,18 @@ describe('mcv deploy', () => {
       }),
     );
   });
+
+  it('treats mcv deploy global --global as equivalent to mcv deploy --global', async () => {
+    await deployWithGlobalProfile(['global'], deviceContext('win32'), { confirmDeploy: async () => true });
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(
+      JSON.parse(
+        fs.readFileSync(path.join(homeDir, '.claude', 'settings.json'), 'utf8'),
+      ),
+    ).toEqual({
+      theme: 'dark',
+      command: `${windowsHomeDir()}\\Tools\\tool.exe`,
+    });
+  });
 });

@@ -695,7 +695,7 @@ export async function applyDeployPlan(context, plan, selection, options = {}) {
             status: 'succeeded',
             repositoryPath: plan.repositoryPath,
             changes: [],
-            issues: [],
+            issues: plan.issues.filter((issue) => issue.severity === 'notice'),
             nextActions: [],
             data: { appliedChangeIds: [], writtenPaths: [], deletedPaths: [] },
             linkOutcomes: plan.linkOutcomes,
