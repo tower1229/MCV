@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { DeployRequest } from '../assets/deploy-request.js';
+import type { SelectedRepositoryView } from '../assets/selected-repository-view.js';
 import { ClaudeCodeAdapter } from './claude-code.js';
 import { parse as parseYaml } from 'yaml';
 
@@ -190,4 +192,49 @@ describe('ClaudeCodeAdapter', () => {
       customPreference: { compactMode: true },
     });
   });
+
+  it('returns no files for project scope', async () => {
+    const adapter = new ClaudeCodeAdapter();
+    const context = { homeDir, platform: 'darwin' as const, env: {} };
+    const operation = await adapter.project(emptyView(), projectRequest(), context);
+    expect(operation.files).toEqual([]);
+  });
+
+  it('projects selected native settings for global scope', async () => {
+    const claudeDir = path.join(homeDir, '.claude');
+    fs.mkdirSync(claudeDir);
+    fs.writeFileSync(path.join(claudeDir, 'settings.json'), JSON.stringify({ theme: 'local' }));
+    const adapter = new ClaudeCodeAdapter();
+    const context = { homeDir, platform: 'darwin' as const, env: {} };
+    const view: SelectedRepositoryView = {
+      skills: [],
+      mcpServers: {},
+      mcpOverrides: {},
+      nativeAssets: new Map([
+        ['native:claude-code/user-settings', Buffer.from(JSON.stringify({ theme: 'repo' }))],
+      ]),
+    };
+    const operation = await adapter.project(view, globalRequest(homeDir), context);
+    const settings = operation.files.find(
+      (file) => file.targetPath === path.join(claudeDir, 'settings.json'),
+    );
+    expect(JSON.parse(settings?.content.toString() ?? '')).toEqual({ theme: 'repo' });
+  });
 });
+
+function emptyView(): SelectedRepositoryView {
+  return { skills: [], mcpServers: {}, mcpOverrides: {}, nativeAssets: new Map() };
+}
+
+function projectRequest(): DeployRequest {
+  return {
+    scope: 'project',
+    targetRoot: '/tmp/project',
+    profileIds: [],
+    selection: { profileIds: [], profilesRevision: '', catalogRevision: '', assetIds: [] },
+  };
+}
+
+function globalRequest(targetRoot: string): DeployRequest {
+  return { ...projectRequest(), scope: 'global', targetRoot };
+}

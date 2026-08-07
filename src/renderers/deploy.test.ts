@@ -9,13 +9,19 @@ describe('plain Deploy renderer', () => {
       skillChange('antigravity-change', 'antigravity', '/home/.gemini/config/skills/review/SKILL.md'),
     ];
     const plan: DeployPlan = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'deploy',
       status: 'planned',
       readyToApply: true,
       operationId: 'renderer-test',
       preconditions: {},
       repositoryPath: '/repository',
+      scope: 'global',
+      targetRoot: '/tmp/home',
+      profileIds: ['global'],
+      profilesRevision: 'rev-profiles',
+      catalogRevision: 'rev-catalog',
+      assetIds: ['rule:canonical'],
       changes,
       linkOutcomes: [],
       linkFacts: [],
@@ -24,7 +30,7 @@ describe('plain Deploy renderer', () => {
       nextActions: [],
     };
     const result: DeployResult = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'deploy',
       status: 'succeeded',
       repositoryPath: '/repository',

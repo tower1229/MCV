@@ -257,7 +257,7 @@ describe('TUI Shell view', () => {
     const overview = shellReducer(createInitialShellState('overview'), {
       type: 'overview.loaded',
       report: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'status',
         status: 'reported',
         ready: true,
@@ -265,7 +265,7 @@ describe('TUI Shell view', () => {
         repository: {
           path: '/Users/张涛/Configuration Repository/long-path',
           id: 'repository-id',
-          schemaVersion: 2,
+          schemaVersion: 3,
           git: {
             branch: 'main',
             clean: false,
@@ -337,7 +337,7 @@ describe('TUI Shell view', () => {
     const environment = shellReducer(createInitialShellState('environment'), {
       type: 'environment.loaded',
       report: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'discover',
         status: 'reported',
         ready: true,
@@ -838,7 +838,7 @@ describe('TUI Shell view', () => {
     const blocked = shellReducer(applying, {
       type: 'capture.applied',
       result: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'capture',
         status: 'blocked',
         repositoryPath: '/tmp/mcv',
@@ -1106,7 +1106,7 @@ describe('TUI Shell view', () => {
     const result = shellReducer(applying, {
       type: 'deploy.applied',
       result: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'deploy',
         status: 'succeeded',
         repositoryPath: '/Users/张涛/Configuration Repository',
@@ -1393,7 +1393,7 @@ describe('TUI Shell view', () => {
     const result = shellReducer(applying, {
       type: 'deploy.applied',
       result: {
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'deploy',
         status: 'succeeded',
         repositoryPath: '/Users/张涛/Configuration Repository',
@@ -1524,13 +1524,19 @@ describe('TUI Shell view', () => {
 
 function deployPlan(): DeployPlan {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'deploy',
     status: 'planned',
     readyToApply: true,
     operationId: 'deploy-view',
     preconditions: {},
     repositoryPath: '/Users/张涛/Configuration Repository',
+    scope: 'global',
+    targetRoot: '/tmp/home',
+    profileIds: ['global'],
+    profilesRevision: 'rev-profiles',
+    catalogRevision: 'rev-catalog',
+    assetIds: ['rule:canonical'],
     changes: [
       {
         id: 'deploy-rules',
@@ -1643,13 +1649,19 @@ function largeDeployPlan(): DeployPlan {
     },
   }));
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'deploy',
     status: 'planned',
     readyToApply: true,
     operationId: 'large-deploy-view',
     preconditions: {},
     repositoryPath: '/Users/张涛/Configuration Repository',
+    scope: 'global',
+    targetRoot: '/tmp/home',
+    profileIds: ['global'],
+    profilesRevision: 'rev-profiles',
+    catalogRevision: 'rev-catalog',
+    assetIds: ['rule:canonical'],
     changes: [...standard, ...advanced],
     linkOutcomes: [],
     linkFacts: [],
@@ -1663,7 +1675,7 @@ function restorePlan(
   override: Partial<RestorePlan> = {},
 ): RestorePlan {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'restore',
     status: 'planned',
     readyToApply: true,
@@ -1698,7 +1710,7 @@ function restorePlan(
 
 function successfulRestoreResult(): RestoreResult {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'restore',
     status: 'succeeded',
     repositoryPath: '/Users/张涛/Configuration Repository',
@@ -1716,7 +1728,7 @@ function successfulRestoreResult(): RestoreResult {
 
 function restoreResult(code: string): RestoreResult {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'restore',
     status: 'failed',
     repositoryPath: '/Users/张涛/Configuration Repository',
@@ -1733,7 +1745,7 @@ function restoreResult(code: string): RestoreResult {
 
 function failedDeployResult(code: string): DeployResult {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'deploy',
     status: 'failed',
     repositoryPath: '/Users/张涛/Configuration Repository',
@@ -1841,7 +1853,7 @@ function capturePlan(
   }
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'capture',
     status: 'planned',
     readyToApply: !withIssues,
@@ -1874,7 +1886,7 @@ function capturePlan(
 
 function staleCaptureResult(): CaptureResult {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'capture',
     status: 'failed',
     repositoryPath: '/tmp/mcv',
@@ -1891,7 +1903,7 @@ function staleCaptureResult(): CaptureResult {
 
 function successfulCaptureResult(): CaptureResult {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'capture',
     status: 'succeeded',
     repositoryPath: '/tmp/mcv',
@@ -1942,7 +1954,7 @@ function repositoryFailureResultState(): ShellState {
 
 function repositoryRecoveryMenuState(): ShellState {
   const report: RepositoryReport = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'repository',
     status: 'reported',
     ready: false,
@@ -1968,7 +1980,7 @@ function repositoryRecoveryMenuState(): ShellState {
 
 function overviewState(linkOutcomes: StatusReport['linkOutcomes'] = []): ShellState {
   const report: StatusReport = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'status',
     status: 'reported',
     ready: false,
@@ -1976,7 +1988,7 @@ function overviewState(linkOutcomes: StatusReport['linkOutcomes'] = []): ShellSt
     repository: {
       path: '/Users/张涛/Configuration Repository/超长路径',
       id: 'repository-id',
-      schemaVersion: 2,
+      schemaVersion: 3,
       git: {
         branch: 'main',
         clean: false,

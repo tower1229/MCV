@@ -67,7 +67,7 @@ describe('Capture operations', () => {
     const second = await createCapturePlan(context);
 
     expect(first).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'capture',
       status: 'planned',
       readyToApply: true,

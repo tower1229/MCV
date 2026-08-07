@@ -17,7 +17,9 @@ import {
 } from '../utils/repository.js';
 import { readState, type McvState } from '../utils/state.js';
 import {
-  createDeployPlan,
+  createGlobalDeployPlan,
+} from './deploy-request-helpers.js';
+import {
   type DeployChange,
   type DeployLinkOutcome,
   type DeployPlan,
@@ -109,7 +111,7 @@ export async function inspectStatus(context: DeviceContext): Promise<StatusRepor
   }
 
   const [deployPlan, environmentReport] = await Promise.all([
-    createDeployPlan(context),
+    createGlobalDeployPlan(context),
     inspectEnvironment(context, repositoryPath),
   ]);
   const repositoryReport = inspectRepository(context, repositoryPath);

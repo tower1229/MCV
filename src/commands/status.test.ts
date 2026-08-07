@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProgram } from '../index.js';
+import { seedGlobalProfileWithCatalog } from '../operations/deploy-request-helpers.js';
 
 describe('mcv status', () => {
   let testRoot: string;
@@ -37,6 +38,7 @@ describe('mcv status', () => {
       '  useSymlinks: false',
       '',
     ].join('\n'));
+    seedGlobalProfileWithCatalog(repositoryPath);
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
@@ -94,7 +96,7 @@ describe('mcv status', () => {
     expect(console.log).toHaveBeenCalledOnce();
     const report = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(report).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'status',
       status: 'reported',
       ready: true,
@@ -121,7 +123,9 @@ describe('mcv status', () => {
       },
       environment: { missingVariables: [], ideSupport: expect.any(Array) },
       lastOperation: null,
-      issues: [{ code: 'deploy.noEnabledTargets' }],
+      issues: expect.arrayContaining([
+        expect.objectContaining({ code: 'deploy.noEnabledTargets' }),
+      ]),
     });
     expect(String(vi.mocked(console.log).mock.calls[0]?.[0])).not.toMatch(/\u001b\[/);
   });
@@ -134,6 +138,7 @@ describe('mcv status', () => {
     );
     fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), `# Rules\n${'detail\n'.repeat(2_000)}`);
+    seedGlobalProfileWithCatalog(repositoryPath);
     writeDeviceState({});
 
     await program().parseAsync(['node', 'mcv', 'status', '--json']);
@@ -169,7 +174,7 @@ describe('mcv status', () => {
   function writeDeviceState(extra: Record<string, unknown>): void {
     fs.mkdirSync(path.join(stateRoot, 'mcv'), { recursive: true });
     fs.writeFileSync(path.join(stateRoot, 'mcv', 'config.json'), JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       defaultRepositoryId: 'repository-id',
       repositoryPath,
       ...extra,

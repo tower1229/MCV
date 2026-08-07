@@ -1083,6 +1083,10 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       path.join(repositoryPath, 'common', 'AGENTS.md'),
       '# Shared Rules\n',
     );
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: { global: { assets: ['rule:canonical'] } },
+    });
     return repositoryPath;
   }
 
@@ -1118,7 +1122,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
   function writeBinding(repositoryPath: string, repositoryId: string): void {
     fs.mkdirSync(path.dirname(statePath()), { recursive: true });
     fs.writeFileSync(statePath(), `${JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       repositoryPath,
       defaultRepositoryId: repositoryId,
     }, null, 2)}\n`);
@@ -1147,6 +1151,10 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'variables: {}',
       '',
     ].join('\n'));
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: { global: { assets: [] } },
+    });
     writeBinding(repositoryPath, 'tui-restore-test');
     const targetPath = path.join(testRoot, conflict ? 'conflict.json' : 'settings.json');
     const beforeContent = 'before deploy\n';
@@ -1182,7 +1190,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       `file://${path.join(process.cwd(), 'dist', 'tui', 'shell.js')}`,
     ).href;
     const plan = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'restore',
       status: 'planned',
       readyToApply: true,
@@ -1204,7 +1212,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       nextActions: [],
     };
     const failed = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'restore',
       status: 'failed',
       repositoryPath: '/tmp/mcv',
@@ -1248,7 +1256,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
     fs.writeFileSync(fixturePath, [
       `import { runTuiShell } from ${JSON.stringify(shellModuleUrl)};`,
       `const plan = ${JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'capture',
         status: 'planned',
         readyToApply: true,
@@ -1264,7 +1272,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
         },
       })};`,
       `const stale = ${JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'capture',
         status: 'failed',
         repositoryPath: '/tmp/mcv',
@@ -1346,12 +1354,16 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
         `# File ${index}\n`,
       );
     }
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: { global: { assets: ['skill:hatch-pet'] } },
+    });
     return repositoryPath;
   }
 
   function validRepositoryReport(): Record<string, unknown> {
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'repository',
       status: 'reported',
       ready: true,
@@ -1371,7 +1383,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       `file://${path.join(process.cwd(), 'dist', 'tui', 'shell.js')}`,
     ).href;
     const plan = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'deploy',
       status: 'planned',
       readyToApply: true,
@@ -1427,7 +1439,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       nextActions: [],
     };
     const failed = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'deploy',
       status: 'failed',
       repositoryPath: '/tmp/mcv',
@@ -1472,7 +1484,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       `file://${path.join(process.cwd(), 'dist', 'tui', 'shell.js')}`,
     ).href;
     const plan = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'capture',
       status: 'planned',
       readyToApply: true,
@@ -1560,7 +1572,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       },
     };
     const failed = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'capture',
       status: 'failed',
       repositoryPath: '/tmp/mcv',

@@ -1,3 +1,6 @@
+import type { DeployRequest } from '../assets/deploy-request.js';
+import type { SelectedRepositoryView } from '../assets/selected-repository-view.js';
+
 export interface DeviceContext {
   homeDir: string;
   platform: NodeJS.Platform;
@@ -67,7 +70,17 @@ export interface IdeAdapter {
     files: DetectedConfigFile[],
     context: DeviceContext,
   ): Promise<CaptureResult>;
-  deploy(repositoryPath: string, context: DeviceContext): Promise<DeployOperation>;
+  /**
+   * Project selected Canonical/Native content for a DeployRequest.
+   * Profile semantics never enter Adapters — only the selected view and request.
+   * Project-scope file writers land in later tickets (#54/#55/#57); until then
+   * `scope: 'project'` returns an empty file set.
+   */
+  project(
+    source: SelectedRepositoryView,
+    request: DeployRequest,
+    context: DeviceContext,
+  ): Promise<DeployOperation>;
 }
 
 export interface SkillDeploymentSurface {

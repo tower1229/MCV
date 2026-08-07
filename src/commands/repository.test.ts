@@ -43,7 +43,7 @@ describe('mcv Repository routes', () => {
     expect(console.log).toHaveBeenCalledOnce();
     const report = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(report).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'repository',
       status: 'reported',
       ready: true,
@@ -71,7 +71,7 @@ describe('mcv Repository routes', () => {
     await createProgram(context()).parseAsync(['node', 'mcv', 'bind', '--dry-run', '--json']);
     const bindPlan = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(bindPlan).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'bind',
       status: 'planned',
       readyToApply: true,
@@ -84,7 +84,7 @@ describe('mcv Repository routes', () => {
     await createProgram(context()).parseAsync(['node', 'mcv', 'bind', '--yes', '--json']);
     const bindResult = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(bindResult).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'bind',
       status: 'succeeded',
       repositoryPath: process.cwd(),
@@ -99,7 +99,7 @@ describe('mcv Repository routes', () => {
     await createProgram(context()).parseAsync(['node', 'mcv', 'unbind', '--dry-run', '--json']);
     const unbindPlan = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(unbindPlan).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'unbind',
       status: 'planned',
       readyToApply: true,
@@ -115,7 +115,7 @@ describe('mcv Repository routes', () => {
     await createProgram(context()).parseAsync(['node', 'mcv', 'unbind', '--yes', '--json']);
     const unbindResult = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(unbindResult).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'unbind',
       status: 'succeeded',
       data: { repositoryId: 'repository-command-id' },

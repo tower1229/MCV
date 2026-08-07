@@ -1,11 +1,59 @@
-import { createAdapterDefinitions } from '../adapters/index.js';
-import { askInTerminal, withInterruptsIgnored } from '../cli/prompt.js';
-import { readManifest } from '../utils/repository.js';
-import { applyDeployPlan, createDeployPlan } from '../operations/deploy.js';
+import * as path from 'path';
+import { GLOBAL_PROFILE_ID } from '../profiles/contracts.js';
+import { buildDeployRequest, createDeployPlan, applyDeployPlan, } from '../operations/deploy.js';
 import { renderDeployPlanPlain, renderDeployResultPlain } from '../renderers/deploy.js';
 import { renderJson } from '../renderers/json.js';
+import { createAdapterDefinitions } from '../adapters/index.js';
+import { askInTerminal, withInterruptsIgnored } from '../cli/prompt.js';
+import { readManifest, resolveBoundRepository } from '../utils/repository.js';
 export async function deployConfigurations(context, dependencies = {}, options = {}) {
-    const reviewPlan = await createDeployPlan(context);
+    const profileArgs = options.profiles ?? [];
+    const wantsGlobal = options.global === true;
+    const hasTarget = typeof options.target === 'string' && options.target.length > 0;
+    if (wantsGlobal && hasTarget) {
+        console.error('options --target and --global cannot be used together');
+        process.exitCode = 2;
+        return;
+    }
+    if (profileArgs.length === 0 && !wantsGlobal) {
+        console.error('Specify one or more Profile IDs, or use --global to deploy the built-in global Profile to device-global locations.\n'
+            + 'Examples: mcv deploy dev\n'
+            + '          mcv deploy --global\n'
+            + '          mcv deploy global --global');
+        process.exitCode = 2;
+        return;
+    }
+    const repositoryPath = resolveBoundRepository(context);
+    const profileIds = profileArgs.length > 0 ? profileArgs : [GLOBAL_PROFILE_ID];
+    const scope = wantsGlobal ? 'global' : 'project';
+    const targetRoot = wantsGlobal
+        ? context.homeDir
+        : path.resolve(options.target ?? process.cwd());
+    const built = buildDeployRequest(repositoryPath, { profileIds, scope, targetRoot });
+    if ('error' in built) {
+        if (options.json) {
+            console.log(renderJson({
+                schemaVersion: 3,
+                operation: 'deploy',
+                status: 'failed',
+                repositoryPath,
+                changes: [],
+                issues: [{
+                        severity: 'error',
+                        code: built.error.code,
+                        message: built.error.message,
+                    }],
+                nextActions: built.error.nextActions,
+                error: built.error,
+            }));
+        }
+        else {
+            console.error(built.error.message);
+        }
+        process.exitCode = built.error.code === 'deploy.profileNotFound' ? 2 : 1;
+        return;
+    }
+    const reviewPlan = await createDeployPlan(context, built.request);
     if (options.dryRun) {
         if (options.json)
             console.log(renderJson(reviewPlan));
@@ -28,6 +76,9 @@ export async function deployConfigurations(context, dependencies = {}, options =
             const enabled = createAdapterDefinitions().filter(({ targetId }) => manifest?.targets?.[targetId]?.enabled === true);
             const subject = enabled.length === 1 ? `${enabled[0].name} configuration is` : 'Configurations are';
             console.log(`${subject} already in sync.`);
+            for (const issue of reviewPlan.issues.filter((item) => item.severity === 'notice')) {
+                console.log(issue.message);
+            }
         }
         return;
     }
@@ -56,14 +107,16 @@ export async function deployConfigurations(context, dependencies = {}, options =
             .filter((change) => change.defaultSelected
             || (options.pruneManaged === true && change.change === 'delete'))
             .map((change) => change.id);
-    const result = await withInterruptsIgnored(() => applyDeployPlan(context, reviewPlan, {
+    const selection = {
         changeIds: selectedIds,
         confirmedIssueIds: options.yes
             ? []
             : reviewPlan.issues
                 .filter((issue) => issue.severity === 'warning')
                 .map((issue) => issue.confirmationId),
-    }, { nonInteractive: options.yes }));
+    };
+    const applyOptions = { nonInteractive: options.yes };
+    const result = await withInterruptsIgnored(() => applyDeployPlan(context, reviewPlan, selection, applyOptions));
     if (result.status !== 'succeeded')
         process.exitCode = result.status === 'blocked' ? 3 : 1;
     if (options.json)

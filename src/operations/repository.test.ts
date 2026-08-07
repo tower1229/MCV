@@ -48,7 +48,7 @@ describe('Repository operations', () => {
     const result = applyBindPlan(context, createBindPlan(context));
 
     expect(result).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'bind',
       status: 'succeeded',
       repositoryPath,
@@ -172,7 +172,7 @@ describe('Repository operations', () => {
     const result = applyUnbindPlan(context, createUnbindPlan(context));
 
     expect(result).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'unbind',
       status: 'succeeded',
       repositoryPath,
@@ -203,7 +203,7 @@ describe('Repository operations', () => {
     const report = inspectRepository(context);
 
     expect(report).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'repository',
       status: 'reported',
       ready: true,
@@ -279,7 +279,7 @@ describe('Repository operations', () => {
     const repositoryPath = path.join(testRoot, 'repository-bind-old-schema');
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), yaml.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       repositoryId: 'repository-bind-old-schema-id',
     }));
 
@@ -450,7 +450,7 @@ describe('Repository operations', () => {
     const plan = createInitPlan(context, repositoryPath);
 
     expect(plan).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'init',
       status: 'planned',
       readyToApply: true,
@@ -527,7 +527,7 @@ describe('Repository operations', () => {
     const plan = createMigrationPlan(context, repositoryPath);
 
     expect(plan).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'migrate',
       status: 'planned',
       readyToApply: true,

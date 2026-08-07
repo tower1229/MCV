@@ -4,7 +4,8 @@ import { useEffect, useReducer, useRef } from 'react';
 import { applyCapturePlan, createCapturePlan, } from '../operations/capture.js';
 import { inspectEnvironment, } from '../operations/environment.js';
 import { inspectStatus, } from '../operations/status.js';
-import { applyDeployPlan, createDeployPlan, } from '../operations/deploy.js';
+import { applyDeployPlan, } from '../operations/deploy.js';
+import { createGlobalDeployPlan } from '../operations/deploy-request-helpers.js';
 import { applyRestorePlan, createRestorePlan, } from '../operations/restore.js';
 import { applyBindPlan, applyInitPlan, applyMigrationPlan, applyUnbindPlan, createBindPlan, createInitPlan, createMigrationPlan, createUnbindPlan, inspectRepository, } from '../operations/repository.js';
 import { readState, recordCaptureSuccess } from '../utils/state.js';
@@ -122,7 +123,7 @@ function Shell({ context, initialRoute, dependencies }) {
             || state.page.workflow.status !== 'regenerating')
             return;
         let active = true;
-        void (dependencies.createDeployPlan ?? createDeployPlan)(context).then((plan) => {
+        void (dependencies.createDeployPlan ?? createGlobalDeployPlan)(context).then((plan) => {
             if (active) {
                 dispatch({
                     type: 'deploy.loaded',
@@ -828,7 +829,7 @@ function loadRoute(context, route, dependencies) {
         return (dependencies.inspectEnvironment ?? inspectEnvironment)(context);
     }
     if (route === 'deploy') {
-        return (dependencies.createDeployPlan ?? createDeployPlan)(context);
+        return (dependencies.createDeployPlan ?? createGlobalDeployPlan)(context);
     }
     if (route === 'restore') {
         return Promise.resolve((dependencies.createRestorePlan ?? createRestorePlan)(context));

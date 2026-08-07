@@ -11,6 +11,14 @@ const LOCAL_KEYS = new Set([
     '$.installationId', '$.installation_id', '$.recentProjects', '$.windowState', '$.telemetry',
     '$.userEmail', '$.antigravity.account',
 ]);
+const GEMINI_NATIVE_RELATIVE_PATHS = [
+    ['gemini-cli-settings', 'gemini-cli/settings.json'],
+    ['antigravity-config', 'antigravity/config.json'],
+    ['antigravity-mcp', 'antigravity/mcp_config.json'],
+    ['antigravity-cli-settings', 'antigravity/cli-settings.json'],
+    ['antigravity-ide-settings', 'antigravity/ide-settings.json'],
+    ['antigravity-keybindings', 'antigravity/keybindings.json'],
+];
 const POLICIES = {
     'gemini-cli-settings': { repositoryPath: 'ide/gemini/native/gemini-cli/settings.json', managed: true },
     'antigravity-config': { repositoryPath: 'ide/gemini/native/antigravity/config.json', managed: false },
@@ -93,41 +101,18 @@ export class GeminiNativeFileHandler {
     }
     async deploy(repositoryPath, context) {
         const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native');
-        const root = path.join(context.homeDir, '.gemini');
-        const antigravityUser = this.antigravityUserDirectory(context);
-        const mappings = [
-            ['gemini-cli/settings.json', path.join(root, 'settings.json')],
-            ['antigravity/config.json', path.join(root, 'config', 'config.json')],
-            ['antigravity/mcp_config.json', path.join(root, 'config', 'mcp_config.json')],
-            ['antigravity/cli-settings.json', path.join(root, 'antigravity-cli', 'settings.json')],
-            ['antigravity/ide-settings.json', path.join(antigravityUser, 'settings.json')],
-            ['antigravity/keybindings.json', path.join(antigravityUser, 'keybindings.json')],
-        ];
-        const deployed = mappings.flatMap(([relative, targetPath]) => {
+        const deployed = [];
+        for (const [fileId, relative] of GEMINI_NATIVE_RELATIVE_PATHS) {
             let source = repositoryFileForPlatform(repositoryPath, `ide/gemini/native/${relative}`, context);
             if (relative === 'gemini-cli/settings.json' && !fs.existsSync(source)) {
                 source = path.join(nativeRoot, 'settings.json');
             }
             if (!fs.existsSync(source))
-                return [];
-            const content = fs.readFileSync(source, 'utf8');
-            if (relative === 'antigravity/keybindings.json') {
-                const parsed = JSON.parse(content);
-                const resolved = resolvePortableValue(parsed, context.variables ?? {}, context.platform);
-                return [{ targetPath, content: `${JSON.stringify(resolved, null, 2)}\n` }];
-            }
-            const parsed = parseStructuredObject(content, 'json', source);
-            const portable = relative === 'antigravity/ide-settings.json'
-                ? filterAntigravityIdeLocalFields(parsed)
-                : parsed;
-            for (const localPath of LOCAL_KEYS)
-                deleteObjectPath(portable, localPath);
-            const resolved = resolvePortableValue(portable, context.variables ?? {}, context.platform);
-            const existing = fs.existsSync(targetPath)
-                ? parseStructuredObject(fs.readFileSync(targetPath, 'utf8'), 'json', targetPath)
-                : {};
-            return [{ targetPath, content: stringifyStructuredObject(mergeRecords(existing, resolved), 'json') }];
-        });
+                continue;
+            const file = projectGeminiNativeAsset(fileId, fs.readFileSync(source), context);
+            if (file)
+                deployed.push(file);
+        }
         return { files: deployed, write: (file) => atomicWriteFile(file.targetPath, file.content) };
     }
     async readCanonical(repositoryPath, context) { return readCanonicalSource(repositoryPath, context); }
@@ -138,11 +123,45 @@ export class GeminiNativeFileHandler {
             || fs.existsSync(path.join(root, 'skills'));
     }
     antigravityUserDirectory(context) {
-        const env = context.env;
-        if (context.platform === 'win32')
-            return path.join(env.APPDATA || path.join(context.homeDir, 'AppData', 'Roaming'), 'Antigravity', 'User');
-        return path.join(context.homeDir, 'Library', 'Application Support', 'Antigravity', 'User');
+        return antigravityUserDirectory(context);
     }
+}
+export function projectGeminiNativeAsset(fileId, content, context) {
+    const targetByFileId = {
+        'gemini-cli-settings': path.join(context.homeDir, '.gemini', 'settings.json'),
+        'antigravity-config': path.join(context.homeDir, '.gemini', 'config', 'config.json'),
+        'antigravity-mcp': path.join(context.homeDir, '.gemini', 'config', 'mcp_config.json'),
+        'antigravity-cli-settings': path.join(context.homeDir, '.gemini', 'antigravity-cli', 'settings.json'),
+        'antigravity-ide-settings': path.join(antigravityUserDirectory(context), 'settings.json'),
+        'antigravity-keybindings': path.join(antigravityUserDirectory(context), 'keybindings.json'),
+    };
+    const targetPath = targetByFileId[fileId];
+    if (!targetPath)
+        return undefined;
+    const text = content.toString('utf8');
+    if (fileId === 'antigravity-keybindings') {
+        const parsed = JSON.parse(text);
+        const resolved = resolvePortableValue(parsed, context.variables ?? {}, context.platform);
+        return { targetPath, content: `${JSON.stringify(resolved, null, 2)}\n` };
+    }
+    const parsed = parseStructuredObject(text, 'json', fileId);
+    const portable = fileId === 'antigravity-ide-settings'
+        ? filterAntigravityIdeLocalFields(parsed)
+        : parsed;
+    for (const localPath of LOCAL_KEYS)
+        deleteObjectPath(portable, localPath);
+    const resolved = resolvePortableValue(portable, context.variables ?? {}, context.platform);
+    const existing = fs.existsSync(targetPath)
+        ? parseStructuredObject(fs.readFileSync(targetPath, 'utf8'), 'json', targetPath)
+        : {};
+    return { targetPath, content: stringifyStructuredObject(mergeRecords(existing, resolved), 'json') };
+}
+function antigravityUserDirectory(context) {
+    const env = context.env;
+    if (context.platform === 'win32') {
+        return path.join(env.APPDATA || path.join(context.homeDir, 'AppData', 'Roaming'), 'Antigravity', 'User');
+    }
+    return path.join(context.homeDir, 'Library', 'Application Support', 'Antigravity', 'User');
 }
 function filterAntigravityIdeLocalFields(value) {
     const local = new Set(getAntigravityIdeLocalPaths(value).map((entry) => entry.slice(2)));

@@ -30,7 +30,7 @@ describe('inspectEnvironment', () => {
     });
 
     expect(report).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'discover',
       status: 'reported',
       ready: true,

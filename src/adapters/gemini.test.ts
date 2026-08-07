@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { DeployRequest } from '../assets/deploy-request.js';
+import type { SelectedRepositoryView } from '../assets/selected-repository-view.js';
 import { parse as parseYaml } from 'yaml';
 import { GeminiAdapter } from './gemini.js';
 
@@ -84,4 +86,49 @@ describe('GeminiAdapter', () => {
       'terminal.integrated.env.osx': { SERVICE_TOKEN: 'plain-service-token' },
     });
   });
+
+  it('returns no files for project scope', async () => {
+    const adapter = new GeminiAdapter();
+    const context = { homeDir, platform: 'darwin' as const, env: {} };
+    const operation = await adapter.project(emptyView(), projectRequest(), context);
+    expect(operation.files).toEqual([]);
+  });
+
+  it('projects selected native settings for global scope', async () => {
+    const geminiRoot = path.join(homeDir, '.gemini');
+    fs.mkdirSync(geminiRoot);
+    fs.writeFileSync(path.join(geminiRoot, 'settings.json'), JSON.stringify({ ui: { theme: 'local' } }));
+    const adapter = new GeminiAdapter();
+    const context = { homeDir, platform: 'darwin' as const, env: {} };
+    const view: SelectedRepositoryView = {
+      skills: [],
+      mcpServers: {},
+      mcpOverrides: {},
+      nativeAssets: new Map([
+        ['native:gemini/gemini-cli-settings', Buffer.from(JSON.stringify({ ui: { theme: 'repo' } }))],
+      ]),
+    };
+    const operation = await adapter.project(view, globalRequest(homeDir), context);
+    const settings = operation.files.find(
+      (file) => file.targetPath === path.join(geminiRoot, 'settings.json'),
+    );
+    expect(JSON.parse(settings?.content.toString() ?? '')).toEqual({ ui: { theme: 'repo' } });
+  });
 });
+
+function emptyView(): SelectedRepositoryView {
+  return { skills: [], mcpServers: {}, mcpOverrides: {}, nativeAssets: new Map() };
+}
+
+function projectRequest(): DeployRequest {
+  return {
+    scope: 'project',
+    targetRoot: '/tmp/project',
+    profileIds: [],
+    selection: { profileIds: [], profilesRevision: '', catalogRevision: '', assetIds: [] },
+  };
+}
+
+function globalRequest(targetRoot: string): DeployRequest {
+  return { ...projectRequest(), scope: 'global', targetRoot };
+}

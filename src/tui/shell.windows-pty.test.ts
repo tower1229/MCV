@@ -295,7 +295,7 @@ function createDeployTreeRepository(testRoot: string): string {
   const statePath = path.join(testRoot, 'mcv', 'config.json');
   fs.mkdirSync(path.dirname(statePath), { recursive: true });
   fs.writeFileSync(statePath, `${JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 3,
     defaultRepositoryId: 'deploy-tree-conpty',
     repositoryPath,
   }, null, 2)}\n`);
@@ -329,7 +329,7 @@ function createRestoreRepository(
   fs.writeFileSync(
     path.join(testRoot, 'mcv', 'config.json'),
     `${JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       defaultRepositoryId: 'restore-conpty',
       repositoryPath,
     }, null, 2)}\n`,
@@ -364,7 +364,7 @@ function createRestoreApplyingFixture(testRoot: string): string {
   const repositoryPath = path.join(testRoot, 'restore-fixture-repository');
   const targetPath = path.join(testRoot, 'restore-fixture-target.json');
   const plan = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'restore',
     status: 'planned',
     readyToApply: true,
@@ -386,7 +386,7 @@ function createRestoreApplyingFixture(testRoot: string): string {
     nextActions: [],
   };
   const result = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'restore',
     status: 'succeeded',
     repositoryPath,
@@ -401,7 +401,7 @@ function createRestoreApplyingFixture(testRoot: string): string {
     },
   };
   const repositoryReport = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'repository',
     status: 'reported',
     ready: true,

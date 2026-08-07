@@ -6,7 +6,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceContext } from '../adapters/types.js';
 import { atomicWriteFile } from '../utils/files.js';
 import { readState, writeState } from '../utils/state.js';
-import { applyDeployPlan, createDeployPlan } from './deploy.js';
+import {
+  applyDeployPlan,
+  buildDeployRequest,
+  createDeployPlan,
+  PROJECT_PROJECTION_PENDING_CODE,
+} from './deploy.js';
+import { createGlobalDeployPlan, seedGlobalProfileWithCatalog } from './deploy-request-helpers.js';
+import { writeProfilesDocument } from '../profiles/store.js';
 import { inspectStatus } from './status.js';
 
 describe('Deploy operations', () => {
@@ -65,6 +72,7 @@ describe('Deploy operations', () => {
       env: { APPDATA: path.join(testRoot, 'state') },
       pathEnv: '',
     };
+    seedGlobalProfileWithCatalog(repositoryPath);
     writeState(context, {
       schemaVersion: 2,
       defaultRepositoryId: 'deploy-operation-test',
@@ -86,14 +94,19 @@ describe('Deploy operations', () => {
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
 
+  async function globalPlan(ctx: DeviceContext = context): Promise<Awaited<ReturnType<typeof createGlobalDeployPlan>>> {
+    seedGlobalProfileWithCatalog(repositoryPath);
+    return createGlobalDeployPlan(ctx);
+  }
+
   it('returns a grouped read-only Plan with stable IDs, full previews, and precondition hashes', async () => {
     const repositoryBefore = hashDirectory(repositoryPath);
     const stateBefore = readState(context);
-    const first = await createDeployPlan(context);
-    const second = await createDeployPlan(context);
+    const first = await globalPlan(context);
+    const second = await globalPlan(context);
 
     expect(first).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'deploy',
       status: 'planned',
       readyToApply: true,
@@ -161,7 +174,7 @@ describe('Deploy operations', () => {
       `${JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: `sk-${'a'.repeat(24)}` } }, null, 2)}\n`,
     );
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.readyToApply).toBe(true);
     expect(plan.issues.map((issue) => issue.code)).not.toContainEqual(
@@ -174,7 +187,7 @@ describe('Deploy operations', () => {
 
   it('keeps source and target preconditions independent', async () => {
     const settingsTarget = path.join(homeDir, '.claude', 'settings.json');
-    const first = await createDeployPlan(context);
+    const first = await globalPlan(context);
     const native = first.changes.find((change) => change.targetPath === settingsTarget);
     if (!native) throw new Error('expected native settings change');
 
@@ -182,7 +195,7 @@ describe('Deploy operations', () => {
       path.join(repositoryPath, 'ide', 'claude-code', 'native', 'settings.json'),
       `${JSON.stringify({ theme: 'solarized' }, null, 2)}\n`,
     );
-    const sourceChanged = await createDeployPlan(context);
+    const sourceChanged = await globalPlan(context);
     expect(sourceChanged.preconditions[`source:${native.id}`]).not.toBe(
       first.preconditions[`source:${native.id}`],
     );
@@ -194,7 +207,7 @@ describe('Deploy operations', () => {
       settingsTarget,
       `${JSON.stringify({ theme: 'light', localOnly: 'changed-locally' }, null, 2)}\n`,
     );
-    const targetChanged = await createDeployPlan(context);
+    const targetChanged = await globalPlan(context);
     expect(targetChanged.preconditions[`source:${native.id}`]).toBe(
       sourceChanged.preconditions[`source:${native.id}`],
     );
@@ -205,7 +218,17 @@ describe('Deploy operations', () => {
 
   it('freezes failed Plans just like successful Plans', async () => {
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), 'schemaVersion: [invalid\n');
-    const plan = await createDeployPlan(context);
+    const plan = await createDeployPlan(context, {
+      scope: 'global',
+      targetRoot: homeDir,
+      profileIds: ['global'],
+      selection: {
+        profileIds: ['global'],
+        assetIds: [],
+        profilesRevision: '',
+        catalogRevision: '',
+      },
+    });
 
     expect(plan.status).toBe('failed');
     expect(Object.isFrozen(plan)).toBe(true);
@@ -215,7 +238,7 @@ describe('Deploy operations', () => {
   });
 
   it('binds deletion source preconditions to the managed inventory entry', async () => {
-    const first = await createDeployPlan(context);
+    const first = await globalPlan(context);
     const deletion = first.changes.find((change) => change.change === 'delete');
     if (!deletion) throw new Error('expected deletion candidate');
     const state = readState(context);
@@ -223,7 +246,7 @@ describe('Deploy operations', () => {
     state.managedInventory[deletion.targetPath].hash = 'changed-inventory-hash';
     writeState(context, state);
 
-    const changed = await createDeployPlan(context);
+    const changed = await globalPlan(context);
     expect(changed.preconditions[`source:${deletion.id}`]).not.toBe(
       first.preconditions[`source:${deletion.id}`],
     );
@@ -241,7 +264,7 @@ describe('Deploy operations', () => {
       }, null, 2)}\n`,
     );
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const mixedChanges = plan.changes.filter(
       (change) => change.targetPath === path.join(homeDir, '.claude.json'),
     );
@@ -258,7 +281,7 @@ describe('Deploy operations', () => {
     const targetPath = path.join(homeDir, '.claude', 'CLAUDE.md');
     const before = fs.readFileSync(targetPath, 'utf8');
     const stateBefore = readState(context);
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const selected = plan.changes.find((change) => change.targetPath === targetPath);
     if (!selected) throw new Error('expected Shared Rules change');
 
@@ -276,7 +299,7 @@ describe('Deploy operations', () => {
 
   it('rejects a precondition race before creating a backup or writing a target', async () => {
     const targetPath = path.join(homeDir, '.claude', 'CLAUDE.md');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const selected = plan.changes.find((change) => change.targetPath === targetPath);
     if (!selected) throw new Error('expected Shared Rules change');
     fs.writeFileSync(targetPath, '# Changed after review\n');
@@ -292,7 +315,7 @@ describe('Deploy operations', () => {
   it('rolls back earlier selected writes and returns a structured failure Result', async () => {
     const rulesPath = path.join(homeDir, '.claude', 'CLAUDE.md');
     const skillPath = path.join(homeDir, '.claude', 'skills', 'review', 'SKILL.md');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const selected = plan.changes.filter((change) =>
       change.targetPath === rulesPath || change.targetPath === skillPath);
     expect(selected).toHaveLength(2);
@@ -321,7 +344,7 @@ describe('Deploy operations', () => {
 
   it('restores a target when its writer modifies the file before throwing', async () => {
     const targetPath = path.join(homeDir, '.claude', 'CLAUDE.md');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const selected = plan.changes.find((change) => change.targetPath === targetPath);
     if (!selected) throw new Error('expected Shared Rules change');
 
@@ -337,7 +360,7 @@ describe('Deploy operations', () => {
   });
 
   it('does not restore a selected target whose write was never attempted', async () => {
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const selected = plan.changes.filter((change, index, changes) =>
       change.defaultSelected
       && changes.findIndex((candidate) => candidate.targetPath === change.targetPath) === index)
@@ -374,7 +397,7 @@ describe('Deploy operations', () => {
 
   it('preserves the verified backup path when automatic rollback is incomplete', async () => {
     const targetPath = path.join(homeDir, '.claude', 'CLAUDE.md');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const selected = plan.changes.find((change) => change.targetPath === targetPath);
     if (!selected) throw new Error('expected Shared Rules change');
 
@@ -394,13 +417,13 @@ describe('Deploy operations', () => {
   });
 
   it('rejects foreign selection IDs and non-interactive deletions before writing', async () => {
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const invalid = await applyDeployPlan(context, plan, { changeIds: ['deploy-not-in-plan'] });
     expect(invalid).toMatchObject({
       status: 'failed', error: { code: 'deploy.invalidSelection' },
     });
 
-    const freshPlan = await createDeployPlan(context);
+    const freshPlan = await globalPlan(context);
     const deletion = freshPlan.changes.find((change) => change.change === 'delete');
     if (!deletion) throw new Error('expected deletion candidate');
     const defaultSelection = freshPlan.changes
@@ -424,7 +447,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(linkTarget, '# Linked rules\n');
     fs.rmSync(rulesPath);
     fs.symlinkSync(linkTarget, rulesPath);
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const warningCodes = plan.issues
       .filter((issue) => issue.severity === 'warning')
       .map((issue) => issue.confirmationId!);
@@ -434,7 +457,7 @@ describe('Deploy operations', () => {
     const blocked = await applyDeployPlan(context, plan, { changeIds: selectedIds });
     expect(blocked).toMatchObject({ status: 'blocked', issues: [expect.objectContaining({ severity: 'warning' })] });
 
-    const nonInteractivePlan = await createDeployPlan(context);
+    const nonInteractivePlan = await globalPlan(context);
     const nonInteractive = await applyDeployPlan(
       context,
       nonInteractivePlan,
@@ -445,7 +468,7 @@ describe('Deploy operations', () => {
       status: 'blocked', issues: [expect.objectContaining({ code: 'deploy.nonInteractiveBlocked' })],
     });
 
-    const confirmedPlan = await createDeployPlan(context);
+    const confirmedPlan = await globalPlan(context);
     const confirmed = await applyDeployPlan(context, confirmedPlan, {
       changeIds: confirmedPlan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
       confirmedIssueIds: warningCodes,
@@ -463,7 +486,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(externalSkill, '# Review\n');
     createDirectoryLink(externalRoot, skillsRoot);
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.linkOutcomes).toEqual([expect.objectContaining({
       status: 'satisfied-via-link',
@@ -523,7 +546,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(externalReference, '# Skill-specific Claude reference\n');
     createDirectoryLink(externalRoot, skillsRoot);
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.linkOutcomes).toEqual([expect.objectContaining({
       status: 'satisfied-via-link',
@@ -560,7 +583,7 @@ describe('Deploy operations', () => {
     fs.symlinkSync(externalSkill, skillLink);
     createDirectoryLink(externalReferences, referencesLink);
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.linkOutcomes).toEqual([expect.objectContaining({
       status: 'satisfied-via-link',
@@ -605,7 +628,7 @@ describe('Deploy operations', () => {
     fs.mkdirSync(path.dirname(codexSkillsRoot), { recursive: true });
     createDirectoryLink(externalRoot, codexSkillsRoot);
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.readyToApply).toBe(true);
     expect(plan.linkOutcomes).toHaveLength(2);
@@ -667,7 +690,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(externalSkill, '# External review\n');
     createDirectoryLink(externalPackage, packagePath);
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     expect(plan.decisions).toEqual([expect.objectContaining({
       kind: 'external-skill-divergence',
       packageNames: ['review'],
@@ -683,7 +706,7 @@ describe('Deploy operations', () => {
     });
     expect(blocked.status).toBe('blocked');
 
-    const preservePlan = await createDeployPlan(context);
+    const preservePlan = await globalPlan(context);
     const decision = preservePlan.decisions[0];
     const result = await applyDeployPlan(context, preservePlan, {
       changeIds: preservePlan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
@@ -703,7 +726,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(externalSkill, '# External review\n');
     createDirectoryLink(externalPackage, packagePath);
 
-    const failingPlan = await createDeployPlan(context);
+    const failingPlan = await globalPlan(context);
     const failingDecision = failingPlan.decisions[0];
     const failingSelection = [
       ...failingPlan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
@@ -720,7 +743,7 @@ describe('Deploy operations', () => {
     expect(fs.realpathSync(packagePath)).toBe(fs.realpathSync(externalPackage));
     expect(fs.readFileSync(externalSkill, 'utf8')).toBe('# External review\n');
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const decision = plan.decisions[0];
     const result = await applyDeployPlan(context, plan, {
       changeIds: [
@@ -735,7 +758,7 @@ describe('Deploy operations', () => {
     expect(fs.readFileSync(path.join(packagePath, 'SKILL.md'), 'utf8')).toBe('# Review\n');
     expect(fs.readFileSync(externalSkill, 'utf8')).toBe('# External review\n');
 
-    const nextPlan = await createDeployPlan(context);
+    const nextPlan = await globalPlan(context);
     expect(nextPlan.status).toBe('planned');
     expect(nextPlan.changes.some((change) =>
       change.change === 'delete' && change.targetPath === packagePath)).toBe(false);
@@ -748,7 +771,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(externalFile, 'not a Skill directory\n');
     fs.symlinkSync(externalFile, skillsRoot);
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.linkOutcomes).toEqual([expect.objectContaining({
       status: 'blocked',
@@ -770,7 +793,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(externalStale, 'externally owned\n');
     createDirectoryLink(externalRoot, skillsRoot);
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.changes.some((change) =>
       change.change === 'delete' && change.targetPath.startsWith(skillsRoot))).toBe(false);
@@ -788,7 +811,7 @@ describe('Deploy operations', () => {
       skillsRoot,
     );
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.linkOutcomes).toEqual([expect.objectContaining({
       status: 'blocked',
@@ -810,7 +833,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(externalSkill, '# Review\n');
     createDirectoryLink(externalRoot, claudeRoot);
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.linkOutcomes).toEqual([expect.objectContaining({
       status: 'blocked',
@@ -837,7 +860,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(physicalSkill, '# Old review\n');
     createDirectoryLink(physicalSkillsRoot, linkedSkillsRoot);
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.readyToApply).toBe(true);
     expect(plan.linkOutcomes).toEqual([expect.objectContaining({
@@ -870,7 +893,7 @@ describe('Deploy operations', () => {
     fs.mkdirSync(projectionPath, { recursive: true });
     fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.readyToApply).toBe(true);
     expect(plan.changes.filter((change) => change.capability === 'skills')).toEqual(
@@ -916,7 +939,7 @@ describe('Deploy operations', () => {
     fs.mkdirSync(projectionPath, { recursive: true });
     fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Local review edits\n');
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.changes.some((change) =>
       change.targetPath === projectionPath
@@ -943,7 +966,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(path.join(externalPackage, 'SKILL.md'), '# Review\n');
     fs.symlinkSync(externalPackage, projectionPath, 'dir');
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.changes.some((change) =>
       change.targetPath === projectionPath
@@ -968,7 +991,7 @@ describe('Deploy operations', () => {
     fs.mkdirSync(projectionPath, { recursive: true });
     fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
 
-    const dryRun = await createDeployPlan(context);
+    const dryRun = await globalPlan(context);
     expect(dryRun.changes.some((change) =>
       change.deploymentKind === 'topology-migration')).toBe(true);
 
@@ -1006,7 +1029,7 @@ describe('Deploy operations', () => {
     const storePackage = path.dirname(storeFile);
     fs.mkdirSync(projectionPath, { recursive: true });
     fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const migration = plan.changes.find((change) =>
       change.deploymentKind === 'topology-migration');
     if (!migration) throw new Error('expected topology migration');
@@ -1056,7 +1079,7 @@ describe('Deploy operations', () => {
       'utf8',
     )).toBe('# Review\n');
 
-    const nextPlan = await createDeployPlan(context);
+    const nextPlan = await globalPlan(context);
     expect(nextPlan.linkOutcomes).toContainEqual(expect.objectContaining({
       status: 'satisfied-via-link',
       ownership: 'managed',
@@ -1075,7 +1098,7 @@ describe('Deploy operations', () => {
     const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
     fs.mkdirSync(projectionPath, { recursive: true });
     fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Changed after review\n');
 
     const result = await applyDeployPlan(
@@ -1108,7 +1131,7 @@ describe('Deploy operations', () => {
     const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
     fs.mkdirSync(projectionPath, { recursive: true });
     fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     const result = await applyDeployPlan(
       context,
@@ -1146,7 +1169,7 @@ describe('Deploy operations', () => {
     const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
     fs.mkdirSync(projectionPath, { recursive: true });
     fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     let removals = 0;
 
     const result = await applyDeployPlan(
@@ -1194,7 +1217,7 @@ describe('Deploy operations', () => {
     const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
     fs.mkdirSync(projectionPath, { recursive: true });
     fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     const result = await applyDeployPlan(
       context,
@@ -1226,7 +1249,7 @@ describe('Deploy operations', () => {
     const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
     fs.mkdirSync(projectionPath, { recursive: true });
     fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     const result = await applyDeployPlan(
       context,
@@ -1266,7 +1289,7 @@ describe('Deploy operations', () => {
     const storeFile = path.join(homeDir, '.agents', 'skills', 'review', 'SKILL.md');
     const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
     const storePackage = path.dirname(storeFile);
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.readyToApply).toBe(true);
     expect(plan.changes.filter((change) => change.capability === 'skills')).toEqual(expect.arrayContaining([
@@ -1316,7 +1339,7 @@ describe('Deploy operations', () => {
     expect(result.status === 'succeeded' && result.data?.projectionPaths).toEqual([projectionPath]);
     expect(readState(context).lastDeploySelection).not.toHaveProperty('codex');
 
-    const nextPlan = await createDeployPlan(context);
+    const nextPlan = await globalPlan(context);
     expect(nextPlan.linkOutcomes).toEqual([expect.objectContaining({
       status: 'satisfied-via-link',
       ownership: 'managed',
@@ -1374,7 +1397,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(storeFile, '# Local review changes\n');
     fs.writeFileSync(extraFile, '# Keep me\n');
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.readyToApply).toBe(false);
     expect(plan.issues).toContainEqual(expect.objectContaining({
@@ -1400,7 +1423,7 @@ describe('Deploy operations', () => {
     fs.mkdirSync(storePackage, { recursive: true });
     fs.writeFileSync(storeFile, '# Review\n');
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.readyToApply).toBe(true);
     expect(plan.changes.some((change) =>
@@ -1422,7 +1445,7 @@ describe('Deploy operations', () => {
     expect(readState(context).managedSkillLayout?.projections).toHaveProperty(projectionPath);
 
     fs.rmSync(path.join(repositoryPath, 'common', 'skills', 'review'), { recursive: true, force: true });
-    const cleanupPlan = await createDeployPlan(context);
+    const cleanupPlan = await globalPlan(context);
     expect(cleanupPlan.changes.some((change) =>
       change.deploymentKind === 'physical-materialization'
       && change.change === 'delete'
@@ -1444,7 +1467,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(path.join(externalPackage, 'SKILL.md'), '# Review\n');
     createDirectoryLink(externalPackage, storePackage);
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.readyToApply).toBe(true);
     expect(plan.changes.some((change) =>
@@ -1475,7 +1498,7 @@ describe('Deploy operations', () => {
     const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
     fs.mkdirSync(storePackage, { recursive: true });
     fs.writeFileSync(storeFile, '# Review\n');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     fs.writeFileSync(storeFile, '# Changed after review\n');
 
     const result = await applyDeployPlan(
@@ -1503,7 +1526,7 @@ describe('Deploy operations', () => {
     const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
     fs.mkdirSync(storePackage, { recursive: true });
     fs.writeFileSync(storeFile, '# Review\n');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     fs.mkdirSync(externalPackage, { recursive: true });
     fs.writeFileSync(path.join(externalPackage, 'SKILL.md'), '# Review\n');
@@ -1538,7 +1561,7 @@ describe('Deploy operations', () => {
     createDirectoryLink(externalPackage, storePackage);
     fs.rmSync(externalPackage, { recursive: true, force: true });
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.readyToApply).toBe(false);
     expect(plan.issues).toContainEqual(expect.objectContaining({
@@ -1571,7 +1594,7 @@ describe('Deploy operations', () => {
     const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
     const claudeProjection = path.join(homeDir, '.claude', 'skills', 'review');
     const geminiProjection = path.join(homeDir, '.gemini', 'skills', 'review');
-    const firstPlan = await createDeployPlan(context);
+    const firstPlan = await globalPlan(context);
     await applyDeployPlan(context, firstPlan, {
       changeIds: firstPlan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
     });
@@ -1585,7 +1608,7 @@ describe('Deploy operations', () => {
         '  claudeCode:\n    enabled: false',
       ),
     );
-    const disabledPlan = await createDeployPlan(context);
+    const disabledPlan = await globalPlan(context);
     const claudeDeletes = disabledPlan.changes.filter((change) =>
       change.change === 'delete' && change.targetPath.startsWith(path.join(homeDir, '.claude', 'skills', 'review')));
     const storeDeletes = disabledPlan.changes.filter((change) =>
@@ -1619,7 +1642,7 @@ describe('Deploy operations', () => {
     const storePackage = path.join(homeDir, '.agents', 'skills', 'review');
     const claudeProjection = path.join(homeDir, '.claude', 'skills', 'review');
     const geminiProjection = path.join(homeDir, '.gemini', 'skills', 'review');
-    const firstPlan = await createDeployPlan(context);
+    const firstPlan = await globalPlan(context);
     await applyDeployPlan(context, firstPlan, {
       changeIds: firstPlan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
     });
@@ -1627,7 +1650,7 @@ describe('Deploy operations', () => {
     expect(fs.lstatSync(geminiProjection).isSymbolicLink()).toBe(true);
 
     fs.rmSync(path.join(repositoryPath, 'common', 'skills', 'review'), { recursive: true, force: true });
-    const cleanupPlan = await createDeployPlan(context);
+    const cleanupPlan = await globalPlan(context);
     const projectionDeletes = cleanupPlan.changes.filter((change) =>
       change.change === 'delete'
       && change.deploymentKind === 'managed-link-projection'
@@ -1675,7 +1698,7 @@ describe('Deploy operations', () => {
     );
     const storeFile = path.join(homeDir, '.agents', 'skills', 'review', 'SKILL.md');
     const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     await applyDeployPlan(context, plan, {
       changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
     });
@@ -1687,7 +1710,7 @@ describe('Deploy operations', () => {
         '  codex:\n    enabled: false',
       ),
     );
-    const after = await createDeployPlan(context);
+    const after = await globalPlan(context);
     expect(after.changes.some((change) =>
       change.change === 'delete' && change.targetPath.startsWith(path.dirname(storeFile)))).toBe(false);
     expect(after.linkOutcomes).toEqual([expect.objectContaining({
@@ -1706,7 +1729,7 @@ describe('Deploy operations', () => {
     );
     const storeFile = path.join(homeDir, '.agents', 'skills', 'review', 'SKILL.md');
     const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const selected = plan.changes.filter((change) => change.defaultSelected);
 
     const result = await applyDeployPlan(
@@ -1742,7 +1765,7 @@ describe('Deploy operations', () => {
     );
     fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'review', 'assets'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'common', 'skills', 'review', 'assets', 'note.txt'), 'note\n');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const materializations = plan.changes.filter((change) =>
       change.deploymentKind === 'physical-materialization');
     const projections = plan.changes.filter((change) =>
@@ -1763,7 +1786,7 @@ describe('Deploy operations', () => {
     const packageRoot = path.join(repositoryPath, 'common', 'skills', 'review');
     fs.mkdirSync(path.join(packageRoot, 'references'), { recursive: true });
     fs.writeFileSync(path.join(packageRoot, 'references', 'guide.md'), '# Guide\n');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const selectedChanges = plan.changes.filter((change) => change.defaultSelected);
     const reviewFiles = selectedChanges.filter((change) =>
       change.capability === 'skills' && change.name === 'review');
@@ -1799,7 +1822,7 @@ describe('Deploy operations', () => {
         projections: {},
       },
     });
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const selected = plan.changes.filter((change) => change.defaultSelected);
 
     const result = await applyDeployPlan(
@@ -1836,7 +1859,7 @@ describe('Deploy operations', () => {
     );
     const storeRoot = path.join(homeDir, '.agents');
     const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const selected = plan.changes.filter((change) => change.defaultSelected);
 
     const result = await applyDeployPlan(
@@ -1866,7 +1889,7 @@ describe('Deploy operations', () => {
     const storeRoot = path.join(homeDir, '.agents');
     const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
     const markerPath = path.join(projectionPath, 'external.txt');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const selected = plan.changes.filter((change) => change.defaultSelected);
 
     const result = await applyDeployPlan(
@@ -1899,7 +1922,7 @@ describe('Deploy operations', () => {
       fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
     );
     const projectionPath = path.join(homeDir, '.claude', 'skills', 'review');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const projection = plan.changes.find((change) =>
       change.deploymentKind === 'managed-link-projection');
     if (!projection) throw new Error('expected managed projection');
@@ -1921,7 +1944,7 @@ describe('Deploy operations', () => {
       fs.readFileSync(manifestPath, 'utf8').replace('useSymlinks: false', 'useSymlinks: true'),
     );
     const storeRoot = path.join(homeDir, '.agents');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const selected = plan.changes.filter((change) => change.defaultSelected);
 
     const result = await applyDeployPlan(
@@ -1943,7 +1966,7 @@ describe('Deploy operations', () => {
     );
     const skillsRoot = path.join(homeDir, '.claude', 'skills');
     const movedRoot = path.join(homeDir, '.claude', 'skills-before-retarget');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     fs.renameSync(skillsRoot, movedRoot);
     fs.mkdirSync(skillsRoot);
 
@@ -1982,7 +2005,7 @@ describe('Deploy operations', () => {
         projections: {},
       },
     });
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     fs.renameSync(storeRoot, path.join(homeDir, '.agents-before-retarget'));
     fs.mkdirSync(path.dirname(storeFile), { recursive: true });
     fs.writeFileSync(storeFile, '# Previous review\n');
@@ -2011,7 +2034,7 @@ describe('Deploy operations', () => {
       repositoryPath,
     });
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.readyToApply).toBe(true);
     expect(plan.changes).toContainEqual(expect.objectContaining({
@@ -2034,7 +2057,7 @@ describe('Deploy operations', () => {
         .replace('  claudeCode:\n    enabled: true', '  claudeCode:\n    enabled: false'),
     );
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.changes).toContainEqual(expect.objectContaining({
       targetPath: path.join(homeDir, '.agents', 'skills', 'review', 'SKILL.md'),
@@ -2067,7 +2090,7 @@ describe('Deploy operations', () => {
     const claudeProjection = path.join(homeDir, '.claude', 'skills', 'review');
     const geminiCliProjection = path.join(homeDir, '.gemini', 'skills', 'review');
     const antigravityCopy = path.join(homeDir, '.gemini', 'config', 'skills', 'review', 'SKILL.md');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.readyToApply).toBe(true);
     expect(plan.changes.filter((change) => change.capability === 'skills')).toEqual(
@@ -2139,7 +2162,7 @@ describe('Deploy operations', () => {
       repositoryPath,
     });
 
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
 
     expect(plan.readyToApply).toBe(true);
     expect(plan.changes).toEqual(expect.arrayContaining([
@@ -2187,7 +2210,7 @@ describe('Deploy operations', () => {
 
   it('applies only selected capabilities and updates only their device state scope', async () => {
     const targetPath = path.join(homeDir, '.claude.json');
-    const plan = await createDeployPlan(context);
+    const plan = await globalPlan(context);
     const native = plan.changes.find((change) =>
       change.targetPath === targetPath && change.capability === 'native');
     if (!native) throw new Error('expected Native change');
@@ -2209,6 +2232,68 @@ describe('Deploy operations', () => {
     }));
     expect(state.managedInventory).not.toHaveProperty(path.join(homeDir, '.claude', 'CLAUDE.md'));
     expect(state.lastDeploySelection).toEqual({ 'claude-code': ['native'] });
+  });
+
+  it('includes DeployContextFields on global plans', async () => {
+    const plan = await globalPlan(context);
+
+    expect(plan).toMatchObject({
+      scope: 'global',
+      targetRoot: homeDir,
+      profileIds: ['global'],
+      assetIds: expect.arrayContaining(['rule:canonical']),
+    });
+    expect(plan.profilesRevision).toEqual(expect.any(String));
+    expect(plan.catalogRevision).toEqual(expect.any(String));
+    expect(plan.assetIds.length).toBeGreaterThan(0);
+  });
+
+  it('returns stale when profiles.yaml revision changes after plan', async () => {
+    const plan = await globalPlan(context);
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: {
+        global: {
+          title: 'Global',
+          assets: ['rule:canonical', 'skill:review'],
+        },
+      },
+    });
+
+    const result = await applyDeployPlan(context, plan, {
+      changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'operation.stalePlan' },
+    });
+  });
+
+  it('returns an empty project-scope plan with projection pending notice when assets remain', async () => {
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'deploy-operation-test',
+      repositoryPath,
+    });
+    const built = buildDeployRequest(repositoryPath, {
+      profileIds: ['global'],
+      scope: 'project',
+      targetRoot: path.join(testRoot, 'project'),
+    });
+    if ('error' in built) throw new Error(built.error.message);
+
+    const plan = await createDeployPlan(context, built.request);
+
+    expect(plan.changes).toEqual([]);
+    expect(plan.issues).toContainEqual(expect.objectContaining({
+      code: PROJECT_PROJECTION_PENDING_CODE,
+    }));
+    expect(plan).toMatchObject({
+      scope: 'project',
+      profileIds: ['global'],
+      assetIds: expect.arrayContaining(['rule:canonical']),
+    });
   });
 });
 

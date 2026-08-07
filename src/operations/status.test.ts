@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceContext } from '../adapters/types.js';
 import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
 import { hashSkillPackageContent } from '../core/managed-skill-layout.js';
+import { seedGlobalProfileWithCatalog, createGlobalDeployPlan } from './deploy-request-helpers.js';
 import { writeState } from '../utils/state.js';
 import { inspectStatus } from './status.js';
 
@@ -45,6 +46,7 @@ describe('inspectStatus', () => {
     fs.writeFileSync(rulesPath, '# Local rules\n');
     fs.writeFileSync(newSkillPath, '---\nname: new-skill\n---\n${env:MISSING_TOKEN}\n');
     fs.writeFileSync(staleSkillPath, '# Stale skill\n');
+    seedGlobalProfileWithCatalog(repositoryPath);
 
     const unchangedPath = path.join(homeDir, 'unchanged.txt');
     const driftPath = path.join(homeDir, 'drift.txt');
@@ -77,7 +79,7 @@ describe('inspectStatus', () => {
     const report = await inspectStatus(context);
 
     expect(report).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'status',
       status: 'reported',
       ready: true,
@@ -161,6 +163,7 @@ describe('inspectStatus', () => {
     fs.writeFileSync(sourceSkill, '# Review\n');
     fs.writeFileSync(externalSkill, '# Review\n');
     fs.symlinkSync(externalRoot, linkedRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    seedGlobalProfileWithCatalog(repositoryPath);
     writeState(context, {
       schemaVersion: 2,
       defaultRepositoryId: 'repository-id',
@@ -191,8 +194,8 @@ describe('inspectStatus', () => {
     if (process.platform === 'win32') return;
     context.platform = 'darwin';
     seedManagedSkillRepository(repositoryPath, homeDir, context);
-    const { applyDeployPlan, createDeployPlan } = await import('./deploy.js');
-    const plan = await createDeployPlan(context);
+    const { applyDeployPlan } = await import('./deploy.js');
+    const plan = await createGlobalDeployPlan(context);
     const selected = plan.changes.filter((change) => change.defaultSelected);
     const result = await applyDeployPlan(context, plan, {
       changeIds: selected.map((change) => change.id),
@@ -227,8 +230,8 @@ describe('inspectStatus', () => {
     if (process.platform === 'win32') return;
     context.platform = 'darwin';
     seedManagedSkillRepository(repositoryPath, homeDir, context);
-    const { applyDeployPlan, createDeployPlan } = await import('./deploy.js');
-    const plan = await createDeployPlan(context);
+    const { applyDeployPlan } = await import('./deploy.js');
+    const plan = await createGlobalDeployPlan(context);
     await applyDeployPlan(context, plan, {
       changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
     });
@@ -304,8 +307,8 @@ describe('inspectStatus', () => {
     if (process.platform === 'win32') return;
     context.platform = 'darwin';
     seedManagedSkillRepository(repositoryPath, homeDir, context);
-    const { applyDeployPlan, createDeployPlan } = await import('./deploy.js');
-    const plan = await createDeployPlan(context);
+    const { applyDeployPlan } = await import('./deploy.js');
+    const plan = await createGlobalDeployPlan(context);
     await applyDeployPlan(context, plan, {
       changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
     });
@@ -417,6 +420,7 @@ describe('inspectStatus', () => {
     const skillPath = path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md');
     fs.mkdirSync(path.dirname(skillPath), { recursive: true });
     fs.writeFileSync(skillPath, '# Review\n');
+    seedGlobalProfileWithCatalog(repositoryPath);
     writeState(context, {
       schemaVersion: 2,
       defaultRepositoryId: 'repository-id',
@@ -424,8 +428,7 @@ describe('inspectStatus', () => {
     });
 
     const report = await inspectStatus(context);
-    const { createDeployPlan } = await import('./deploy.js');
-    const deployPlan = await createDeployPlan(context);
+    const deployPlan = await createGlobalDeployPlan(context);
     const skillChanges = deployPlan.changes.filter((change) => change.capability === 'skills');
 
     expect(skillChanges).toEqual(expect.arrayContaining([
@@ -468,6 +471,7 @@ function seedManagedSkillRepository(
   fs.mkdirSync(path.join(homeDir, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Repository rules\n');
   fs.writeFileSync(path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md'), '# Review\n');
+  seedGlobalProfileWithCatalog(repositoryPath);
   writeState(context, {
     schemaVersion: 2,
     defaultRepositoryId: 'repository-id',
@@ -500,6 +504,7 @@ function createRepository(repositoryPath: string, codexEnabled = true): void {
   ].join('\n'));
   fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
   fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Repository rules\n');
+  seedGlobalProfileWithCatalog(repositoryPath);
 }
 
 function sha256(content: string): string {

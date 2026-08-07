@@ -36,7 +36,7 @@ describe('mcv init', () => {
 
     expect(console.log).toHaveBeenCalledOnce();
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'init',
       status: 'succeeded',
       repositoryPath,
@@ -99,7 +99,7 @@ describe('mcv init', () => {
 
     expect(console.log).toHaveBeenCalledOnce();
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'init',
       status: 'planned',
       readyToApply: true,

@@ -1,7 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { parseAssetId } from '../assets/ids.js';
+import { toCanonicalDeploySource } from '../assets/selected-repository-view.js';
+import { atomicWriteFile } from '../utils/files.js';
 import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObject, } from '../utils/structured-config.js';
-import { ClaudeCodeNativeFileHandler } from './claude-code-native-file-handler.js';
+import { ClaudeCodeNativeFileHandler, projectClaudeCodeNativeAsset } from './claude-code-native-file-handler.js';
 import { ClaudeCodeCanonicalTransformer } from './claude-code-canonical-transformer.js';
 import { CLAUDE_CODE_MANAGED_PATHS } from './overlay-policies.js';
 export class ClaudeCodeAdapter {
@@ -35,16 +38,32 @@ export class ClaudeCodeAdapter {
         const nativeCapture = await this.nativeFileHandler.capture(files, context);
         return this.canonicalTransformer.transform(nativeCapture, context);
     }
-    async deploy(repositoryPath, context) {
-        const [nativeOperation, canonicalSource] = await Promise.all([
-            this.nativeFileHandler.deploy(repositoryPath, context),
-            this.nativeFileHandler.readCanonical(repositoryPath, context),
+    async project(source, request, context) {
+        const write = (file) => atomicWriteFile(file.targetPath, file.content);
+        if (request.scope === 'project') {
+            return { files: [], write };
+        }
+        const canonicalSource = toCanonicalDeploySource(source);
+        const [nativeFiles, canonicalFiles] = await Promise.all([
+            Promise.resolve(this.projectNativeAssets(source.nativeAssets, context)),
+            this.canonicalTransformer.deploy(canonicalSource, context),
         ]);
-        const canonicalFiles = await this.canonicalTransformer.deploy(canonicalSource, context);
         return {
-            files: this.mergeDeploymentFiles(nativeOperation.files, canonicalFiles, context),
-            write: nativeOperation.write,
+            files: this.mergeDeploymentFiles(nativeFiles, canonicalFiles, context),
+            write,
         };
+    }
+    projectNativeAssets(nativeAssets, context) {
+        const files = [];
+        for (const [assetId, content] of nativeAssets) {
+            const parsed = parseAssetId(assetId);
+            if (parsed.type !== 'native' || parsed.target !== 'claude-code')
+                continue;
+            const file = projectClaudeCodeNativeAsset(parsed.fileId, content, context);
+            if (file)
+                files.push(file);
+        }
+        return files;
     }
     mergeDeploymentFiles(nativeFiles, canonicalFiles, context) {
         const mergedPaths = [

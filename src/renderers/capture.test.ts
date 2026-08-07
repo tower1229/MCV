@@ -9,7 +9,7 @@ import {
 describe('Capture plan rendering', () => {
   it('identifies contributing Skill projections without duplicating the package change', () => {
     const plan = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'capture',
       status: 'planned',
       readyToApply: true,
@@ -76,7 +76,7 @@ describe('Capture plan rendering', () => {
 describe('Capture result rendering', () => {
   it('reports newly Unassigned Assets and the classification next action', () => {
     const result = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'capture',
       status: 'succeeded',
       repositoryPath: '/repo',

@@ -106,13 +106,19 @@ function skillPlan(): DeployPlan {
     },
   });
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     operation: 'deploy',
     status: 'planned',
     readyToApply: true,
     operationId: 'tree-test',
     preconditions: {},
     repositoryPath: '/tmp/mcv',
+    scope: 'global',
+    targetRoot: '/tmp/home',
+    profileIds: ['global'],
+    profilesRevision: 'rev-profiles',
+    catalogRevision: 'rev-catalog',
+    assetIds: ['rule:canonical'],
     changes: [
       change(
         'skill-readme',

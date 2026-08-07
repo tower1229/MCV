@@ -64,18 +64,24 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
     });
     const deployCommand = program
         .command('deploy')
-        .description('Deploy repository configuration to this device')
+        .description('Deploy selected Profiles to the current project or device-global locations')
+        .argument('[profiles...]', 'Profile IDs to deploy (unioned and deduplicated)')
+        .option('--global', 'Deploy to device-global IDE locations (defaults Profiles to global)')
+        .option('--target <path>', 'Project root for project-scope Deploy (default: process.cwd())')
         .option('--dry-run', 'Show the deployment plan without writing')
         .option('--json', 'Print a machine-readable plan')
         .option('--yes', 'Deploy without prompting after a reviewed dry-run')
         .option('--prune-managed', 'Delete stale managed files and exact duplicate Skills from the legacy Codex directory')
-        .action(async (options) => {
+        .action(async (profiles, options) => {
         validateWriteOutputOptions(deployCommand, options);
         if (shouldUseWriteTui(options)) {
             await runShell(context, 'deploy', true);
         }
         else {
-            await deployConfigurations(context, deployDependencies, options);
+            await deployConfigurations(context, deployDependencies, {
+                ...options,
+                profiles,
+            });
         }
     });
     const discoverCommand = program

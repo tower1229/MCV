@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProgram } from '../index.js';
+import type { DeviceContext } from '../adapters/types.js';
+import { seedGlobalProfileWithCatalog } from '../operations/deploy-request-helpers.js';
 import { findSymbolicLinkAncestor } from '../utils/files.js';
 import { restoreLatestBackup } from './restore.js';
 
@@ -67,12 +69,19 @@ describe('mcv deploy', () => {
 
   const windowsHomeDir = () => homeDir.replace(/\//g, '\\');
 
+  async function deployWithGlobalProfile(
+    args: string[] = [],
+    context: DeviceContext = deviceContext('win32'),
+    dependencies: Parameters<typeof createProgram>[2] = {},
+  ): Promise<void> {
+    seedGlobalProfileWithCatalog(repositoryPath);
+    await createProgram(context, {}, dependencies).parseAsync([
+      'node', 'mcv', 'deploy', '--global', ...args,
+    ]);
+  }
+
   it('deploys repository configuration with portable paths resolved for this device', async () => {
-    await createProgram(
-      deviceContext('win32'),
-      {},
-      { confirmDeploy: async () => true },
-    ).parseAsync(['node', 'mcv', 'deploy']);
+    await deployWithGlobalProfile([], deviceContext('win32'), { confirmDeploy: async () => true });
 
     expect(
       JSON.parse(
@@ -85,11 +94,7 @@ describe('mcv deploy', () => {
   });
 
   it('exits 130 without writing when Deploy confirmation is interrupted', async () => {
-    await createProgram(
-      deviceContext('win32'),
-      {},
-      { confirmDeploy: async () => undefined },
-    ).parseAsync(['node', 'mcv', 'deploy']);
+    await deployWithGlobalProfile([], deviceContext('win32'), { confirmDeploy: async () => undefined });
 
     expect(process.exitCode).toBe(130);
     expect(console.log).toHaveBeenCalledWith(
@@ -102,21 +107,26 @@ describe('mcv deploy', () => {
     fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Rules\n');
 
-    await createProgram(deviceContext('win32')).parseAsync(['node', 'mcv', 'deploy', '--dry-run']);
+    await deployWithGlobalProfile(['--dry-run'], deviceContext('win32'));
     const plain = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
     expect(plain).toContain('Deploy Plan:');
     expect(plain).toContain('Claude Code / Shared Rules');
     expect(plain).toContain('[replace entire file]');
 
     vi.mocked(console.log).mockClear();
-    await createProgram(deviceContext('win32')).parseAsync(['node', 'mcv', 'deploy', '--dry-run', '--json']);
+    await deployWithGlobalProfile(['--dry-run', '--json'], deviceContext('win32'));
     expect(vi.mocked(console.log)).toHaveBeenCalledOnce();
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0][0]))).toEqual(
       expect.objectContaining({
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'deploy',
         status: 'planned',
         repositoryPath,
+        scope: 'global',
+        profileIds: ['global'],
+        profilesRevision: expect.any(String),
+        catalogRevision: expect.any(String),
+        assetIds: expect.any(Array),
         changes: expect.arrayContaining([
           expect.objectContaining({ capability: 'rules', strategy: 'replace-entire-file' }),
         ]),
@@ -137,13 +147,11 @@ describe('mcv deploy', () => {
     fs.mkdirSync(path.dirname(linkedRoot), { recursive: true });
     fs.symlinkSync(externalRoot, linkedRoot, process.platform === 'win32' ? 'junction' : 'dir');
 
-    await createProgram(deviceContext('win32')).parseAsync(['node', 'mcv', 'deploy', '--dry-run']);
+    await deployWithGlobalProfile(['--dry-run'], deviceContext('win32'));
     const plain = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
 
     vi.mocked(console.log).mockClear();
-    await createProgram(deviceContext('win32')).parseAsync([
-      'node', 'mcv', 'deploy', '--dry-run', '--json',
-    ]);
+    await deployWithGlobalProfile(['--dry-run', '--json'], deviceContext('win32'));
     const json = JSON.parse(String(vi.mocked(console.log).mock.calls[0][0]));
     expect(json).toMatchObject({ status: 'planned' });
     expect(plain).toContain(
@@ -174,18 +182,14 @@ describe('mcv deploy', () => {
     fs.mkdirSync(path.dirname(sourceSkill), { recursive: true });
     fs.writeFileSync(sourceSkill, '# Review\n');
 
-    await createProgram(deviceContext()).parseAsync(['node', 'mcv', 'deploy', '--dry-run']);
+    await deployWithGlobalProfile(['--dry-run'], deviceContext());
     const planText = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
     expect(planText).toContain('Physical materialization');
     expect(planText).toContain('Managed-link projection');
     expect(planText).toContain(`${path.join(homeDir, '.claude', 'skills', 'review')} -> ${path.join(homeDir, '.agents', 'skills', 'review')}`);
 
     vi.mocked(console.log).mockClear();
-    await createProgram(
-      deviceContext(),
-      {},
-      { confirmDeploy: async () => true },
-    ).parseAsync(['node', 'mcv', 'deploy']);
+    await deployWithGlobalProfile([], deviceContext(), { confirmDeploy: async () => true });
     const resultText = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
     expect(resultText).toContain('Physical materializations: 1');
     expect(resultText).toContain('Managed-link projections: 1');
@@ -206,7 +210,7 @@ describe('mcv deploy', () => {
     fs.mkdirSync(projectionPath, { recursive: true });
     fs.writeFileSync(path.join(projectionPath, 'SKILL.md'), '# Review\n');
 
-    await createProgram(deviceContext()).parseAsync(['node', 'mcv', 'deploy', '--dry-run']);
+    await deployWithGlobalProfile(['--dry-run'], deviceContext());
     const planText = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
     expect(planText).toContain('Topology migration');
     expect(planText).toContain('[not selected]');
@@ -214,7 +218,7 @@ describe('mcv deploy', () => {
     expect(planText).toContain('Topology migration available');
 
     vi.mocked(console.log).mockClear();
-    await createProgram(deviceContext()).parseAsync(['node', 'mcv', 'deploy', '--dry-run', '--json']);
+    await deployWithGlobalProfile(['--dry-run', '--json'], deviceContext());
     const planJson = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0])) as {
       changes: Array<{ deploymentKind?: string; defaultSelected: boolean; targetPath: string }>;
       issues: Array<{ code: string }>;
@@ -229,7 +233,7 @@ describe('mcv deploy', () => {
     }));
 
     vi.mocked(console.log).mockClear();
-    await createProgram(deviceContext()).parseAsync(['node', 'mcv', 'deploy', '--yes', '--json']);
+    await deployWithGlobalProfile(['--yes', '--json'], deviceContext());
     const resultJson = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0])) as {
       status: string;
       issues: Array<{ code: string }>;
@@ -254,11 +258,7 @@ describe('mcv deploy', () => {
     fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), rules);
 
-    await createProgram(
-      deviceContext('win32'),
-      {},
-      { confirmDeploy: async () => true },
-    ).parseAsync(['node', 'mcv', 'deploy']);
+    await deployWithGlobalProfile([], deviceContext('win32'), { confirmDeploy: async () => true });
 
     expect(
       fs.readFileSync(path.join(homeDir, '.claude', 'CLAUDE.md'), 'utf8'),
@@ -272,11 +272,7 @@ describe('mcv deploy', () => {
     fs.writeFileSync(path.join(skillRoot, 'SKILL.md'), '# Review\n');
     fs.writeFileSync(path.join(skillRoot, 'resources', 'fixture.bin'), resource);
 
-    await createProgram(
-      deviceContext('win32'),
-      {},
-      { confirmDeploy: async () => true },
-    ).parseAsync(['node', 'mcv', 'deploy']);
+    await deployWithGlobalProfile([], deviceContext('win32'), { confirmDeploy: async () => true });
 
     expect(
       fs.readFileSync(path.join(homeDir, '.claude', 'skills', 'review', 'SKILL.md'), 'utf8'),
@@ -306,19 +302,13 @@ describe('mcv deploy', () => {
     fs.mkdirSync(divergentLegacySkill, { recursive: true });
     fs.writeFileSync(path.join(divergentLegacySkill, 'SKILL.md'), '# Legacy TDD\n');
 
-    await createProgram(
-      deviceContext('win32'),
-    ).parseAsync(['node', 'mcv', 'deploy', '--dry-run']);
+    await deployWithGlobalProfile(['--dry-run'], deviceContext('win32'));
     expect(fs.existsSync(path.join(duplicateLegacySkill, 'SKILL.md'))).toBe(true);
     expect(vi.mocked(console.log)).toHaveBeenCalledWith(
       expect.stringContaining('[duplicate:codex-legacy] grill-me'),
     );
 
-    await createProgram(
-      deviceContext('win32'),
-      {},
-      { confirmDeploy: async () => true },
-    ).parseAsync(['node', 'mcv', 'deploy', '--prune-managed']);
+    await deployWithGlobalProfile(['--prune-managed'], deviceContext('win32'), { confirmDeploy: async () => true });
 
     expect(fs.existsSync(path.join(duplicateLegacySkill, 'SKILL.md'))).toBe(false);
     expect(fs.existsSync(path.join(duplicateLegacySkill, 'references', 'questions.md'))).toBe(false);
@@ -359,11 +349,7 @@ describe('mcv deploy', () => {
       }, null, 2)}\n`,
     );
 
-    await createProgram(
-      deviceContext('win32'),
-      {},
-      { confirmDeploy: async () => true },
-    ).parseAsync(['node', 'mcv', 'deploy']);
+    await deployWithGlobalProfile([], deviceContext('win32'), { confirmDeploy: async () => true });
 
     expect(
       JSON.parse(fs.readFileSync(path.join(homeDir, '.claude.json'), 'utf8')),
@@ -404,11 +390,7 @@ describe('mcv deploy', () => {
       }, null, 2)}\n`,
     );
 
-    const runDeploy = () => createProgram(
-      deviceContext('win32'),
-      {},
-      { confirmDeploy: async () => true },
-    ).parseAsync(['node', 'mcv', 'deploy']);
+    const runDeploy = () => deployWithGlobalProfile([], deviceContext('win32'), { confirmDeploy: async () => true });
 
     await runDeploy();
 
@@ -450,11 +432,13 @@ describe('mcv deploy', () => {
   });
 
   it('records deployed file hashes as the status baseline', async () => {
-    const run = (command: 'deploy' | 'status') => createProgram(
-      deviceContext('win32'),
-      {},
-      { confirmDeploy: async () => true },
-    ).parseAsync(['node', 'mcv', command]);
+    const run = async (command: 'deploy' | 'status') => {
+      if (command === 'deploy') {
+        await deployWithGlobalProfile([], deviceContext('win32'), { confirmDeploy: async () => true });
+        return;
+      }
+      await createProgram(deviceContext('win32'), {}, { confirmDeploy: async () => true }).parseAsync(['node', 'mcv', 'status']);
+    };
 
     await run('deploy');
     const settingsPath = path.join(homeDir, '.claude', 'settings.json');
@@ -480,9 +464,7 @@ describe('mcv deploy', () => {
   it('deletes only prior managed inventory when prune is explicitly confirmed', async () => {
     fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Managed rules\n');
-    const run = (...args: string[]) => createProgram(
-      deviceContext('win32'), {}, { confirmDeploy: async () => true },
-    ).parseAsync(['node', 'mcv', 'deploy', ...args]);
+    const run = (...args: string[]) => deployWithGlobalProfile(args, deviceContext('win32'), { confirmDeploy: async () => true });
     await run();
     const targetPath = path.join(homeDir, '.claude', 'CLAUDE.md');
     expect(fs.existsSync(targetPath)).toBe(true);
@@ -523,11 +505,7 @@ describe('mcv deploy', () => {
       `${JSON.stringify({ command: '${TOOLS_HOME}\\bin\\tool' }, null, 2)}\n`,
     );
 
-    await createProgram(
-      deviceContext('darwin'),
-      {},
-      { confirmDeploy: async () => true },
-    ).parseAsync(['node', 'mcv', 'deploy']);
+    await deployWithGlobalProfile([], deviceContext('darwin'), { confirmDeploy: async () => true });
 
     expect(
       JSON.parse(
@@ -537,14 +515,10 @@ describe('mcv deploy', () => {
   });
 
   it('gives device variable values precedence over repository defaults', async () => {
-    await createProgram(
-      {
-        ...deviceContext('win32'),
-        variables: { TOOLS_HOME: 'D:\\本机 工具' },
-      },
-      {},
-      { confirmDeploy: async () => true },
-    ).parseAsync(['node', 'mcv', 'deploy']);
+    await deployWithGlobalProfile([], {
+      ...deviceContext('win32'),
+      variables: { TOOLS_HOME: 'D:\\本机 工具' },
+    } as DeviceContext, { confirmDeploy: async () => true });
 
     expect(
       JSON.parse(
@@ -564,11 +538,7 @@ describe('mcv deploy', () => {
       }, null, 2)}\n`,
     );
 
-    await createProgram(
-      deviceContext('win32'),
-      {},
-      { confirmDeploy: async () => true },
-    ).parseAsync(['node', 'mcv', 'deploy']);
+    await deployWithGlobalProfile([], deviceContext('win32'), { confirmDeploy: async () => true });
 
     expect(
       JSON.parse(
@@ -584,7 +554,7 @@ describe('mcv deploy', () => {
       path.join(repositoryPath, 'mcv.yaml'),
       'schemaVersion: 4\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
     );
-    const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native');
+    const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native', 'gemini-cli');
     fs.mkdirSync(nativeRoot, { recursive: true });
     fs.writeFileSync(
       path.join(nativeRoot, 'settings.json'),
@@ -607,11 +577,7 @@ describe('mcv deploy', () => {
       }, null, 2)}\n`,
     );
 
-    await createProgram(
-      deviceContext(),
-      {},
-      { confirmDeploy: async () => true },
-    ).parseAsync(['node', 'mcv', 'deploy']);
+    await deployWithGlobalProfile([], deviceContext(), { confirmDeploy: async () => true });
 
     expect(JSON.parse(fs.readFileSync(settingsPath, 'utf8'))).toEqual({
       ui: { density: 'compact', theme: 'dark' },
@@ -642,11 +608,7 @@ describe('mcv deploy', () => {
       'personality = "pragmatic"\n[mcp_servers.stale]\ncommand = "old-server"\n',
     );
 
-    await createProgram(
-      deviceContext(),
-      {},
-      { confirmDeploy: async () => true },
-    ).parseAsync(['node', 'mcv', 'deploy']);
+    await deployWithGlobalProfile([], deviceContext(), { confirmDeploy: async () => true });
 
     const { parse } = await import('smol-toml');
     expect(parse(fs.readFileSync(configPath, 'utf8'))).toEqual({
@@ -655,5 +617,51 @@ describe('mcv deploy', () => {
       mcp_servers: { shared: { command: 'shared-server' } },
     });
     expect(fs.readFileSync(path.join(homeDir, '.codex', 'AGENTS.md'), 'utf8')).toBe('# Rules\n');
+  });
+
+  it('exits 2 without writing when no Profile is specified', async () => {
+    await createProgram(
+      deviceContext('win32'),
+      {},
+      { confirmDeploy: async () => true },
+    ).parseAsync(['node', 'mcv', 'deploy']);
+
+    expect(process.exitCode).toBe(2);
+    expect(fs.existsSync(path.join(homeDir, '.claude', 'settings.json'))).toBe(false);
+  });
+
+  it('exits 2 without writing when --yes is used without a Profile', async () => {
+    await createProgram(deviceContext('win32')).parseAsync(['node', 'mcv', 'deploy', '--yes']);
+
+    expect(process.exitCode).toBe(2);
+    expect(fs.existsSync(path.join(homeDir, '.claude', 'settings.json'))).toBe(false);
+  });
+
+  it('exits 2 when --global and --target are used together', async () => {
+    await createProgram(deviceContext('win32')).parseAsync([
+      'node', 'mcv', 'deploy', '--global', '--target', '/tmp/x',
+    ]);
+
+    expect(process.exitCode).toBe(2);
+  });
+
+  it('returns schemaVersion 3 and DeployContextFields for --global --dry-run --json', async () => {
+    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Rules\n');
+
+    vi.mocked(console.log).mockClear();
+    await deployWithGlobalProfile(['--dry-run', '--json'], deviceContext('win32'));
+    expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0][0]))).toEqual(
+      expect.objectContaining({
+        schemaVersion: 3,
+        operation: 'deploy',
+        scope: 'global',
+        targetRoot: homeDir,
+        profileIds: ['global'],
+        profilesRevision: expect.any(String),
+        catalogRevision: expect.any(String),
+        assetIds: expect.any(Array),
+      }),
+    );
   });
 });

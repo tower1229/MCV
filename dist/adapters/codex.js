@@ -1,8 +1,11 @@
 import * as path from 'path';
+import { parseAssetId } from '../assets/ids.js';
+import { toCanonicalDeploySource } from '../assets/selected-repository-view.js';
+import { atomicWriteFile } from '../utils/files.js';
 import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObject } from '../utils/structured-config.js';
 import { hasExecutable } from './adapter-utils.js';
 import { CodexCanonicalTransformer } from './codex-canonical-transformer.js';
-import { CodexNativeFileHandler } from './codex-native-file-handler.js';
+import { CodexNativeFileHandler, projectCodexNativeUserSettings } from './codex-native-file-handler.js';
 import { CODEX_MANAGED_PATHS } from './overlay-policies.js';
 export class CodexAdapter {
     nativeFileHandler;
@@ -34,17 +37,33 @@ export class CodexAdapter {
     async capture(files, context) {
         return this.canonicalTransformer.transform(await this.nativeFileHandler.capture(files, context), context);
     }
-    async deploy(repositoryPath, context) {
-        const [nativeOperation, canonicalSource] = await Promise.all([
-            this.nativeFileHandler.deploy(repositoryPath, context),
-            this.nativeFileHandler.readCanonical(repositoryPath, context),
+    async project(source, request, context) {
+        const write = (file) => atomicWriteFile(file.targetPath, file.content);
+        if (request.scope === 'project') {
+            return { files: [], write };
+        }
+        const canonicalSource = toCanonicalDeploySource(source);
+        const [nativeFiles, canonicalFiles] = await Promise.all([
+            Promise.resolve(this.projectNativeAssets(source.nativeAssets, context)),
+            this.canonicalTransformer.deploy(canonicalSource, context),
         ]);
-        const canonicalFiles = await this.canonicalTransformer.deploy(canonicalSource, context);
         const configPath = path.join(context.env.CODEX_HOME || path.join(context.homeDir, '.codex'), 'config.toml');
         return {
-            files: this.mergeConfig(nativeOperation.files, canonicalFiles, configPath),
-            write: nativeOperation.write,
+            files: this.mergeConfig(nativeFiles, canonicalFiles, configPath),
+            write,
         };
+    }
+    projectNativeAssets(nativeAssets, context) {
+        const files = [];
+        for (const [assetId, content] of nativeAssets) {
+            const parsed = parseAssetId(assetId);
+            if (parsed.type !== 'native' || parsed.target !== 'codex')
+                continue;
+            const file = projectCodexNativeUserSettings(content, context);
+            if (file)
+                files.push(file);
+        }
+        return files;
     }
     mergeConfig(nativeFiles, canonicalFiles, configPath) {
         const native = nativeFiles.find((file) => file.targetPath === configPath);

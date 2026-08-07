@@ -164,33 +164,19 @@ export class ClaudeCodeNativeFileHandler implements NativeFileHandler {
   ): Promise<DeployOperation> {
     const mappings = [
       {
+        fileId: 'user-settings',
         sourcePath: repositoryFileForPlatform(repositoryPath, 'ide/claude-code/native/settings.json', context),
-        targetPath: path.join(this.root(context), 'settings.json'),
-        localPaths: JSON_CAPTURE_POLICIES['user-settings'].localPaths,
       },
       {
+        fileId: 'user-state',
         sourcePath: repositoryFileForPlatform(repositoryPath, 'ide/claude-code/native/.claude.json', context),
-        targetPath: path.join(context.homeDir, '.claude.json'),
-        localPaths: JSON_CAPTURE_POLICIES['user-state'].localPaths,
       },
-    ];
+    ] as const;
 
-    const files = mappings.flatMap((mapping) => {
-      if (!fs.existsSync(mapping.sourcePath)) return [];
-      const parsed = JSON.parse(fs.readFileSync(mapping.sourcePath, 'utf8')) as unknown;
-      if (!isRecord(parsed)) {
-        throw new Error(`${mapping.sourcePath} must contain a JSON object.`);
-      }
-      const resolved = resolvePortableValue(
-        parsed,
-        context.variables ?? {},
-        context.platform,
-      ) as Record<string, unknown>;
-      for (const localPath of mapping.localPaths) deleteObjectPath(resolved, localPath);
-      return [{
-        targetPath: mapping.targetPath,
-        content: `${JSON.stringify(resolved, null, 2)}\n`,
-      }];
+    const files = mappings.flatMap(({ fileId, sourcePath }) => {
+      if (!fs.existsSync(sourcePath)) return [];
+      const file = projectClaudeCodeNativeAsset(fileId, fs.readFileSync(sourcePath), context);
+      return file ? [file] : [];
     });
     return {
       files,
@@ -245,4 +231,31 @@ export class ClaudeCodeNativeFileHandler implements NativeFileHandler {
     }
   }
 
+}
+
+export function projectClaudeCodeNativeAsset(
+  fileId: string,
+  content: Buffer,
+  context: DeviceContext,
+): DeployFile | undefined {
+  const policy = JSON_CAPTURE_POLICIES[fileId];
+  if (!policy) return undefined;
+  const configRoot = context.env?.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude');
+  const targetPath = fileId === 'user-state'
+    ? path.join(context.homeDir, '.claude.json')
+    : path.join(configRoot, 'settings.json');
+  const parsed = JSON.parse(content.toString('utf8')) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error(`native:claude-code/${fileId} must contain a JSON object.`);
+  }
+  const resolved = resolvePortableValue(
+    parsed,
+    context.variables ?? {},
+    context.platform,
+  ) as Record<string, unknown>;
+  for (const localPath of policy.localPaths) deleteObjectPath(resolved, localPath);
+  return {
+    targetPath,
+    content: `${JSON.stringify(resolved, null, 2)}\n`,
+  };
 }

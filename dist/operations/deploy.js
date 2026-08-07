@@ -5,6 +5,10 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { createAdapterDefinitions } from '../adapters/index.js';
 import { CLAUDE_CODE_MCP_PATH, CODEX_MCP_PATH, GEMINI_MCP_PATH, } from '../adapters/overlay-policies.js';
+import { deployContextFieldsFromRequest, } from '../assets/deploy-request.js';
+import { buildSelectedRepositoryView } from '../assets/selected-repository-view.js';
+import { GLOBAL_PROFILE_ID } from '../profiles/contracts.js';
+import { resolveProfiles } from '../profiles/resolver.js';
 import { atomicWriteFile, findSymbolicLinkAncestor, hashDirectoryTree, hashFile, } from '../utils/files.js';
 import { isRecord } from '../utils/objects.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
@@ -16,14 +20,39 @@ import { findLegacyCodexSkillDuplicates } from '../utils/deploy-skills.js';
 import { classifyCanonicalSkillLinks, canonicalDeviceSkillStoreRoot, canonicalSkillTargetKey, canonicalSkillPackageName, deployPathExists, hashDeviceTopologyNode, isPathWithinRoot, planCanonicalSkillDeviceLayout, } from '../core/canonical-skill-device-layout.js';
 import { ideForSkillSurface } from '../core/skill-surfaces.js';
 import { OPERATION_SCHEMA_VERSION, } from './contracts.js';
+/**
+ * Checkpoint for #54/#55/#57: project-scope writers are intentionally deferred.
+ * When those land, remove the empty-projection short-circuit in buildDeployPlan
+ * and re-verify `mcv deploy <profile>` writes Rules/Skills/MCP under targetRoot.
+ */
+export const PROJECT_PROJECTION_PENDING_CODE = 'deploy.projectProjectionPending';
+export function buildDeployRequest(repositoryPath, input) {
+    const profileIds = input.profileIds.length > 0
+        ? [...input.profileIds]
+        : [GLOBAL_PROFILE_ID];
+    const resolved = resolveProfiles(repositoryPath, profileIds, input.scope);
+    if (resolved.status === 'failed') {
+        return { error: resolved.error, issues: resolved.issues };
+    }
+    return {
+        request: {
+            scope: input.scope,
+            targetRoot: input.targetRoot,
+            profileIds,
+            selection: resolved.selection,
+        },
+        issues: resolved.issues,
+    };
+}
 const activeDeployPlans = new WeakMap();
-export async function createDeployPlan(context) {
+export async function createDeployPlan(context, request) {
     const operationId = uuidv4();
+    const contextFields = deployContextFieldsFromRequest(request);
     let repositoryPath = null;
     try {
         repositoryPath = resolveBoundRepository(context);
         const mutations = new Map();
-        const plan = await buildDeployPlan(context, repositoryPath, operationId, mutations);
+        const plan = await buildDeployPlan(context, repositoryPath, operationId, mutations, request);
         registerDeployPlan(plan, mutations);
         return plan;
     }
@@ -52,10 +81,44 @@ export async function createDeployPlan(context) {
                 technicalDetails: errorMessage(error),
                 nextActions: ['Fix the Repository or IDE configuration problem, then regenerate the Deploy Plan.'],
             },
+            ...contextFields,
         });
     }
 }
-async function buildDeployPlan(context, repositoryPath, operationId, mutations) {
+async function buildDeployPlan(context, repositoryPath, operationId, mutations, request) {
+    const contextFields = deployContextFieldsFromRequest(request);
+    const resolved = resolveProfiles(repositoryPath, request.profileIds, request.scope);
+    if (resolved.status === 'failed') {
+        return {
+            schemaVersion: OPERATION_SCHEMA_VERSION,
+            operation: 'deploy',
+            status: 'failed',
+            readyToApply: false,
+            operationId,
+            preconditions: {},
+            repositoryPath,
+            changes: [],
+            linkOutcomes: [],
+            linkFacts: [],
+            decisions: [],
+            issues: [{
+                    severity: 'error',
+                    code: resolved.error.code,
+                    message: resolved.error.message,
+                }],
+            nextActions: resolved.error.nextActions,
+            error: resolved.error,
+            ...contextFields,
+        };
+    }
+    const selectionIssues = [...resolved.issues];
+    // Prefer freshly resolved selection (revisions recomputed) over the caller's copy.
+    const activeRequest = {
+        ...request,
+        selection: resolved.selection,
+        profileIds: [...resolved.selection.profileIds],
+    };
+    const activeFields = deployContextFieldsFromRequest(activeRequest);
     const manifest = readManifest(repositoryPath);
     const definitions = createAdapterDefinitions().filter(({ targetId }) => manifest.targets[targetId]?.enabled === true);
     if (definitions.length === 0) {
@@ -71,33 +134,51 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
             linkOutcomes: [],
             linkFacts: [],
             decisions: [],
-            issues: [{
+            issues: [
+                ...selectionIssues,
+                {
                     severity: 'notice',
                     code: 'deploy.noEnabledTargets',
                     message: 'No IDE targets are enabled in this Repository.',
-                }],
+                },
+            ],
             nextActions: ['Enable at least one IDE target in mcv.yaml before deploying configuration.'],
+            ...activeFields,
         };
     }
     const deployContext = {
         ...context,
         variables: resolveManifestVariables(manifest.variables, context, repositoryPath),
     };
-    const desired = (await Promise.all(definitions.map(async (definition) => {
-        const operation = await definition.adapter.deploy(repositoryPath, deployContext);
-        return operation.files.flatMap((file) => {
-            const semantics = inferDeploymentSemantics(file.targetPath, definition.targetId, repositoryPath, context);
-            return semantics.capabilities.map((capability) => ({
-                ...file,
-                owner: 'ide',
-                ide: ideName(definition.targetId),
-                capability,
-                strategy: semantics.strategy,
-                deploymentKind: capability === 'skills' ? 'copy-projection' : 'ordinary-file',
-            }));
-        });
-    }))).flat();
-    const issues = [];
+    let desired = [];
+    if (activeRequest.scope === 'project') {
+        // #54/#55/#57: project writers not active yet — structure + notice only.
+        if (activeRequest.selection.assetIds.length > 0) {
+            selectionIssues.push({
+                severity: 'notice',
+                code: PROJECT_PROJECTION_PENDING_CODE,
+                message: 'Project-scope Rules, Skills, and MCP projection is not active yet; Deploy Plan is empty until those writers land.',
+            });
+        }
+    }
+    else {
+        const selectedView = buildSelectedRepositoryView(repositoryPath, activeRequest.selection, deployContext);
+        desired = (await Promise.all(definitions.map(async (definition) => {
+            const operation = await definition.adapter.project(selectedView, activeRequest, deployContext);
+            return operation.files.flatMap((file) => {
+                const semantics = inferDeploymentSemantics(file.targetPath, definition.targetId, repositoryPath, context);
+                return semantics.capabilities.map((capability) => ({
+                    ...file,
+                    owner: 'ide',
+                    ide: ideName(definition.targetId),
+                    capability,
+                    strategy: semantics.strategy,
+                    deploymentKind: capability === 'skills' ? 'copy-projection' : 'ordinary-file',
+                }));
+            });
+        }))).flat();
+    }
+    const issues = [...selectionIssues];
     const linkOutcomes = [];
     const linkFacts = [];
     const layout = planCanonicalSkillLayout(desired, context, manifest.deploy.useSymlinks, mutations, issues, definitions);
@@ -321,6 +402,7 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations) 
         nextActions: blocked
             ? ['Resolve every decisionRequired or error Issue, then regenerate the Deploy Plan.']
             : [],
+        ...activeFields,
     };
 }
 function planCanonicalSkillLayout(desired, context, useSymlinks, mutations, issues, definitions) {
@@ -572,19 +654,24 @@ export async function applyDeployPlan(context, plan, selection, options = {}) {
         return blockedDeployResult(plan, blocking);
     if (!plan.repositoryPath || resolveBoundRepository(context) !== plan.repositoryPath) {
         activeDeployPlans.delete(plan);
-        return failedDeployResult(plan.repositoryPath, stalePlanError());
+        return failedDeployResult(plan.repositoryPath, stalePlanError(), undefined, deployContextFromPlan(plan));
     }
     let freshPlan;
     try {
-        freshPlan = await buildDeployPlan(context, plan.repositoryPath, plan.operationId, new Map());
+        freshPlan = await buildDeployPlan(context, plan.repositoryPath, plan.operationId, new Map(), deployRequestFromPlan(plan));
     }
     catch {
         activeDeployPlans.delete(plan);
-        return failedDeployResult(plan.repositoryPath, stalePlanError());
+        return failedDeployResult(plan.repositoryPath, stalePlanError(), undefined, deployContextFromPlan(plan));
+    }
+    if (plan.profilesRevision !== freshPlan.profilesRevision
+        || plan.catalogRevision !== freshPlan.catalogRevision) {
+        activeDeployPlans.delete(plan);
+        return failedDeployResult(plan.repositoryPath, stalePlanError(), undefined, deployContextFromPlan(plan));
     }
     if (!sameDeploySnapshot(plan, freshPlan)) {
         activeDeployPlans.delete(plan);
-        return failedDeployResult(plan.repositoryPath, stalePlanError());
+        return failedDeployResult(plan.repositoryPath, stalePlanError(), undefined, deployContextFromPlan(plan));
     }
     const selectedChanges = plan.changes.filter((change) => selected.has(change.id));
     const prepared = prepareDeployWrites(selectedChanges, active.mutations);
@@ -613,6 +700,12 @@ export async function applyDeployPlan(context, plan, selection, options = {}) {
             data: { appliedChangeIds: [], writtenPaths: [], deletedPaths: [] },
             linkOutcomes: plan.linkOutcomes,
             linkFacts: plan.linkFacts,
+            scope: plan.scope,
+            targetRoot: plan.targetRoot,
+            profileIds: plan.profileIds,
+            profilesRevision: plan.profilesRevision,
+            catalogRevision: plan.catalogRevision,
+            assetIds: plan.assetIds,
         };
     }
     let backupPath;
@@ -656,13 +749,19 @@ export async function applyDeployPlan(context, plan, selection, options = {}) {
             },
             linkOutcomes: plan.linkOutcomes,
             linkFacts: plan.linkFacts,
+            scope: plan.scope,
+            targetRoot: plan.targetRoot,
+            profileIds: plan.profileIds,
+            profilesRevision: plan.profilesRevision,
+            catalogRevision: plan.catalogRevision,
+            assetIds: plan.assetIds,
         };
     }
     catch (error) {
         activeDeployPlans.delete(plan);
         markDeployBackupFailed(backupPath, error);
         if (error instanceof StaleDeployPlanError) {
-            return failedDeployResult(plan.repositoryPath, stalePlanError(error.message));
+            return failedDeployResult(plan.repositoryPath, stalePlanError(error.message), undefined, deployContextFromPlan(plan));
         }
         if (error instanceof DeployRollbackError) {
             return failedDeployResult(plan.repositoryPath, {
@@ -670,14 +769,14 @@ export async function applyDeployPlan(context, plan, selection, options = {}) {
                 message: 'Deploy failed and could not fully restore the selected device configuration.',
                 technicalDetails: error.message,
                 nextActions: [`Restore the affected files from ${backupPath}, then generate a new Deploy Plan.`],
-            });
+            }, undefined, deployContextFromPlan(plan));
         }
         return failedDeployResult(plan.repositoryPath, {
             code: 'deploy.transactionFailed',
             message: 'Deploy could not commit the selected changes and restored the device configuration.',
             technicalDetails: errorMessage(error),
             nextActions: ['Check target permissions, then generate and review a new Deploy Plan.'],
-        });
+        }, undefined, deployContextFromPlan(plan));
     }
 }
 function deployBlockingIssues(plan, selection, options) {
@@ -701,6 +800,12 @@ function deployBlockingIssues(plan, selection, options) {
 }
 function sameDeploySnapshot(left, right) {
     return left.repositoryPath === right.repositoryPath
+        && left.scope === right.scope
+        && left.targetRoot === right.targetRoot
+        && stableValue(left.profileIds) === stableValue(right.profileIds)
+        && left.profilesRevision === right.profilesRevision
+        && left.catalogRevision === right.catalogRevision
+        && stableValue(left.assetIds) === stableValue(right.assetIds)
         && stableValue(left.preconditions) === stableValue(right.preconditions)
         && stableValue(left.changes.map(deploySnapshotChange))
             === stableValue(right.changes.map(deploySnapshotChange))
@@ -709,6 +814,19 @@ function sameDeploySnapshot(left, right) {
         && stableValue(left.decisions) === stableValue(right.decisions)
         && stableValue(left.issues.map((issue) => [issue.severity, issue.code, issue.confirmationId, issue.decisionId]))
             === stableValue(right.issues.map((issue) => [issue.severity, issue.code, issue.confirmationId, issue.decisionId]));
+}
+function deployRequestFromPlan(plan) {
+    return {
+        scope: plan.scope,
+        targetRoot: plan.targetRoot,
+        profileIds: [...plan.profileIds],
+        selection: {
+            profileIds: [...plan.profileIds],
+            profilesRevision: plan.profilesRevision,
+            catalogRevision: plan.catalogRevision,
+            assetIds: [...plan.assetIds],
+        },
+    };
 }
 function deploySnapshotChange(change) {
     return {
@@ -1180,7 +1298,10 @@ function stalePlanError(technicalDetails) {
         nextActions: ['Generate and review a new Deploy Plan.'],
     };
 }
-function failedDeployResult(repositoryPath, error, issues = [{ severity: 'error', code: error.code, message: error.message }]) {
+function deployContextFromPlan(plan) {
+    return deployContextFieldsFromRequest(deployRequestFromPlan(plan));
+}
+function failedDeployResult(repositoryPath, error, issues = [{ severity: 'error', code: error.code, message: error.message }], context) {
     return {
         schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'deploy',
@@ -1190,6 +1311,7 @@ function failedDeployResult(repositoryPath, error, issues = [{ severity: 'error'
         issues,
         nextActions: error.nextActions,
         error,
+        ...context,
     };
 }
 function blockedDeployResult(plan, issues) {
@@ -1205,6 +1327,12 @@ function blockedDeployResult(plan, issues) {
         nextActions: issues.some((issue) => issue.severity === 'warning')
             ? ['Confirm every warning explicitly before applying the Deploy Plan.']
             : ['Review and resolve the Deploy Plan interactively before applying it.'],
+        scope: plan.scope,
+        targetRoot: plan.targetRoot,
+        profileIds: plan.profileIds,
+        profilesRevision: plan.profilesRevision,
+        catalogRevision: plan.catalogRevision,
+        assetIds: plan.assetIds,
     };
 }
 function freezeDeployPlan(plan) {

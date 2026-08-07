@@ -1,4 +1,4 @@
-export const OPERATION_SCHEMA_VERSION = 2 as const;
+export const OPERATION_SCHEMA_VERSION = 3 as const;
 
 export type OperationName =
   | 'discover'

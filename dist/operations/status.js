@@ -3,7 +3,7 @@ import { deployPathExists, hashDeviceTopologyNode, } from '../core/canonical-ski
 import { inspectManagedSkillDrift, isPathCoveredByManagedSkillLayout, } from '../core/managed-skill-layout.js';
 import { readManifest, resolveBoundRepository, } from '../utils/repository.js';
 import { readState } from '../utils/state.js';
-import { createDeployPlan, } from './deploy.js';
+import { createGlobalDeployPlan, } from './deploy-request-helpers.js';
 import { OPERATION_SCHEMA_VERSION, } from './contracts.js';
 import { inspectEnvironment, } from './environment.js';
 import { inspectRepository, } from './repository.js';
@@ -15,7 +15,7 @@ export async function inspectStatus(context) {
         throw new Error('Bound repository ID does not match local state. Run `mcv bind <path>` again.');
     }
     const [deployPlan, environmentReport] = await Promise.all([
-        createDeployPlan(context),
+        createGlobalDeployPlan(context),
         inspectEnvironment(context, repositoryPath),
     ]);
     const repositoryReport = inspectRepository(context, repositoryPath);

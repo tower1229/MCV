@@ -23,10 +23,10 @@ import {
 } from '../operations/status.js';
 import {
   applyDeployPlan,
-  createDeployPlan,
   type DeployPlan,
   type DeployResult,
 } from '../operations/deploy.js';
+import { createGlobalDeployPlan } from '../operations/deploy-request-helpers.js';
 import {
   applyRestorePlan,
   createRestorePlan,
@@ -283,7 +283,7 @@ function Shell({ context, initialRoute, dependencies }: ShellProps) {
     ) return;
 
     let active = true;
-    void (dependencies.createDeployPlan ?? createDeployPlan)(context).then(
+    void (dependencies.createDeployPlan ?? createGlobalDeployPlan)(context).then(
       (plan) => {
         if (active) {
           dispatch({
@@ -1057,7 +1057,7 @@ function loadRoute(
     return (dependencies.inspectEnvironment ?? inspectEnvironment)(context);
   }
   if (route === 'deploy') {
-    return (dependencies.createDeployPlan ?? createDeployPlan)(context);
+    return (dependencies.createDeployPlan ?? createGlobalDeployPlan)(context);
   }
   if (route === 'restore') {
     return Promise.resolve(

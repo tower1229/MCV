@@ -1,8 +1,11 @@
 import * as path from 'path';
+import { parseAssetId } from '../assets/ids.js';
+import { toCanonicalDeploySource } from '../assets/selected-repository-view.js';
+import { atomicWriteFile } from '../utils/files.js';
 import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObject } from '../utils/structured-config.js';
 import { hasExecutable } from './adapter-utils.js';
 import { GeminiCanonicalTransformer } from './gemini-canonical-transformer.js';
-import { GeminiNativeFileHandler } from './gemini-native-file-handler.js';
+import { GeminiNativeFileHandler, projectGeminiNativeAsset } from './gemini-native-file-handler.js';
 import { GEMINI_MANAGED_PATHS } from './overlay-policies.js';
 export class GeminiAdapter {
     nativeFileHandler;
@@ -40,18 +43,34 @@ export class GeminiAdapter {
     async capture(files, context) {
         return this.canonicalTransformer.transform(await this.nativeFileHandler.capture(files, context), context);
     }
-    async deploy(repositoryPath, context) {
-        const [nativeOperation, canonicalSource] = await Promise.all([
-            this.nativeFileHandler.deploy(repositoryPath, context),
-            this.nativeFileHandler.readCanonical(repositoryPath, context),
+    async project(source, request, context) {
+        const write = (file) => atomicWriteFile(file.targetPath, file.content);
+        if (request.scope === 'project') {
+            return { files: [], write };
+        }
+        const canonicalSource = toCanonicalDeploySource(source);
+        const [nativeFiles, canonicalFiles] = await Promise.all([
+            Promise.resolve(this.projectNativeAssets(source.nativeAssets, context)),
+            this.canonicalTransformer.deploy(canonicalSource, context),
         ]);
-        const canonicalFiles = await this.canonicalTransformer.deploy(canonicalSource, context);
         const settingsPath = path.join(context.homeDir, '.gemini', 'settings.json');
         const antigravityMcpPath = path.join(context.homeDir, '.gemini', 'config', 'mcp_config.json');
         return {
-            files: this.mergeSettings(this.mergeSettings(nativeOperation.files, canonicalFiles, settingsPath), [], antigravityMcpPath),
-            write: nativeOperation.write,
+            files: this.mergeSettings(this.mergeSettings(nativeFiles, canonicalFiles, settingsPath), [], antigravityMcpPath),
+            write,
         };
+    }
+    projectNativeAssets(nativeAssets, context) {
+        const files = [];
+        for (const [assetId, content] of nativeAssets) {
+            const parsed = parseAssetId(assetId);
+            if (parsed.type !== 'native' || parsed.target !== 'gemini')
+                continue;
+            const file = projectGeminiNativeAsset(parsed.fileId, content, context);
+            if (file)
+                files.push(file);
+        }
+        return files;
     }
     mergeSettings(nativeFiles, canonicalFiles, settingsPath) {
         const native = nativeFiles.find((file) => file.targetPath === settingsPath);

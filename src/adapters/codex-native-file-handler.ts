@@ -113,18 +113,10 @@ export class CodexNativeFileHandler implements NativeFileHandler {
     context: DeviceContext,
   ): Promise<DeployOperation> {
     const sourcePath = repositoryFileForPlatform(repositoryPath, 'ide/codex/native/config.toml', context);
-    const targetPath = path.join(this.root(context), 'config.toml');
     const files: DeployFile[] = [];
     if (fs.existsSync(sourcePath)) {
-      const parsed = parseStructuredObject(fs.readFileSync(sourcePath, 'utf8'), 'toml', sourcePath);
-      const resolved = resolvePortableValue(
-        parsed,
-        context.variables ?? {},
-        context.platform,
-      ) as Record<string, unknown>;
-      for (const localPath of LOCAL_PATHS) deleteObjectPath(resolved, localPath);
-      removeCodexRuntimeFields(resolved);
-      files.push({ targetPath, content: stringifyStructuredObject(resolved, 'toml') });
+      const file = projectCodexNativeUserSettings(fs.readFileSync(sourcePath), context);
+      if (file) files.push(file);
     }
     return { files, write: (file) => atomicWriteFile(file.targetPath, file.content) };
   }
@@ -139,6 +131,25 @@ export class CodexNativeFileHandler implements NativeFileHandler {
   readDeployTarget(targetPath: string): DeployFile | undefined {
     return readDeployTarget(targetPath);
   }
+}
+
+export function projectCodexNativeUserSettings(
+  content: Buffer,
+  context: DeviceContext,
+): DeployFile | undefined {
+  const targetPath = path.join(
+    context.env?.CODEX_HOME || path.join(context.homeDir, '.codex'),
+    'config.toml',
+  );
+  const parsed = parseStructuredObject(content.toString('utf8'), 'toml', 'native:codex/user-settings');
+  const resolved = resolvePortableValue(
+    parsed,
+    context.variables ?? {},
+    context.platform,
+  ) as Record<string, unknown>;
+  for (const localPath of LOCAL_PATHS) deleteObjectPath(resolved, localPath);
+  removeCodexRuntimeFields(resolved);
+  return { targetPath, content: stringifyStructuredObject(resolved, 'toml') };
 }
 
 function removeCodexRuntimeFields(value: Record<string, unknown>): void {

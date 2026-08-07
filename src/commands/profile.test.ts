@@ -80,7 +80,7 @@ describe('mcv profile', () => {
     expect(console.log).toHaveBeenCalledOnce();
     const report = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(report).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'profile',
       command: 'list',
       status: 'reported',
@@ -317,7 +317,7 @@ describe('mcv profile', () => {
   function writeDeviceState(): void {
     fs.mkdirSync(path.join(stateRoot, 'mcv'), { recursive: true });
     fs.writeFileSync(path.join(stateRoot, 'mcv', 'config.json'), JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       defaultRepositoryId: 'repository-id',
       repositoryPath,
     }));

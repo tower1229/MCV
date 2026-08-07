@@ -25,7 +25,7 @@ describe('device state compatibility', () => {
     const antigravityPath = path.join(context.homeDir, '.gemini', 'config', 'skills', 'review');
     fs.mkdirSync(path.dirname(statePath), { recursive: true });
     fs.writeFileSync(statePath, JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       managedSkillLayout: {
         packages: {},
         projections: {

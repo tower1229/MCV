@@ -5,6 +5,7 @@ import * as path from 'path';
 import { spawn, spawnSync } from 'child_process';
 import { describe, expect, it } from 'vitest';
 import { writeProfilesDocument } from './profiles/store.js';
+import { seedGlobalProfileWithCatalog } from './operations/deploy-request-helpers.js';
 
 const cliPath = path.join(process.cwd(), 'dist', 'index.js');
 const packagePath = path.join(process.cwd(), 'package.json');
@@ -71,7 +72,7 @@ describe('packaged mcv CLI', () => {
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
     expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'discover',
       status: 'reported',
       ready: true,
@@ -113,7 +114,7 @@ describe('packaged mcv CLI', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'repository',
         status: 'reported',
         ready: false,
@@ -147,7 +148,7 @@ describe('packaged mcv CLI', () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'bind',
         status: 'failed',
         repositoryPath: invalidRepository,
@@ -177,6 +178,7 @@ describe('packaged mcv CLI', () => {
       'variables: {}',
       '',
     ].join('\n'));
+    seedGlobalProfileWithCatalog(repositoryPath);
     const invoke = (...args: string[]) => spawnSync(
       process.execPath,
       [cliPath, ...args],
@@ -336,7 +338,7 @@ describe('packaged mcv CLI', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'init',
         status: 'planned',
         readyToApply: true,
@@ -375,7 +377,7 @@ describe('packaged mcv CLI', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'migrate',
         status: 'succeeded',
         repositoryPath: resolvedRepositoryPath,
@@ -435,7 +437,7 @@ describe('packaged mcv CLI', () => {
       ).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'capture',
         status: 'planned',
         repositoryPath: resolvedRepositoryPath,
@@ -492,10 +494,11 @@ describe('packaged mcv CLI', () => {
       '',
     ].join('\n'));
     fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Process rules\n');
+    seedGlobalProfileWithCatalog(repositoryPath);
     try {
       const result = spawnSync(
         process.execPath,
-        [cliPath, 'deploy', '--dry-run', '--json'],
+        [cliPath, 'deploy', '--global', '--dry-run', '--json'],
         {
           cwd: repositoryPath,
           encoding: 'utf8',
@@ -506,7 +509,7 @@ describe('packaged mcv CLI', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'deploy',
         status: 'planned',
         repositoryPath,
@@ -521,7 +524,7 @@ describe('packaged mcv CLI', () => {
 
       const applyResult = spawnSync(
         process.execPath,
-        [cliPath, 'deploy', '--yes', '--json'],
+        [cliPath, 'deploy', '--global', '--yes', '--json'],
         {
           cwd: repositoryPath,
           encoding: 'utf8',
@@ -568,10 +571,11 @@ describe('packaged mcv CLI', () => {
     fs.writeFileSync(sourceSkill, '# Review\n');
     fs.writeFileSync(externalSkill, '# Review\n');
     fs.symlinkSync(externalRoot, linkedRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    seedGlobalProfileWithCatalog(repositoryPath);
     try {
       const planResult = spawnSync(
         process.execPath,
-        [cliPath, 'deploy', '--dry-run', '--json'],
+        [cliPath, 'deploy', '--global', '--dry-run', '--json'],
         {
           cwd: repositoryPath,
           encoding: 'utf8',
@@ -606,7 +610,7 @@ describe('packaged mcv CLI', () => {
 
       const applyResult = spawnSync(
         process.execPath,
-        [cliPath, 'deploy', '--yes', '--json'],
+        [cliPath, 'deploy', '--global', '--yes', '--json'],
         {
           cwd: repositoryPath,
           encoding: 'utf8',
@@ -649,10 +653,11 @@ describe('packaged mcv CLI', () => {
         '',
       ].join('\n'));
       fs.writeFileSync(sourceSkill, '# Review\n');
+      seedGlobalProfileWithCatalog(repositoryPath);
       try {
         const planResult = spawnSync(
           process.execPath,
-          [cliPath, 'deploy', '--dry-run', '--json'],
+          [cliPath, 'deploy', '--global', '--dry-run', '--json'],
           {
             cwd: repositoryPath,
             encoding: 'utf8',
@@ -675,7 +680,7 @@ describe('packaged mcv CLI', () => {
 
         const applyResult = spawnSync(
           process.execPath,
-          [cliPath, 'deploy', '--yes', '--json'],
+          [cliPath, 'deploy', '--global', '--yes', '--json'],
           {
             cwd: repositoryPath,
             encoding: 'utf8',
@@ -692,7 +697,7 @@ describe('packaged mcv CLI', () => {
 
         const satisfiedResult = spawnSync(
           process.execPath,
-          [cliPath, 'deploy', '--yes', '--json'],
+          [cliPath, 'deploy', '--global', '--yes', '--json'],
           {
             cwd: repositoryPath,
             encoding: 'utf8',
@@ -745,7 +750,7 @@ describe('packaged mcv CLI', () => {
       '',
     ].join('\n'));
     fs.writeFileSync(path.join(stateRoot, 'config.json'), `${JSON.stringify({
-      schemaVersion: 2,
+      schemaVersion: 3,
       repositoryPath,
       defaultRepositoryId: 'restore-interrupt-id',
     }, null, 2)}\n`);
@@ -775,7 +780,7 @@ describe('packaged mcv CLI', () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 2,
+        schemaVersion: 3,
         operation: 'restore',
         status: 'planned',
         readyToApply: true,

@@ -61,7 +61,7 @@ describe('mcv capture', () => {
     expect(console.log).toHaveBeenCalledOnce();
     const plan = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(plan).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'capture',
       status: 'planned',
       readyToApply: true,
@@ -106,7 +106,7 @@ describe('mcv capture', () => {
     expect(console.log).toHaveBeenCalledOnce();
     const result = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(result).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       operation: 'capture',
       status: 'succeeded',
       data: {

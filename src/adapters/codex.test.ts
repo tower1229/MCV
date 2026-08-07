@@ -3,6 +3,8 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse as parseToml } from 'smol-toml';
 import { parse as parseYaml } from 'yaml';
+import type { DeployRequest } from '../assets/deploy-request.js';
+import type { SelectedRepositoryView } from '../assets/selected-repository-view.js';
 import { CodexAdapter } from './codex.js';
 
 describe('CodexAdapter', () => {
@@ -74,4 +76,47 @@ describe('CodexAdapter', () => {
       content: '# Rules\n',
     }));
   });
+
+  it('returns no files for project scope', async () => {
+    const adapter = new CodexAdapter();
+    const context = { homeDir, platform: 'darwin' as const, env: {} };
+    const operation = await adapter.project(emptyView(), projectRequest(), context);
+    expect(operation.files).toEqual([]);
+  });
+
+  it('projects selected native config for global scope', async () => {
+    const codexRoot = path.join(homeDir, '.codex');
+    fs.mkdirSync(codexRoot);
+    fs.writeFileSync(path.join(codexRoot, 'config.toml'), 'model = "local"\n');
+    const adapter = new CodexAdapter();
+    const context = { homeDir, platform: 'darwin' as const, env: {} };
+    const view: SelectedRepositoryView = {
+      skills: [],
+      mcpServers: {},
+      mcpOverrides: {},
+      nativeAssets: new Map([
+        ['native:codex/user-settings', Buffer.from('model = "repo"\n')],
+      ]),
+    };
+    const operation = await adapter.project(view, globalRequest(homeDir), context);
+    const config = operation.files.find((file) => file.targetPath === path.join(codexRoot, 'config.toml'));
+    expect(parseToml(config?.content.toString() ?? '')).toEqual({ model: 'repo' });
+  });
 });
+
+function emptyView(): SelectedRepositoryView {
+  return { skills: [], mcpServers: {}, mcpOverrides: {}, nativeAssets: new Map() };
+}
+
+function projectRequest(): DeployRequest {
+  return {
+    scope: 'project',
+    targetRoot: '/tmp/project',
+    profileIds: [],
+    selection: { profileIds: [], profilesRevision: '', catalogRevision: '', assetIds: [] },
+  };
+}
+
+function globalRequest(targetRoot: string): DeployRequest {
+  return { ...projectRequest(), scope: 'global', targetRoot };
+}
