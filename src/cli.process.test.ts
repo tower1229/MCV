@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn, spawnSync } from 'child_process';
 import { describe, expect, it } from 'vitest';
+import { writeProfilesDocument } from './profiles/store.js';
 
 const cliPath = path.join(process.cwd(), 'dist', 'index.js');
 const packagePath = path.join(process.cwd(), 'package.json');
@@ -409,6 +410,10 @@ describe('packaged mcv CLI', () => {
       'variables: {}',
       '',
     ].join('\n'));
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: { global: { assets: [] } },
+    });
     fs.writeFileSync(
       path.join(claudeRoot, 'settings.json'),
       JSON.stringify({ theme: 'dark', apiToken: 'process-secret-must-not-leak' }),

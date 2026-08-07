@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProgram } from '../index.js';
+import { writeProfilesDocument } from '../profiles/store.js';
 import { parse as parseToml } from 'smol-toml';
 
 describe('mcv capture', () => {
@@ -22,6 +23,10 @@ describe('mcv capture', () => {
       path.join(repositoryPath, 'mcv.yaml'),
       'schemaVersion: 4\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  claudeCode:\n    enabled: true\nvariables: {}\n',
     );
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: { global: { assets: [] } },
+    });
     fs.writeFileSync(
       path.join(homeDir, '.claude', 'settings.json'),
       JSON.stringify({ theme: 'dark', apiToken: 'must-not-leak' }),
@@ -104,9 +109,15 @@ describe('mcv capture', () => {
       schemaVersion: 2,
       operation: 'capture',
       status: 'succeeded',
-      data: { appliedChangeIds: [expect.any(String)] },
+      data: {
+        appliedChangeIds: [expect.any(String)],
+        newUnassignedCount: 1,
+        newUnassignedAssetIds: ['native:claude-code/user-settings'],
+      },
       issues: [],
-      nextActions: [],
+      nextActions: [
+        'Classify 1 new Unassigned Asset(s) with an Agent or `mcv profile edit <id> --add ...`, or create a Profile.',
+      ],
     });
   });
 
@@ -120,6 +131,7 @@ describe('mcv capture', () => {
 
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(output).toContain('Captured 1 selected item(s)');
+    expect(output).toContain('New Unassigned: 1 asset(s) (native:claude-code/user-settings).');
     expect(output).not.toContain('Capture Plan:');
   });
 

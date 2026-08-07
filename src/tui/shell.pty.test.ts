@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { writeProfilesDocument } from '../profiles/store.js';
 
 const expectPath = '/usr/bin/expect';
 const cliPath = path.join(process.cwd(), 'dist', 'index.js');
@@ -1056,6 +1057,10 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged TUI Shell in a real PTY', 
       'variables: {}',
       '',
     ].join('\n'));
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: { global: { assets: [] } },
+    });
     return repositoryPath;
   }
 

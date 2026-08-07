@@ -35,7 +35,17 @@ export function renderCapturePlanPlain(plan) {
 }
 export function renderCaptureResultPlain(result) {
     if (result.status === 'succeeded') {
-        return [`Captured ${result.data?.appliedChangeIds.length ?? 0} selected item(s) into ${result.repositoryPath}.`];
+        const lines = [
+            `Captured ${result.data?.appliedChangeIds.length ?? 0} selected item(s) into ${result.repositoryPath}.`,
+        ];
+        const newUnassignedCount = result.data?.newUnassignedCount ?? 0;
+        if (newUnassignedCount > 0) {
+            const ids = result.data?.newUnassignedAssetIds ?? [];
+            lines.push(`New Unassigned: ${newUnassignedCount} asset(s) (${ids.join(', ')}).`);
+        }
+        for (const action of result.nextActions)
+            lines.push(`Next: ${action}`);
+        return lines;
     }
     return [
         ...result.issues.map(renderIssuePlain),

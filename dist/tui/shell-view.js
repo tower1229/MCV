@@ -161,13 +161,22 @@ function scrollablePageLines(state) {
     if (page.route === 'capture') {
         const result = page.workflow.result;
         if (result.status === 'succeeded') {
-            return statusPageLines('capture-success', 'success', [
+            const newUnassignedCount = result.data?.newUnassignedCount ?? 0;
+            const lines = [
                 'Succeeded: Capture completed.',
                 `Applied: ${result.data?.appliedChangeIds.length ?? 0} changes`,
                 `Written: ${result.data?.writtenPaths.length ?? 0} paths`,
                 `Deleted: ${result.data?.deletedPaths.length ?? 0} paths`,
-                ...result.issues.map((issue) => `Warning: ${issue.message}`),
-            ], (index) => index >= 4 ? 'warning' : undefined);
+            ];
+            if (newUnassignedCount > 0) {
+                lines.push(`New Unassigned: ${newUnassignedCount} asset(s) (${(result.data?.newUnassignedAssetIds ?? []).join(', ')}).`);
+            }
+            for (const action of result.nextActions)
+                lines.push(`Next: ${action}`);
+            const warningStart = lines.length;
+            for (const issue of result.issues)
+                lines.push(`Warning: ${issue.message}`);
+            return statusPageLines('capture-success', 'success', lines, (index) => (index >= warningStart ? 'warning' : undefined));
         }
         if (result.status === 'blocked') {
             return statusPageLines('capture-blocked', 'error', [

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { CapturePlan } from '../operations/capture.js';
-import { formatContributingProjections, renderCapturePlanPlain } from './capture.js';
+import type { CapturePlan, CaptureResult } from '../operations/capture.js';
+import {
+  formatContributingProjections,
+  renderCapturePlanPlain,
+  renderCaptureResultPlain,
+} from './capture.js';
 
 describe('Capture plan rendering', () => {
   it('identifies contributing Skill projections without duplicating the package change', () => {
@@ -66,5 +70,34 @@ describe('Capture plan rendering', () => {
     expect(formatContributingProjections(plan.changes[0].contributingProjections!)).toBe(
       'claude-code (managed), codex (physical), gemini-cli (managed)',
     );
+  });
+});
+
+describe('Capture result rendering', () => {
+  it('reports newly Unassigned Assets and the classification next action', () => {
+    const result = {
+      schemaVersion: 2,
+      operation: 'capture',
+      status: 'succeeded',
+      repositoryPath: '/repo',
+      changes: [],
+      issues: [],
+      nextActions: [
+        'Classify 1 new Unassigned Asset(s) with an Agent or `mcv profile edit <id> --add ...`, or create a Profile.',
+      ],
+      data: {
+        appliedChangeIds: ['capture-skill-1'],
+        writtenPaths: ['common/skills/review/SKILL.md'],
+        deletedPaths: [],
+        newUnassignedCount: 1,
+        newUnassignedAssetIds: ['skill:review'],
+      },
+    } satisfies CaptureResult;
+
+    expect(renderCaptureResultPlain(result)).toEqual([
+      'Captured 1 selected item(s) into /repo.',
+      'New Unassigned: 1 asset(s) (skill:review).',
+      'Next: Classify 1 new Unassigned Asset(s) with an Agent or `mcv profile edit <id> --add ...`, or create a Profile.',
+    ]);
   });
 });

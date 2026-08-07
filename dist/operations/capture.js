@@ -5,8 +5,10 @@ import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import * as yaml from 'yaml';
 import { createAdapterDefinitions } from '../adapters/index.js';
+import { assetIdForCaptureChange, findReferencingProfiles, } from '../assets/capture-assets.js';
 import { collectSkills, getSkillSources, } from '../core/skills.js';
 import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
+import { readProfilesDocument } from '../profiles/store.js';
 import { isRecord, mergeRecords } from '../utils/objects.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
 import { readState } from '../utils/state.js';
@@ -125,6 +127,7 @@ async function buildCapturePlan(context, repositoryPath, operationId, mutations)
     addFileChanges(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths, mutations);
     addSkillChanges(repositoryPath, skills.packages, changes, issues, plannedRepositoryPaths, mutations);
     addRepositoryDeletionChanges(repositoryPath, definitions.map(({ targetId }) => targetId), sourcedFiles, skills.packages, changes, issues, plannedRepositoryPaths, mutations);
+    addProfileReferencedDeleteIssues(repositoryPath, changes, issues);
     const rawSourceHash = hashSourcePaths([
         ...captured.flatMap(({ discovered }) => discovered.map((file) => file.path)),
         ...[...skills.packages.values()].flatMap((copies) => copies.flatMap((skill) => [
@@ -208,6 +211,8 @@ export async function applyCapturePlan(context, plan, selection, options = {}) {
     try {
         const applied = applyCaptureTransaction(plan.repositoryPath, selectedMutations, options.moveFile ?? fs.renameSync, options.restoreFile ?? ((targetPath, content) => fs.writeFileSync(targetPath, content)));
         activeCapturePlans.delete(plan);
+        const newUnassignedAssetIds = computeNewUnassignedAssetIds(plan.repositoryPath, selectedChanges);
+        const newUnassignedCount = newUnassignedAssetIds.length;
         return {
             schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'capture',
@@ -215,11 +220,17 @@ export async function applyCapturePlan(context, plan, selection, options = {}) {
             repositoryPath: plan.repositoryPath,
             changes: selectedChanges,
             issues: [],
-            nextActions: [],
+            nextActions: newUnassignedCount > 0
+                ? [
+                    `Classify ${newUnassignedCount} new Unassigned Asset(s) with an Agent or \`mcv profile edit <id> --add ...\`, or create a Profile.`,
+                ]
+                : [],
             data: {
                 appliedChangeIds: selectedIds,
                 writtenPaths: applied.writtenPaths,
                 deletedPaths: applied.deletedPaths,
+                newUnassignedCount,
+                newUnassignedAssetIds,
             },
         };
     }
@@ -283,6 +294,9 @@ function captureBlockingIssues(plan, selected, selection, options) {
     const errors = plan.issues.filter((issue) => issue.severity === 'error');
     if (errors.length > 0)
         return errors;
+    const profileReferencedDeletes = plan.issues.filter((issue) => issue.severity === 'decisionRequired' && issue.code === 'capture.profileReferencedDelete');
+    if (profileReferencedDeletes.length > 0)
+        return profileReferencedDeletes;
     const conflictChanges = plan.changes.filter((change) => change.change === 'conflict');
     const groups = new Map();
     for (const change of conflictChanges) {
@@ -294,6 +308,42 @@ function captureBlockingIssues(plan, selected, selection, options) {
         return plan.issues.filter((issue) => issue.severity === 'decisionRequired');
     }
     return [];
+}
+function addProfileReferencedDeleteIssues(repositoryPath, changes, issues) {
+    const document = readProfilesDocument(repositoryPath);
+    const seen = new Set();
+    for (const change of changes) {
+        if (change.change !== 'delete')
+            continue;
+        const assetId = assetIdForCaptureChange(change);
+        if (!assetId || seen.has(assetId))
+            continue;
+        seen.add(assetId);
+        const profiles = findReferencingProfiles(document, assetId);
+        if (profiles.length === 0)
+            continue;
+        issues.push({
+            severity: 'decisionRequired',
+            code: 'capture.profileReferencedDelete',
+            message: `Asset ${assetId} is still referenced by Profile(s) [${profiles.join(', ')}] and cannot be deleted until those references are removed.`,
+            details: `Profiles: ${profiles.join(', ')}`,
+        });
+    }
+}
+function computeNewUnassignedAssetIds(repositoryPath, changes) {
+    const document = readProfilesDocument(repositoryPath);
+    const ids = new Set();
+    for (const change of changes) {
+        if (change.change !== 'add')
+            continue;
+        const assetId = assetIdForCaptureChange(change);
+        if (!assetId)
+            continue;
+        if (findReferencingProfiles(document, assetId).length > 0)
+            continue;
+        ids.add(assetId);
+    }
+    return [...ids].sort((left, right) => left.localeCompare(right));
 }
 function sameCaptureSnapshot(left, right) {
     return left.repositoryPath === right.repositoryPath

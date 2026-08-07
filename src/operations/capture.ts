@@ -11,12 +11,17 @@ import type {
   DeviceContext,
 } from '../adapters/types.js';
 import {
+  assetIdForCaptureChange,
+  findReferencingProfiles,
+} from '../assets/capture-assets.js';
+import {
   collectSkills,
   getSkillSources,
   type SkillPackage,
   type SkillProjection,
 } from '../core/skills.js';
 import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
+import { readProfilesDocument } from '../profiles/store.js';
 import { isRecord, mergeRecords } from '../utils/objects.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
 import { readState } from '../utils/state.js';
@@ -95,6 +100,8 @@ export interface CaptureResultData {
   appliedChangeIds: string[];
   writtenPaths: string[];
   deletedPaths: string[];
+  newUnassignedCount: number;
+  newUnassignedAssetIds: string[];
 }
 
 export type CaptureResult = Result<CaptureResultData, CaptureChange> & {
@@ -269,6 +276,7 @@ async function buildCapturePlan(
     plannedRepositoryPaths,
     mutations,
   );
+  addProfileReferencedDeleteIssues(repositoryPath, changes, issues);
 
   const rawSourceHash = hashSourcePaths([
     ...captured.flatMap(({ discovered }) => discovered.map((file) => file.path)),
@@ -375,6 +383,11 @@ export async function applyCapturePlan(
       options.restoreFile ?? ((targetPath, content) => fs.writeFileSync(targetPath, content)),
     );
     activeCapturePlans.delete(plan);
+    const newUnassignedAssetIds = computeNewUnassignedAssetIds(
+      plan.repositoryPath,
+      selectedChanges,
+    );
+    const newUnassignedCount = newUnassignedAssetIds.length;
     return {
       schemaVersion: OPERATION_SCHEMA_VERSION,
       operation: 'capture',
@@ -382,11 +395,17 @@ export async function applyCapturePlan(
       repositoryPath: plan.repositoryPath,
       changes: selectedChanges,
       issues: [],
-      nextActions: [],
+      nextActions: newUnassignedCount > 0
+        ? [
+          `Classify ${newUnassignedCount} new Unassigned Asset(s) with an Agent or \`mcv profile edit <id> --add ...\`, or create a Profile.`,
+        ]
+        : [],
       data: {
         appliedChangeIds: selectedIds,
         writtenPaths: applied.writtenPaths,
         deletedPaths: applied.deletedPaths,
+        newUnassignedCount,
+        newUnassignedAssetIds,
       },
     };
   } catch (error) {
@@ -459,6 +478,10 @@ function captureBlockingIssues(
   const errors = plan.issues.filter((issue) => issue.severity === 'error');
   if (errors.length > 0) return errors;
 
+  const profileReferencedDeletes = plan.issues.filter((issue) =>
+    issue.severity === 'decisionRequired' && issue.code === 'capture.profileReferencedDelete');
+  if (profileReferencedDeletes.length > 0) return profileReferencedDeletes;
+
   const conflictChanges = plan.changes.filter((change) => change.change === 'conflict');
   const groups = new Map<string, CaptureChange[]>();
   for (const change of conflictChanges) {
@@ -470,6 +493,45 @@ function captureBlockingIssues(
     return plan.issues.filter((issue) => issue.severity === 'decisionRequired');
   }
   return [];
+}
+
+function addProfileReferencedDeleteIssues(
+  repositoryPath: string,
+  changes: CaptureChange[],
+  issues: Issue[],
+): void {
+  const document = readProfilesDocument(repositoryPath);
+  const seen = new Set<string>();
+  for (const change of changes) {
+    if (change.change !== 'delete') continue;
+    const assetId = assetIdForCaptureChange(change);
+    if (!assetId || seen.has(assetId)) continue;
+    seen.add(assetId);
+    const profiles = findReferencingProfiles(document, assetId);
+    if (profiles.length === 0) continue;
+    issues.push({
+      severity: 'decisionRequired',
+      code: 'capture.profileReferencedDelete',
+      message: `Asset ${assetId} is still referenced by Profile(s) [${profiles.join(', ')}] and cannot be deleted until those references are removed.`,
+      details: `Profiles: ${profiles.join(', ')}`,
+    });
+  }
+}
+
+function computeNewUnassignedAssetIds(
+  repositoryPath: string,
+  changes: CaptureChange[],
+): string[] {
+  const document = readProfilesDocument(repositoryPath);
+  const ids = new Set<string>();
+  for (const change of changes) {
+    if (change.change !== 'add') continue;
+    const assetId = assetIdForCaptureChange(change);
+    if (!assetId) continue;
+    if (findReferencingProfiles(document, assetId).length > 0) continue;
+    ids.add(assetId);
+  }
+  return [...ids].sort((left, right) => left.localeCompare(right));
 }
 
 function sameCaptureSnapshot(left: CapturePlan, right: CapturePlan): boolean {

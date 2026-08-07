@@ -1902,6 +1902,8 @@ function successfulCaptureResult(): CaptureResult {
       appliedChangeIds: ['capture-file-1', 'capture-mcp-claude'],
       writtenPaths: ['common/mcp.yaml', 'ide/claude-code/native/设置.json'],
       deletedPaths: [],
+      newUnassignedCount: 0,
+      newUnassignedAssetIds: [],
     },
   };
 }

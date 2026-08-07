@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceContext } from '../adapters/types.js';
 import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
 import { readState, writeState } from '../utils/state.js';
+import { writeProfilesDocument } from '../profiles/store.js';
+import { createProfileService } from '../profiles/service.js';
 import { applyCapturePlan, createCapturePlan } from './capture.js';
 
 describe('Capture operations', () => {
@@ -32,6 +34,10 @@ describe('Capture operations', () => {
       'variables: {}',
       '',
     ].join('\n'));
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: { global: { assets: [] } },
+    });
     context = {
       homeDir,
       platform: 'win32',
@@ -664,8 +670,14 @@ describe('Capture operations', () => {
     expect(result).toMatchObject({
       operation: 'capture',
       status: 'succeeded',
-      data: { appliedChangeIds: [freshRules.id] },
-      nextActions: [],
+      data: {
+        appliedChangeIds: [freshRules.id],
+        newUnassignedCount: 1,
+        newUnassignedAssetIds: ['rule:canonical'],
+      },
+      nextActions: [
+        'Classify 1 new Unassigned Asset(s) with an Agent or `mcv profile edit <id> --add ...`, or create a Profile.',
+      ],
     });
     expect(fs.readFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), 'utf8'))
       .toBe('# Device rules\n');
@@ -889,6 +901,120 @@ describe('Capture operations', () => {
       entry.startsWith('.repository.mcv-capture-'));
     expect(recovery).toBeDefined();
     expect(fs.existsSync(path.join(testRoot, recovery!, 'manifest.json'))).toBe(true);
+  });
+
+  it('blocks deleting a Profile-referenced Asset with decisionRequired naming every referencing Profile', async () => {
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: {
+        global: { assets: ['skill:kept'] },
+        dev: { assets: ['skill:kept'] },
+      },
+    });
+    const kept = path.join(repositoryPath, 'common', 'skills', 'kept');
+    fs.mkdirSync(kept, { recursive: true });
+    fs.writeFileSync(path.join(kept, 'SKILL.md'), '---\nname: kept\n---\n# Kept\n');
+
+    const plan = await createCapturePlan(context);
+    const deletion = plan.changes.find((change) =>
+      change.itemType === 'skill' && change.name === 'kept' && change.change === 'delete');
+
+    expect(deletion).toMatchObject({ change: 'delete', defaultSelected: false });
+    expect(plan.readyToApply).toBe(false);
+    expect(plan.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        severity: 'decisionRequired',
+        code: 'capture.profileReferencedDelete',
+        message: expect.stringMatching(/skill:kept.*\[dev, global\]|skill:kept.*\[global, dev\]/),
+        details: expect.stringMatching(/dev.*global|global.*dev/),
+      }),
+    ]));
+    expect(plan.nextActions).toEqual(expect.arrayContaining([
+      expect.stringContaining('Resolve every decisionRequired'),
+    ]));
+
+    const blocked = await applyCapturePlan(context, plan, { changeIds: [] });
+    expect(blocked).toMatchObject({
+      status: 'blocked',
+      issues: expect.arrayContaining([
+        expect.objectContaining({ code: 'capture.profileReferencedDelete' }),
+      ]),
+    });
+    expect(fs.existsSync(path.join(kept, 'SKILL.md'))).toBe(true);
+  });
+
+  it('leaves newly captured Assets Unassigned and reports the new Unassigned count without rewriting profiles.yaml', async () => {
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: { global: { assets: [] } },
+    });
+    const profilesBefore = fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8');
+    const skillDir = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: review\n---\n# Review\n');
+
+    const plan = await createCapturePlan(context);
+    const skill = plan.changes.find((change) =>
+      change.itemType === 'skill' && change.name === 'review' && change.change === 'add');
+    if (!skill) throw new Error('expected skill add change');
+
+    const result = await applyCapturePlan(context, plan, { changeIds: [skill.id] });
+
+    expect(result).toMatchObject({
+      status: 'succeeded',
+      data: {
+        appliedChangeIds: [skill.id],
+        newUnassignedCount: 1,
+        newUnassignedAssetIds: ['skill:review'],
+      },
+      nextActions: [
+        'Classify 1 new Unassigned Asset(s) with an Agent or `mcv profile edit <id> --add ...`, or create a Profile.',
+      ],
+    });
+    expect(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8')).toBe(profilesBefore);
+    expect(fs.readFileSync(
+      path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md'),
+      'utf8',
+    )).toContain('# Review');
+
+    const inventory = createProfileService(repositoryPath).inspect();
+    expect(inventory.unassignedAssetIds).toContain('skill:review');
+    expect(inventory.profiles.global.assets).not.toContain('skill:review');
+  });
+
+  it('keeps Profile references intact when updating an already-cataloged Asset', async () => {
+    const skillRepo = path.join(repositoryPath, 'common', 'skills', 'review');
+    fs.mkdirSync(skillRepo, { recursive: true });
+    fs.writeFileSync(path.join(skillRepo, 'SKILL.md'), '---\nname: review\n---\n# Old\n');
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: {
+        global: { assets: ['skill:review'] },
+        team: { assets: ['skill:review'] },
+      },
+    });
+    const profilesBefore = fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8');
+    const skillDir = path.join(homeDir, '.claude', 'skills', 'review');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: review\n---\n# New\n');
+
+    const plan = await createCapturePlan(context);
+    const skill = plan.changes.find((change) =>
+      change.itemType === 'skill' && change.name === 'review' && change.change === 'modify');
+    if (!skill) throw new Error('expected skill modify change');
+
+    const result = await applyCapturePlan(context, plan, { changeIds: [skill.id] });
+
+    expect(result).toMatchObject({
+      status: 'succeeded',
+      data: {
+        newUnassignedCount: 0,
+        newUnassignedAssetIds: [],
+      },
+      nextActions: [],
+    });
+    expect(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8')).toBe(profilesBefore);
+    expect(fs.readFileSync(path.join(skillRepo, 'SKILL.md'), 'utf8')).toContain('# New');
   });
 });
 
