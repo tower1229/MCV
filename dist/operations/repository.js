@@ -1037,11 +1037,6 @@ function migrateManifestToCurrent(raw) {
 function isMigratableSchema(schemaVersion) {
     return schemaVersion === 1 || schemaVersion === 2 || schemaVersion === 3;
 }
-function hasLegacyManagedInventory(state) {
-    if (!state.managedInventory)
-        return false;
-    return Object.values(state.managedInventory).some((entry) => entry.scope !== 'global');
-}
 function geminiLayoutMappings(repositoryPath) {
     const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native');
     return [

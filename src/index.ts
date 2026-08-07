@@ -19,6 +19,13 @@ import { showStatus } from './commands/status.js';
 import { restoreLatestBackup } from './commands/restore.js';
 import { bind, migrate, showRepository, unbind } from './commands/binding.js';
 import {
+  createProfile,
+  deleteProfile,
+  editProfile,
+  listProfiles,
+  showProfile,
+} from './commands/profile.js';
+import {
   runTuiShell,
   type RepositoryEntry,
   type ShellOutcome,
@@ -217,6 +224,94 @@ export function createProgram(
       }
     });
 
+  const profileCommand = program
+    .command('profile')
+    .description('Manage Profiles in the bound MCV Repository')
+    .action(() => {
+      profileCommand.help();
+    });
+
+  profileCommand
+    .command('list')
+    .description('List Profiles with asset counts and Unassigned')
+    .option('--json', 'Print one machine-readable Profile list report')
+    .action((options) => {
+      listProfiles(context, options);
+    });
+
+  profileCommand
+    .command('show')
+    .description('Show one Profile and its Assets')
+    .argument('<id>', 'Profile ID')
+    .option('--json', 'Print one machine-readable Profile report')
+    .action((id, options) => {
+      showProfile(context, id, options);
+    });
+
+  profileCommand
+    .command('create')
+    .description('Create a Profile')
+    .argument('<id>', 'Profile ID')
+    .option('--title <title>', 'Human-readable title')
+    .option('--description <description>', 'Human- and agent-facing description')
+    .option('--add <assetIds...>', 'Asset IDs to include')
+    .option('--expected-revision <sha256>', 'Fail unless Profiles Revision matches')
+    .option('--json', 'Print one machine-readable Result')
+    .action((id, options) => {
+      createProfile(context, id, {
+        title: options.title,
+        description: options.description,
+        add: options.add,
+        expectedRevision: options.expectedRevision,
+        json: options.json,
+      });
+    });
+
+  const profileEditCommand = profileCommand
+    .command('edit')
+    .description('Update a Profile title, description, or Assets')
+    .argument('<id>', 'Profile ID')
+    .option('--title <title>', 'Human-readable title')
+    .option('--description <description>', 'Human- and agent-facing description')
+    .option('--add <assetIds...>', 'Asset IDs to add')
+    .option('--remove <assetIds...>', 'Asset IDs to remove')
+    .option('--expected-revision <sha256>', 'Fail unless Profiles Revision matches')
+    .option('--json', 'Print one machine-readable Result')
+    .action((id, options) => {
+      if (
+        options.title === undefined
+        && options.description === undefined
+        && !options.add?.length
+        && !options.remove?.length
+      ) {
+        profileEditCommand.error(
+          'profile edit requires at least one of --title, --description, --add, or --remove',
+          { exitCode: 2, code: 'mcv.missingProfileEdit' },
+        );
+      }
+      editProfile(context, id, {
+        title: options.title,
+        description: options.description,
+        add: options.add,
+        remove: options.remove,
+        expectedRevision: options.expectedRevision,
+        json: options.json,
+      });
+    });
+
+  profileCommand
+    .command('delete')
+    .description('Delete a Profile set definition without deleting Assets')
+    .argument('<id>', 'Profile ID')
+    .option('--expected-revision <sha256>', 'Fail unless Profiles Revision matches')
+    .option('--json', 'Print one machine-readable Result')
+    .action((id, options) => {
+      deleteProfile(context, id, {
+        expectedRevision: options.expectedRevision,
+        json: options.json,
+      });
+    });
+
   program.action(async () => {
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
       program.outputHelp();
@@ -368,7 +463,7 @@ function validateWriteOutputOptions(
 export async function runCli(argv: string[] = process.argv): Promise<void> {
   const program = createProgram();
   program.exitOverride();
-  for (const command of program.commands) command.exitOverride();
+  applyExitOverride(program);
   try {
     await program.parseAsync(argv);
   } catch (error) {
@@ -378,6 +473,13 @@ export async function runCli(argv: string[] = process.argv): Promise<void> {
     }
     process.exitCode = 1;
     console.error(`MCV failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function applyExitOverride(command: Command): void {
+  for (const child of command.commands) {
+    child.exitOverride();
+    applyExitOverride(child);
   }
 }
 

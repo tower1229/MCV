@@ -10,7 +10,8 @@ export type OperationName =
   | 'capture'
   | 'deploy'
   | 'status'
-  | 'restore';
+  | 'restore'
+  | 'profile';
 
 export type IssueSeverity =
   | 'notice'
