@@ -25,10 +25,6 @@ jobs:
           node-version: 22.12.0
           cache: npm
       - run: npm ci
-      - name: Verify macOS PTY prerequisites
-        if: runner.os == 'macOS'
-        shell: bash
-        run: test -x /usr/bin/expect && test -x /bin/zsh
       - run: npm run typecheck
       - run: npm run build
       - run: npm test

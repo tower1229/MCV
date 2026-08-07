@@ -42,11 +42,9 @@ MCV 仓库中的配置分为：
 
 ## 快速开始
 
-在完整 TTY 中直接运行 `mcv` 会进入统一的 Ink Shell，并异步打开只读 Overview。一级导航固定为 Overview、Capture、Deploy、Restore Latest Deployment、Repository 和 Help；Overview 中按 `↑` / `↓` 移动焦点，按 `→` 或 `Enter` 打开焦点目标。`c`、`d`、`s`、`r`、`h` 继续分别作为 Capture、Deploy、Restore Latest Deployment、Repository、Help 的可选加速键。所有业务子命令都 deep-link 到同一个持久 Shell：`status` 打开 Overview，`discover` 打开 Environment Details，Capture/Deploy/Restore 打开各自 workflow，Repository 生命周期命令直接打开对应 Repository 页面或 Plan。Help、Environment Details 和 Result 页按 `↑` / `↓` 滚动；Help 与 Environment Details 按 `←` 或 `Escape` 返回 Overview，Result 页按 `←` 或 `Enter` 返回刷新后的 Overview。除 Repository 路径输入页需要保留完整文本输入外，任一非 Apply 页面按 `q` 正常退出，按 `Ctrl+C` 以 130 退出。direct subcommand 正常关闭后会在主屏留下对应摘要和 next action。Shell 使用 alternate screen，退出、失败、中断和异常后都会恢复主屏、光标和输入模式。
+在完整 TTY 中直接运行 `mcv` 会打印简洁的 plain-text Overview（与 `mcv status` 同一份只读报告）后立即退出；不会进入 alternate screen。非 TTY 的无参数调用仍立即输出 help。日常入口是 `mcv`、`mcv capture`、`mcv deploy` 和 `mcv profile`；`status` 保留为兼容别名，但不作为新的日常概念宣传。低频命令（`init`、`bind`、`unbind`、`migrate`、`restore`、`repo`、`discover`）仍可用。
 
-非 TTY 的无参数调用仍立即输出 help。显式使用 `--plain`、`--dry-run`、`--yes` 或 `--json` 的命令始终执行一次性协议，不进入 alternate screen。
-
-发布门在 macOS 与 Windows CI 中分别运行 packaged real PTY/ConPTY 测试，并验证 alternate screen、光标和输入模式恢复；任一平台未实际执行对应终端测试时，发布门不会通过。
+Capture、Deploy、Restore 以及 Repository 生命周期命令一律走一次性 Command 层：TTY 中展示分组 Plan / Diff 摘要并确认，非交互场景使用 `--dry-run`、`--yes` 或 `--json`。只读命令直接打印 Report。全屏 TUI 已从默认路径移除；未来仅 `mcv profile` 会保留专用全屏界面。
 
 ### 1. 创建私人配置仓库
 
@@ -55,19 +53,20 @@ MCV 仓库中的配置分为：
 ```bash
 mkdir my-mcv-config
 cd my-mcv-config
-mcv init
+mcv init --dry-run
+mcv init --yes
 ```
 
-该命令在 TTY 中直接打开 Repository Init Plan；确认后创建 schema v3 的 `mcv.yaml`、绑定当前设备，并继续 Environment discovery 与 Capture workflow。显式使用 `--dry-run`、`--yes` 或 `--json` 时保持一次性协议。MCV 不执行任何 Git 操作。
+`mcv init` 默认打印 Init Plan；确认后使用 `--yes` 创建 schema v4 的 `mcv.yaml`、`profiles.yaml`（含内置 global Profile）并绑定当前设备。显式使用 `--dry-run`、`--yes` 或 `--json` 时保持一次性协议。MCV 不执行任何 Git 操作。
 
 ### 2. 查看可发现的配置
 
 ```bash
-mcv discover --plain
+mcv discover
 mcv discover --json
 ```
 
-两个模式复用同一份 Environment Report：`--plain` 输出英文文本，`--json` 输出单个结构化 JSON 文档。报告包含三个 Adapter 的检测结果，以及已找到或缺失的已知配置路径。
+两个模式复用同一份 Environment Report：默认输出英文文本，`--json` 输出单个结构化 JSON 文档。报告包含三个 Adapter 的检测结果，以及已找到或缺失的已知配置路径。
 
 ### 3. 收集当前设备配置
 
@@ -75,7 +74,7 @@ mcv discover --json
 mcv capture
 ```
 
-TTY workflow 会按 IDE 与 File、Skill、MCP 显示最终会写入的完整预览，其中可能包含明文密钥。按 `↑` / `↓` 移动焦点，按 `→` 打开 Diff 或推进到下一审阅面，按 `←` 关闭 Diff 或返回上一审阅面并恢复原焦点；`Home`、`End`、`Page Up`、`Page Down` 用于长列表。`Space` 选择项目、required choice 或 warning confirmation，只有最终确认面的 `Enter` 可以开始 Apply；`d` 仍是可选 Diff 快捷键。选择、warning、blocked、applying 与 Result 使用带显式符号和文字的共享状态语义，关闭颜色时信息不减少。删除候选默认不选，warning 必须逐项显式确认，decision required 与 error 未解决时 Apply 不可用。Apply 前后检测到 Plan 已过期时会重新生成预览并要求重新审阅，不会保留旧选择或授权。只有最终确认后才写入仓库。处理包括：
+Capture 打印按 IDE 与 File、Skill、MCP 分组的完整预览（可能包含明文密钥），在终端确认后写入仓库。可用 `--dry-run` 只审阅、`--yes` 在审阅后非交互应用默认非冲突变更，并可组合 `--json`。删除候选默认不选；warning 与 decision required 在交互路径中处理，`--yes` 不会执行有风险的决策。处理包括：
 
 - 对 Adapter/Skill 已发现的支持内容保留原值和文件，不按文件名或字段名判断敏感性；
 - 用户已选择的 `${env:VARIABLE_NAME}` 引用保持引用，明文值保持明文；
@@ -100,7 +99,9 @@ git push
 通过用户选择的备份或传输方式将数据仓库带到新设备（使用 Git 时可克隆），进入包含 `mcv.yaml` 的目录后执行：
 
 ```bash
-mcv deploy
+mcv deploy --global
+# 或把选中 Profile 部署到当前项目：
+mcv deploy dev
 ```
 
 MCV 会显示按 IDE/capability 分组的写入计划并请求确认，只执行该 Plan 中选中的 selection ID。Apply 会重新验证 operation ID、Repository 来源哈希和目标前置哈希；warning 必须交互确认，decision required 或 error 会阻止写入。per-package divergent 外部 Skill 链接必须选择 Preserve 或 Replace：Replace 只备份并移除链接节点，再创建 managed link 或 copy，绝不写穿外部目标；shared-root divergent 只能 Preserve。`--yes` 不会执行这些决策或拓扑替换。仓库是经过用户确认的配置事实源，不是本机回滚备份。
@@ -109,40 +110,40 @@ Project-scope Deploy（`mcv deploy <profile> --target <path>`）把选中的 Ski
 
 每个选中变化都会在首次写入前备份并验证；写入或本机状态提交失败时，已写入变化会从验证过的备份回滚。成功后只更新实际 Apply 范围的 Baseline Snapshot、managed inventory，以及仅保存在本机、按 IDE/capability 记录的最近 Deploy selection。再次部署相同内容不会创建新备份。
 
-Deploy TTY workflow 会复用最近一次成功的 IDE/capability selection。按 `↑` / `↓` 浏览可见树，按 `→` 展开分组或打开焦点文件 Diff，按 `←` 关闭 Diff、回到父节点、折叠分组或从树根返回 Overview；`Home`、`End`、`Page Up` 和 `Page Down` 用于长 Plan 和 warning 列表，`Space` 切换选择或确认 warning。Diff 明确标注 managed merge 或 whole-file replacement。删除候选只在默认折叠、带 `× Destructive` 状态的 Advanced Cleanup 中显示且默认不选；最终 Apply 只能由 `Enter` 启动。Apply 或 rollback 期间输入被禁用；Plan 过期时必须重新生成并重新审阅。结果页按 `Enter` 返回刷新后的 Overview，按 `q` 退出。
-
 新设备进入 Repository 后先执行 `mcv bind --dry-run` 审阅计划，再执行 `mcv bind --yes`；也可以通过 `mcv bind <path>` 显式指定路径。Bind 只校验 manifest 和 repository ID 并写入本机绑定；不会迁移或修改 Repository。普通命令不会因为当前目录恰好存在另一个 `mcv.yaml` 就越过已有绑定。
 
-`mcv repo --plain` 检查当前绑定路径、Repository ID、schema version 和有效性；`mcv repo --json` 返回同一份结构化 Report。只有检测到 Git Repository 时才附带只读 Git 状态。非 Git Repository 是正常状态，MCV 不执行 Git mutation。
+`mcv repo` 检查当前绑定路径、Repository ID、schema version 和有效性；`mcv repo --json` 返回同一份结构化 Report。只有检测到 Git Repository 时才附带只读 Git 状态。非 Git Repository 是正常状态，MCV 不执行 Git mutation。
 
-在 TTY 中直接运行 `mcv` 时，未绑定设备会先进入 Repository onboarding：当前目录是有效 Repository 时优先审阅 Bind Plan，否则可选择在当前目录 Init 或输入已有 Repository 路径。绑定路径失效、Repository ID 不匹配或 schema 需要迁移时，Capture/Deploy 会被阻断，必须先在 Repository 页面完成 Rebind、Unbind 或 Migration Plan。Init 成功后依次进入 Environment discovery 与 Capture；从 Capture 退出不会删除已创建的 `mcv.yaml` 或本机绑定。
+未绑定设备应先 `mcv init --yes` 或 `mcv bind --yes`。绑定路径失效、Repository ID 不匹配或 schema 需要迁移时，Capture/Deploy 会被阻断，必须先完成 Rebind、Unbind 或 `mcv migrate --yes`。
 
 ### 5. 检查漂移与恢复
 
 ```bash
+mcv
 mcv status
 mcv restore --dry-run
 mcv restore
 ```
 
-- `status --plain` 从同一份只读 Overview Report 汇总 Repository、限定在 MCV Repository 路径内的可选 Git 状态、Pending Deployment Change、相对 Baseline Snapshot 的 unchanged/Drift/missing、IDE/Surface、实际配置缺失变量和本设备最近操作。Pending 对同一 Surface 的多文件 Skill projection 按 package 聚合，Canonical materialization 不重复计数，默认未选拓扑迁移进入 `optional`，Advanced Cleanup 只进入 `advancedCleanupExcluded`。Environment 只解释 manifest、MCP 和 Native structured configuration；Rules、Skills、references 和普通 Markdown 中的示例变量不检查。`status --json` 完全省略 `changes`，完整候选由 `deploy --dry-run --json` 提供。所有 JSON operation 使用 schema v2。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
+- 裸 `mcv` 与 `status` 从同一份只读 Overview Report 汇总 Repository、限定在 MCV Repository 路径内的可选 Git 状态、Pending Deployment Change、相对 Baseline Snapshot 的 unchanged/Drift/missing、IDE/Surface、实际配置缺失变量和本设备最近操作。Pending 对同一 Surface 的多文件 Skill projection 按 package 聚合，Canonical materialization 不重复计数，默认未选拓扑迁移进入 `optional`，Advanced Cleanup 只进入 `advancedCleanupExcluded`。Environment 只解释 manifest、MCP 和 Native structured configuration；Rules、Skills、references 和普通 Markdown 中的示例变量不检查。`status --json` 完全省略 `changes`，完整候选由 `deploy --dry-run --json` 提供。JSON Deploy operation 使用 schema v3；其他 JSON operation 使用其各自 schema。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
 - `restore --dry-run` 默认选择当前项目（`--target` 或 `process.cwd()`）最近一次完整且内容可验证的 project-scope Deploy backup；`--global` 选择最近一次全局 Deploy backup。展示备份时间、将恢复或删除的路径，并区分 ordinary file、managed-link projection、copy projection 与 physical package；内容或拓扑（链接重定向、目录/链接互换等）在部署后发生变化时，以独立的 Restore Conflict 阻止覆盖。
 - `restore` 默认在终端确认完整 Plan；自动化场景可在审阅后使用 `restore --yes`，并可组合 `--json` 取得结构化 Result。`--target` 与 `--global` 互斥。为避免无监督删除，包含删除的 Plan 必须交互确认，`--yes` 会在写入前阻断。Apply 会重验 operation ID、完整 selection、backup 来源、当前节点类型、链接目标和物理身份；事务开始时先创建并验证当前状态 backup（含目录与符号链接拓扑）。事务前按 Ctrl+C 以 130 退出；写入、删除或本机状态提交失败时仅回滚已尝试路径，backup/commit/rollback 期间忽略普通取消；不完整回滚会保留并报告 recovery backup。成功 Restore 会清除 Baseline Snapshot、managed inventory 与 managed Skill layout，需重新 Deploy 或 Capture 建立事实基线。
-- Restore TTY workflow 展示最近完整 backup 的时间、投影与物理 package 区分后的 write/delete 影响和 Restore Conflict 路径；按 `↑` / `↓` 浏览影响，按 `→` 打开焦点详情，按 `←` 关闭详情或返回 Overview，最终 Apply 仍只能由 `Enter` 启动。冲突或无可用 backup 时 Apply 被禁用，且不提供 force restore。Plan 过期会自动重新生成并要求重新审阅；成功或失败结果页按 `Enter` 或 `←` 返回刷新后的 Overview，按 `q` 退出。
 
 ## 命令
 
 ```text
-mcv init       TTY 中 deep-link 到 Init Plan；--dry-run/--yes/--json 强制一次性 Plan/Result
-mcv repo       TTY 中 deep-link 到 Repository；--plain/--json 强制一次性 Report
-mcv bind [PATH] TTY 中 deep-link 到 Bind Plan；--dry-run/--yes/--json 强制一次性 Plan/Result
-mcv unbind     TTY 中 deep-link 到 Unbind Plan；--dry-run/--yes/--json 强制一次性 Plan/Result
-mcv migrate    TTY 中 deep-link 到 Migration Plan；--dry-run/--yes/--json 强制一次性 Plan/Result
-mcv discover   TTY 中 deep-link 到 Environment Details；--plain/--json 强制一次性 Report
-mcv capture    TTY 中 deep-link 到可选择 Capture workflow；--dry-run/--yes/--json 强制一次性 Plan/Result
-mcv deploy     TTY 中 deep-link 到可选择 Deploy workflow；--dry-run/--yes/--json 强制一次性 Plan/Result
-mcv status     TTY 中 deep-link 到只读 Overview；--plain/--json 强制一次性 Report
-mcv restore    TTY 中 deep-link 到 Restore Latest Deployment；--dry-run/--yes/--json 强制一次性 Plan/Result
+mcv            TTY 中打印简洁 Overview 后退出；非 TTY 打印 help
+mcv capture    一次性 Capture Plan/确认/Apply；--dry-run/--yes/--json
+mcv deploy     一次性 Deploy Plan/确认/Apply；需 Profile 或 --global；--dry-run/--yes/--json
+mcv profile    Profile 管理（list/show/create/edit/delete）；未来专用全屏 TUI
+mcv status     Overview 兼容别名；--json 输出结构化 Report
+mcv init       打印 Init Plan；--yes/--dry-run/--json 控制写入
+mcv repo       打印 Repository Report；--json 输出结构化 Report
+mcv bind [PATH] 打印 Bind Plan；--yes/--dry-run/--json 控制写入
+mcv unbind     打印 Unbind Plan；--yes/--dry-run/--json 控制写入
+mcv migrate    打印 Migration Plan；--yes/--dry-run/--json 控制写入
+mcv discover   打印 Environment Report；--json 输出结构化 Report
+mcv restore    一次性 Restore Plan/确认/Apply；--dry-run/--yes/--json
 ```
 
 删除默认不执行。只有 `mcv deploy --prune-managed` 经交互确认后，才会删除本机 state 中已记录为 MCV managed、但仓库已不再生成的文件，以及与本次 Canonical 部署逐文件完全一致的旧 `$CODEX_HOME/skills` Skill 副本；`--yes` 永远拒绝删除与 topology migration。普通 deploy 检测到后一种重复时会提示，不会自动删除；内容不同或包含链接的 legacy Skill 会保留。
@@ -217,7 +218,7 @@ MCV 对配置内容保持中立，不提供保密保证。
 ## 当前限制
 
 - 仅支持 Codex、Claude Code 和 Gemini。
-- 没有 `doctor`、命名的 Profile/Preset 资产管理或 GUI；当前诊断通过各命令的 `--dry-run`、`--plain`、`--json` 输出。
+- Profile 管理目前通过 CLI（`mcv profile …`）与隐藏的 `mcv mcp` 集成入口；专用 Profile 全屏 TUI 尚未落地。
 - `restore` 只恢复本机 Deploy backup（默认当前项目；`--global` 选择全局），不读取仓库。
 - 没有变化的重复 deploy 不生成新备份。
 - restore 后清除部署基线，要求重新 deploy 或 capture 后再建立事实基线。

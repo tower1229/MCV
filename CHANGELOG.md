@@ -4,6 +4,18 @@ All notable changes to MCV are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Bare `mcv` prints a concise plain-text Overview in a TTY (help in a non-TTY) and exits immediately; the persistent fullscreen Ink Shell, alternate-screen routing, and deep-link semantics are removed from the default path.
+- Capture, Deploy, Restore, and Repository lifecycle commands always use the one-shot Plan/Report command layer with terminal confirmations where applicable.
+- Daily entry points are `mcv`, `mcv capture`, `mcv deploy`, and `mcv profile`; `status` remains a compatibility alias for the Overview report.
+
+### Removed
+
+- Global Shell routes, shell state, snapshots, and macOS/Windows Shell PTY release gates. A dedicated Profile TUI remains future work.
+
 ## [0.2.0-beta.1] - 2026-08-05
 
 This prerelease replaces the stale public `0.1.0` package with the current repository contract. Treat Repository files, backups, terminal previews, and JSON output as data that may contain plaintext credentials.

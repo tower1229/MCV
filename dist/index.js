@@ -12,7 +12,6 @@ import { restoreLatestBackup } from './commands/restore.js';
 import { bind, migrate, showRepository, unbind } from './commands/binding.js';
 import { createProfile, deleteProfile, editProfile, listProfiles, showProfile, } from './commands/profile.js';
 import { startMcpServer } from './commands/mcp.js';
-import { runTuiShell, } from './tui/shell.js';
 // package.json is the single version source for both npm and the CLI.
 const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 export function createDefaultDeviceContext() {
@@ -34,17 +33,9 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         .option('--dry-run', 'Preview initialization without writing')
         .option('--yes', 'Initialize without prompting after reviewing a dry-run')
         .option('--json', 'Print one machine-readable Plan or Result')
-        .action(async (options) => {
+        .action((options) => {
         validateWriteOutputOptions(initCommand, options);
-        if (shouldUseWriteTui(options)) {
-            await runRepositoryShell(context, {
-                operation: 'init',
-                path: process.cwd(),
-            });
-        }
-        else {
-            initRepository(context, process.cwd(), options);
-        }
+        initRepository(context, process.cwd(), options);
     });
     const captureCommand = program
         .command('capture')
@@ -55,12 +46,7 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         .option('--verbose', 'Show processed file content in the preview')
         .action(async (options) => {
         validateWriteOutputOptions(captureCommand, options);
-        if (shouldUseWriteTui(options)) {
-            await runShell(context, 'capture', true);
-        }
-        else {
-            await captureConfigurations(context, captureDependencies, options);
-        }
+        await captureConfigurations(context, captureDependencies, options);
     });
     const deployCommand = program
         .command('deploy')
@@ -74,15 +60,10 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         .option('--prune-managed', 'Delete stale managed files and exact duplicate Skills from the legacy Codex directory')
         .action(async (profiles, options) => {
         validateWriteOutputOptions(deployCommand, options);
-        if (shouldUseWriteTui(options)) {
-            await runShell(context, 'deploy', true);
-        }
-        else {
-            await deployConfigurations(context, deployDependencies, {
-                ...options,
-                profiles,
-            });
-        }
+        await deployConfigurations(context, deployDependencies, {
+            ...options,
+            profiles,
+        });
     });
     const discoverCommand = program
         .command('discover')
@@ -93,12 +74,7 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         if (options.plain && options.json) {
             discoverCommand.error("options '--plain' and '--json' cannot be used together", { exitCode: 2, code: 'mcv.conflictingOutputModes' });
         }
-        if (shouldUseReadOnlyTui(options)) {
-            await runShell(context, 'environment', true);
-        }
-        else {
-            await discoverConfigurations(context, options);
-        }
+        await discoverConfigurations(context, options);
     });
     const statusCommand = program
         .command('status')
@@ -109,12 +85,7 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         if (options.plain && options.json) {
             statusCommand.error("options '--plain' and '--json' cannot be used together", { exitCode: 2, code: 'mcv.conflictingOutputModes' });
         }
-        if (shouldUseReadOnlyTui(options)) {
-            await runShell(context, 'overview', true);
-        }
-        else {
-            await showStatus(context, options);
-        }
+        await showStatus(context, options);
     });
     const restoreCommand = program
         .command('restore')
@@ -129,74 +100,43 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         if (options.global && options.target) {
             restoreCommand.error("options '--target' and '--global' cannot be used together", { exitCode: 2, code: 'mcv.conflictingRestoreScope' });
         }
-        if (shouldUseWriteTui(options)) {
-            await runShell(context, 'restore', true);
-        }
-        else {
-            await restoreLatestBackup(context, {}, options);
-        }
+        await restoreLatestBackup(context, {}, options);
     });
     const repositoryCommand = program.command('repo')
         .description('Inspect the current MCV Repository binding')
         .addOption(new Option('--plain', 'Print a one-shot English text report'))
         .addOption(new Option('--json', 'Print one machine-readable report'))
-        .action(async (options) => {
+        .action((options) => {
         if (options.plain && options.json) {
             repositoryCommand.error("options '--plain' and '--json' cannot be used together", { exitCode: 2, code: 'mcv.conflictingOutputModes' });
         }
-        if (shouldUseReadOnlyTui(options)) {
-            await runRepositoryShell(context);
-        }
-        else {
-            showRepository(context, options);
-        }
+        showRepository(context, options);
     });
     const bindCommand = program.command('bind [path]')
         .description('Bind this device to an existing MCV Repository')
         .option('--dry-run', 'Preview the Repository binding without writing')
         .option('--yes', 'Bind without prompting after reviewing a dry-run')
         .addOption(new Option('--json', 'Print one machine-readable Plan or Result'))
-        .action(async (repositoryPath, options) => {
+        .action((repositoryPath, options) => {
         validateWriteOutputOptions(bindCommand, options);
-        if (shouldUseWriteTui(options)) {
-            await runRepositoryShell(context, {
-                operation: 'bind',
-                path: repositoryPath ?? process.cwd(),
-            });
-        }
-        else {
-            bind(context, repositoryPath, options);
-        }
+        bind(context, repositoryPath, options);
     });
     const unbindCommand = program.command('unbind')
         .description('Remove the Repository binding from this device')
         .option('--dry-run', 'Preview removal of the local Repository binding')
         .option('--yes', 'Remove the local binding without prompting after reviewing a dry-run')
         .addOption(new Option('--json', 'Print one machine-readable Plan or Result'))
-        .action(async (options) => {
+        .action((options) => {
         validateWriteOutputOptions(unbindCommand, options);
-        if (shouldUseWriteTui(options)) {
-            await runRepositoryShell(context, { operation: 'unbind' });
-        }
-        else {
-            unbind(context, options);
-        }
+        unbind(context, options);
     });
     const migrateCommand = program.command('migrate [path]').description('Migrate an older repository to the current schema')
         .option('--dry-run', 'Preview migration without writing')
         .option('--yes', 'Migrate without prompting after reviewing a dry-run')
         .option('--json', 'Print one machine-readable Plan or Result')
-        .action(async (repositoryPath = process.cwd(), options) => {
+        .action((repositoryPath = process.cwd(), options) => {
         validateWriteOutputOptions(migrateCommand, options);
-        if (shouldUseWriteTui(options)) {
-            await runRepositoryShell(context, {
-                operation: 'migrate',
-                path: repositoryPath,
-            });
-        }
-        else {
-            migrate(context, repositoryPath, options);
-        }
+        migrate(context, repositoryPath, options);
     });
     const profileCommand = program
         .command('profile')
@@ -282,116 +222,13 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         await startMcpServer(context);
     });
     program.action(async () => {
-        if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        if (!process.stdout.isTTY) {
             program.outputHelp();
             return;
         }
-        await runShell(context, 'overview', false);
+        await showStatus(context);
     });
     return program;
-}
-function shouldUseReadOnlyTui(options) {
-    return Boolean(process.stdin.isTTY
-        && process.stdout.isTTY
-        && !options.plain
-        && !options.json);
-}
-function shouldUseWriteTui(options) {
-    return Boolean(process.stdin.isTTY
-        && process.stdout.isTTY
-        && !options.dryRun
-        && !options.yes
-        && !options.json);
-}
-async function runShell(context, route, direct) {
-    const outcome = await runTuiShell(context, route);
-    reportShellOutcome(outcome, route, direct);
-}
-async function runRepositoryShell(context, repositoryEntry) {
-    const dependencies = repositoryEntry ? { repositoryEntry } : {};
-    const outcome = await runTuiShell(context, 'repository', dependencies);
-    reportShellOutcome(outcome, 'repository', true);
-}
-function reportShellOutcome(outcome, initialRoute, direct) {
-    const printNextAction = () => {
-        if (outcome.nextAction)
-            console.log(`Next: ${outcome.nextAction}`);
-    };
-    if (outcome.reason === 'interrupted') {
-        process.exitCode = 130;
-        console.log('MCV interrupted.');
-        return;
-    }
-    if (!direct)
-        return;
-    if (initialRoute === 'repository') {
-        if (outcome.operationStatus === 'blocked')
-            process.exitCode = 3;
-        else if (outcome.operationStatus === 'failed' || outcome.failureMessage) {
-            process.exitCode = 1;
-        }
-        if (outcome.failureMessage) {
-            console.error(`Repository failed: ${outcome.failureMessage}`);
-            printNextAction();
-            return;
-        }
-        console.log(outcome.summary ?? 'Repository closed without changes.');
-        printNextAction();
-        return;
-    }
-    if (initialRoute === 'capture') {
-        if (outcome.operationStatus === 'blocked')
-            process.exitCode = 3;
-        else if (outcome.operationStatus === 'failed' || outcome.failureMessage) {
-            process.exitCode = 1;
-        }
-        if (outcome.failureMessage) {
-            console.error(`Capture failed: ${outcome.failureMessage}`);
-            printNextAction();
-            return;
-        }
-        console.log(outcome.summary ?? 'Capture closed without applying changes.');
-        printNextAction();
-        return;
-    }
-    if (initialRoute === 'deploy') {
-        if (outcome.operationStatus === 'blocked')
-            process.exitCode = 3;
-        else if (outcome.operationStatus === 'failed' || outcome.failureMessage) {
-            process.exitCode = 1;
-        }
-        if (outcome.failureMessage) {
-            console.error(`Deploy failed: ${outcome.failureMessage}`);
-            printNextAction();
-            return;
-        }
-        console.log(outcome.summary ?? 'Deploy closed without applying changes.');
-        printNextAction();
-        return;
-    }
-    if (initialRoute === 'restore') {
-        if (outcome.operationStatus === 'blocked')
-            process.exitCode = 3;
-        else if (outcome.operationStatus === 'failed' || outcome.failureMessage) {
-            process.exitCode = 1;
-        }
-        if (outcome.failureMessage) {
-            console.error(`Restore failed: ${outcome.failureMessage}`);
-            printNextAction();
-            return;
-        }
-        console.log(outcome.summary ?? 'Restore closed without applying changes.');
-        printNextAction();
-        return;
-    }
-    if (outcome.failureMessage) {
-        process.exitCode = 1;
-        console.error(`${outcome.route === 'overview' ? 'Overview' : 'Environment Details'} failed: ${outcome.failureMessage}`);
-        printNextAction();
-        return;
-    }
-    console.log(outcome.summary ?? `${initialRoute === 'overview' ? 'Overview' : 'Environment Details'} closed before its Report was ready.`);
-    printNextAction();
 }
 function validateWriteOutputOptions(command, options) {
     if (options.dryRun && options.yes) {

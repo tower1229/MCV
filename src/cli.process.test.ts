@@ -770,7 +770,7 @@ describe('packaged mcv CLI', () => {
     try {
       const result = spawnSync(
         process.execPath,
-        [cliPath, 'restore', '--dry-run', '--json'],
+        [cliPath, 'restore', '--global', '--dry-run', '--json'],
         {
           encoding: 'utf8',
           env: isolatedEnvironment(isolatedRoot),
@@ -793,7 +793,7 @@ describe('packaged mcv CLI', () => {
 
       const applyResult = spawnSync(
         process.execPath,
-        [cliPath, 'restore', '--yes', '--json'],
+        [cliPath, 'restore', '--global', '--yes', '--json'],
         {
           encoding: 'utf8',
           env: isolatedEnvironment(isolatedRoot),

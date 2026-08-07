@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as yaml from 'yaml';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeState } from './utils/state.js';
 
 const terminalPrompt = vi.hoisted(() => ({
   question: vi.fn(),
@@ -8,18 +10,14 @@ const terminalPrompt = vi.hoisted(() => ({
   off: vi.fn(),
   close: vi.fn(),
 }));
-const shellRuntime = vi.hoisted(() => ({
-  runTuiShell: vi.fn(),
-}));
 
 vi.mock('readline/promises', () => ({
   createInterface: vi.fn(() => terminalPrompt),
 }));
-vi.mock('./tui/shell.js', () => shellRuntime);
 
 import { createProgram } from './index.js';
 
-describe('mcv init interaction', () => {
+describe('mcv default path without fullscreen Shell', () => {
   const originalCwd = process.cwd();
   const originalIsTTY = process.stdin.isTTY;
   const originalStdoutIsTTY = process.stdout.isTTY;
@@ -32,21 +30,48 @@ describe('mcv init interaction', () => {
     repositoryPath = path.join(testRoot, 'repository');
     homeDir = path.join(testRoot, 'home');
     fs.mkdirSync(repositoryPath);
-    fs.mkdirSync(path.join(homeDir, '.claude'), { recursive: true });
-    fs.writeFileSync(path.join(homeDir, '.claude', 'settings.json'), '{"theme":"dark"}\n');
+    fs.mkdirSync(homeDir);
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), yaml.stringify({
+      schemaVersion: 4,
+      repositoryId: 'index-overview-id',
+      initializedAt: '2026-08-07T00:00:00.000Z',
+      targets: {
+        codex: { enabled: true },
+        claudeCode: { enabled: true },
+        gemini: {
+          enabled: true,
+          surfaces: { geminiCli: 'auto', antigravity: 'auto' },
+        },
+      },
+      variables: {},
+      capture: { preserveUnknownNativeFields: true },
+      deploy: { backupBeforeWrite: true, useSymlinks: false },
+    }));
+    fs.writeFileSync(path.join(repositoryPath, 'profiles.yaml'), yaml.stringify({
+      schemaVersion: 1,
+      profiles: {
+        global: {
+          assets: [],
+        },
+      },
+    }));
+    writeState(
+      { homeDir, platform: 'darwin', env: {}, pathEnv: '' },
+      {
+        schemaVersion: 2,
+        defaultRepositoryId: 'index-overview-id',
+        repositoryPath,
+      },
+    );
     process.chdir(repositoryPath);
     Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
     Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: true });
-    terminalPrompt.question.mockReset().mockResolvedValueOnce('y');
+    terminalPrompt.question.mockReset().mockResolvedValue('n');
     terminalPrompt.once.mockReset();
     terminalPrompt.off.mockReset();
     terminalPrompt.close.mockReset();
-    shellRuntime.runTuiShell.mockReset().mockResolvedValue({
-      reason: 'completed',
-      route: 'repository',
-      summary: 'Repository closed without changes.',
-    });
     vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -60,10 +85,21 @@ describe('mcv init interaction', () => {
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
 
+  function context() {
+    return { homeDir, platform: 'darwin' as const, env: {}, pathEnv: '' };
+  }
+
+  function loggedText(): string {
+    return vi.mocked(console.log).mock.calls.map((call) => String(call[0])).join('\n');
+  }
+
   it('keeps explicit JSON Init execution one-shot inside a TTY', async () => {
-    await createProgram(
-      { homeDir, platform: 'darwin', env: {}, pathEnv: '' },
-    ).parseAsync(['node', 'mcv', 'init', '--yes', '--json']);
+    const emptyRepo = path.join(testRoot, 'empty-init');
+    fs.mkdirSync(emptyRepo);
+    process.chdir(emptyRepo);
+    writeState(context(), { schemaVersion: 2 });
+
+    await createProgram(context()).parseAsync(['node', 'mcv', 'init', '--yes', '--json']);
 
     expect(terminalPrompt.question).not.toHaveBeenCalled();
     expect(console.log).toHaveBeenCalledOnce();
@@ -73,61 +109,106 @@ describe('mcv init interaction', () => {
     });
   });
 
-  it('prints help instead of opening the Shell when stdout is not a TTY', async () => {
+  it('prints help instead of an Overview when stdout is not a TTY', async () => {
     Object.defineProperty(process.stdout, 'isTTY', {
       configurable: true,
       value: false,
     });
-    const context = { homeDir, platform: 'darwin' as const, env: {}, pathEnv: '' };
     const output: string[] = [];
-    const cli = createProgram(context);
+    const cli = createProgram(context());
     cli.configureOutput({ writeOut: (text) => output.push(text) });
 
     await cli.parseAsync(['node', 'mcv']);
 
     expect(output.join('')).toContain('Usage: mcv [options] [command]');
+    expect(loggedText()).not.toContain('Repository:');
+    expect(terminalPrompt.question).not.toHaveBeenCalled();
+  });
+
+  it('prints a plain-text Overview when stdout is a TTY even if stdin is not', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', {
+      configurable: true,
+      value: false,
+    });
+
+    await createProgram(context()).parseAsync(['node', 'mcv']);
+
+    expect(loggedText()).toContain('Repository:');
+    expect(loggedText()).toContain('Pending deployment:');
+    expect(terminalPrompt.question).not.toHaveBeenCalled();
+  });
+
+  it('prints a plain-text Overview for bare mcv in a TTY and exits', async () => {
+    await createProgram(context()).parseAsync(['node', 'mcv']);
+
+    expect(loggedText()).toContain('Repository:');
+    expect(loggedText()).toContain(repositoryPath);
+    expect(loggedText()).toContain('Pending deployment:');
+    expect(terminalPrompt.question).not.toHaveBeenCalled();
+  });
+
+  it('prints the same Overview through the status compatibility alias', async () => {
+    await createProgram(context()).parseAsync(['node', 'mcv', 'status']);
+
+    expect(loggedText()).toContain('Repository:');
+    expect(loggedText()).toContain('Pending deployment:');
     expect(terminalPrompt.question).not.toHaveBeenCalled();
   });
 
   it.each([
     {
       argv: ['init'],
-      operation: 'init',
+      prepare: () => {
+        const emptyRepo = path.join(testRoot, 'empty-init-plan');
+        fs.mkdirSync(emptyRepo);
+        process.chdir(emptyRepo);
+        writeState(context(), { schemaVersion: 2 });
+      },
+      marker: 'Init Plan:',
     },
-    {
-      argv: ['repo'],
-      operation: undefined,
-    },
-    {
-      argv: ['bind'],
-      operation: 'bind',
-    },
-    {
-      argv: ['unbind'],
-      operation: 'unbind',
-    },
+    { argv: ['repo'], marker: 'Repository:' },
+    { argv: ['bind'], marker: 'Bind Plan:' },
+    { argv: ['unbind'], marker: 'Unbind Plan:' },
     {
       argv: ['migrate'],
-      operation: 'migrate',
+      prepare: () => {
+        const oldRepository = path.join(testRoot, 'old-repository');
+        fs.mkdirSync(oldRepository);
+        fs.writeFileSync(path.join(oldRepository, 'mcv.yaml'), yaml.stringify({
+          schemaVersion: 1,
+          repositoryId: 'old-repository-id',
+          targets: {},
+        }));
+        process.chdir(oldRepository);
+      },
+      marker: 'Migration Plan:',
     },
-  ])('deep-links `mcv $argv` into the persistent Repository Shell', async ({
-    argv,
-    operation,
-  }) => {
-    await createProgram(
-      { homeDir, platform: 'darwin', env: {}, pathEnv: '' },
-    ).parseAsync(['node', 'mcv', ...argv]);
+    { argv: ['discover'], marker: 'Codex:' },
+  ])('runs `mcv $argv` as a one-shot report without a Shell', async ({ argv, prepare, marker }) => {
+    prepare?.();
+    await createProgram(context()).parseAsync(['node', 'mcv', ...argv]);
 
-    const entry = operation === undefined
-      ? undefined
-      : operation === 'unbind'
-        ? { operation }
-        : { operation, path: repositoryPath };
-    expect(shellRuntime.runTuiShell).toHaveBeenCalledWith(
-      expect.objectContaining({ homeDir }),
-      'repository',
-      entry === undefined ? {} : { repositoryEntry: entry },
-    );
+    expect(loggedText()).toContain(marker);
     expect(terminalPrompt.question).not.toHaveBeenCalled();
+  });
+
+  it('runs capture through the one-shot Plan/confirm path in a TTY', async () => {
+    await createProgram(context()).parseAsync(['node', 'mcv', 'capture']);
+
+    expect(loggedText().length).toBeGreaterThan(0);
+    expect(terminalPrompt.question).toHaveBeenCalled();
+  });
+
+  it('runs deploy through the one-shot command path in a TTY', async () => {
+    await createProgram(context()).parseAsync(['node', 'mcv', 'deploy', '--global']);
+
+    expect(loggedText()).toMatch(/already in sync|Deploy Plan:/);
+  });
+
+  it('runs restore through the one-shot command path in a TTY', async () => {
+    await createProgram(context()).parseAsync(['node', 'mcv', 'restore', '--global']);
+
+    expect(`${loggedText()}\n${vi.mocked(console.error).mock.calls.map((call) => String(call[0])).join('\n')}`)
+      .toMatch(/Restore Plan:|No complete restore backup|restore\./i);
   });
 });
