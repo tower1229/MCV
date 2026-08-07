@@ -2,4 +2,4 @@
 
 {1–3 sentences: what's the context, what did we decide, and why.}
 
-<!-- Replace this file when recording your first real ADR. See .agents/skills/domain-modeling/ADR-FORMAT.md. -->
+<!-- Replace this file when recording your first real ADR. Format: see the domain-modeling agent skill's ADR-FORMAT.md. -->

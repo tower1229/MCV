@@ -1,0 +1,9 @@
+# ADR 0014: Agent Profile Management over Local MCP; TUI Shrinks to Profiles Only
+
+Status: Accepted
+
+Agents become first-class Profile managers through a local stdio MCP server (`mcv mcp`) exposing four tools — `inspect_inventory`, `read_assets`, `update_profiles`, `deploy_profiles` — over the same ProfileService that backs the CLI and TUI. Writes present expected Catalog and Profiles Revisions, validate every Asset reference and the global invariant, and commit as one atomic `profiles.yaml` replacement. Deploy calls reuse the existing Plan/Apply safety seam and return structured, agent-correctable issues rather than forcing a TUI open.
+
+MCV deliberately does not inject standing instructions into global `AGENTS.md`, `CLAUDE.md`, or `GEMINI.md`: that would tax every session's attention for a tool used only occasionally. Guidance ships instead as MCP server instructions, precise tool descriptions with safety annotations, and an on-demand `mcv://guides/profile-classification` resource. There is no HTTP server, account system, or remote authorization — MCV is a single-user local tool. Configuration Data Neutrality (ADR 0010) extends to MCP unchanged: no secret detection, masking, or blocking, with documentation warning that agent hosts, tool logs, and model context may receive the faithfully returned content.
+
+The TUI contracts symmetrically: the persistent global Ink shell leaves the default path, bare `mcv` prints a plain overview, and the only remaining full-screen interface is a dedicated Profile-maintenance app. Capture, Deploy, and Restore run as one-shot commands with grouped plans, diff summaries, and confirmations.
