@@ -17,6 +17,8 @@ Use this checklist for `0.2.0-beta.1`. Publishing and tagging are maintainer-con
 - [ ] GitHub `Release Gate / Verify (macos-latest)` passes.
 - [ ] GitHub `Release Gate / Verify (windows-latest)` passes.
 
+Profile TUI PTY notes: macOS Verify requires `/usr/bin/expect` and `/bin/zsh`; Windows Verify exercises ConPTY restoration for `mcv profile`.
+
 ## Repository settings
 
 - [ ] Require both Release Gate jobs before merging to `master`.

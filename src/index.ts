@@ -25,6 +25,10 @@ import {
   listProfiles,
   showProfile,
 } from './commands/profile.js';
+import {
+  openProfileEditor,
+  shouldOpenProfileEditor,
+} from './commands/profile-editor.js';
 import { startMcpServer } from './commands/mcp.js';
 // package.json is the single version source for both npm and the CLI.
 const packageVersion = (
@@ -187,7 +191,11 @@ export function createProgram(
   const profileCommand = program
     .command('profile')
     .description('Manage Profiles in the bound MCV Repository')
-    .action(() => {
+    .action(async () => {
+      if (shouldOpenProfileEditor()) {
+        await openProfileEditor(context);
+        return;
+      }
       profileCommand.help();
     });
 
@@ -237,7 +245,18 @@ export function createProgram(
     .option('--remove <assetIds...>', 'Asset IDs to remove')
     .option('--expected-revision <sha256>', 'Fail unless Profiles Revision matches')
     .option('--json', 'Print one machine-readable Result')
-    .action((id, options) => {
+    .action(async (id, options) => {
+      if (shouldOpenProfileEditor({
+        title: options.title,
+        description: options.description,
+        add: options.add,
+        remove: options.remove,
+        expectedRevision: options.expectedRevision,
+        json: options.json,
+      })) {
+        await openProfileEditor(context, { initialProfileId: id });
+        return;
+      }
       if (
         options.title === undefined
         && options.description === undefined
@@ -245,7 +264,7 @@ export function createProgram(
         && !options.remove?.length
       ) {
         profileEditCommand.error(
-          'profile edit requires at least one of --title, --description, --add, or --remove',
+          'profile edit requires a TTY, or at least one of --title, --description, --add, or --remove',
           { exitCode: 2, code: 'mcv.missingProfileEdit' },
         );
       }

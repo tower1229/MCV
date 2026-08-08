@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Dedicated Profile maintenance TUI (`mcv profile`, `mcv profile edit <id>`) with a three-pane Ink layout, search, Asset-type and technical-compatibility filters, ProfileService-backed save with Revision conflict reporting, and macOS PTY / Windows ConPTY restoration gates.
 - Project-scope Deploy overlays selected MCP servers at key granularity into Codex `.codex/config.toml`, Claude Code `.mcp.json`, and Gemini CLI `.gemini/settings.json`, preserving non-MCV servers and recording Managed Receipt ownership; unrecorded same-name conflicts require Preserve/Replace and are never cleared by `--yes`. Antigravity remains global-only with a `projectScopeUnsupported` notice.
 
 ### Changed
@@ -15,10 +16,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Bare `mcv` prints a concise plain-text Overview in a TTY (help in a non-TTY) and exits immediately; the persistent fullscreen Ink Shell, alternate-screen routing, and deep-link semantics are removed from the default path.
 - Capture, Deploy, Restore, and Repository lifecycle commands always use the one-shot Plan/Report command layer with terminal confirmations where applicable.
 - Daily entry points are `mcv`, `mcv capture`, `mcv deploy`, and `mcv profile`; `status` remains a compatibility alias for the Overview report.
+- `mcv profile` in a TTY opens the Profile editor; flag-based `mcv profile edit` remains the non-interactive mutation path.
 
 ### Removed
 
-- Global Shell routes, shell state, snapshots, and macOS/Windows Shell PTY release gates. A dedicated Profile TUI remains future work.
+- Global Shell routes, shell state, snapshots, and the former multi-route Shell PTY release gates. Profile maintenance keeps a dedicated fullscreen TUI.
 
 ## [0.2.0-beta.1] - 2026-08-05
 
