@@ -63,5 +63,5 @@ export function projectSkillPackage(targetRoot, relativeRoot, skill, receipt) {
     return { ...base, status: 'conflict' };
 }
 function normalizeSkillRelativePath(relativePath) {
-    return relativePath.split(path.sep).join('/');
+    return relativePath.replace(/\\/g, '/');
 }

@@ -4,9 +4,11 @@
 
 MCV（Mobile Configuration Vehicle）是一个本地运行的 CLI，用来把 Codex、Claude Code 和 Gemini 的个人配置忠实收集到用户自己掌控的本地数据仓库，并在另一台 macOS 或 Windows 设备上事务化部署。Git 是可选且推荐的版本管理、备份和传输方式，但不是使用 MCV 的前置条件。
 
-MCV `0.2.0-beta.1` 已完成最小闭环：发现配置、忠实收集与路径参数化、部署、漂移检查和最近一次备份恢复。MCV 不判断配置内容是否敏感；Adapter 支持范围内发现的明文密钥、`.env`、credential、PEM/key 等文件会原样进入 Repository、预览、终端、JSON 和备份。用户自行决定使用明文还是 `${env:*}`，并自行负责访问控制、加密、传输和泄漏风险。MCV 不会安装 IDE，也不会在后台自动修改配置。
+MCV `0.3.0-beta.1` 在忠实 Capture / 事务化 Deploy 之上加入 Profile 选择、**项目为默认 Deploy scope**、项目 Managed Receipt，以及本地 MCP 上的 Profile 读写。MCV 不判断配置内容是否敏感；Adapter 支持范围内发现的明文密钥、`.env`、credential、PEM/key 等文件会原样进入 Repository、预览、终端、JSON 和备份。用户自行决定使用明文还是 `${env:*}`，并自行负责访问控制、加密、传输和泄漏风险。MCV 不会安装 IDE，也不会在后台自动修改配置。
 
-> `0.2.0-beta.1` 是预发布版本。请把 Repository、备份和终端输出视为可能含明文密钥的数据，并按自己的安全要求管理。升级已有 Repository 前先运行 `mcv migrate --dry-run`。
+> `0.3.0-beta.1` 是预发布版本。请把 Repository、备份和终端输出视为可能含明文密钥的数据，并按自己的安全要求管理。升级已有 Repository 前先运行 `mcv migrate --dry-run`。
+>
+> **Breaking：** 裸 `mcv deploy`（以及无 Profile 的 `mcv deploy --yes`）现在以退出码 2 报用法错误且不写任何文件。旧版“全量部署到设备全局”请改用 `mcv deploy --global`。消费 JSON 的脚本必须读取 `schemaVersion`，并拒绝未知的 operation schema 版本（Deploy 现为 v3）。
 
 ## 安装
 
@@ -95,19 +97,24 @@ git commit -m "capture AI IDE configuration"
 git push
 ```
 
-### 4. 在另一台设备部署
+### 4. 部署到当前项目或设备全局
 
-通过用户选择的备份或传输方式将数据仓库带到新设备（使用 Git 时可克隆），进入包含 `mcv.yaml` 的目录后执行：
+Deploy 的默认 scope 是**当前项目**（`process.cwd()`，可用 `--target` 显式指定；与 `--global` 互斥）。Profile 只决定“部署哪些 Asset”，scope 只决定“写到哪里”。通过用户选择的备份或传输方式将数据仓库带到新设备（使用 Git 时可克隆），进入包含 `mcv.yaml` 的目录后执行：
 
 ```bash
-mcv deploy --global
-# 或把选中 Profile 部署到当前项目：
+# 把 Profile 部署到当前项目（默认 scope）
 mcv deploy dev
+# 把内置 global Profile 部署到设备全局 IDE 位置
+mcv deploy --global
+# 把命名为 global 的 Profile 部署到当前项目（不是 --global scope）
+mcv deploy global
 ```
+
+裸 `mcv deploy` 不会静默写入当前目录或全局：它以退出码 2 提示必须指定 Profile，或使用 `mcv deploy --global`。
 
 MCV 会显示按 IDE/capability 分组的写入计划并请求确认，只执行该 Plan 中选中的 selection ID。Apply 会重新验证 operation ID、Repository 来源哈希和目标前置哈希；warning 必须交互确认，decision required 或 error 会阻止写入。per-package divergent 外部 Skill 链接必须选择 Preserve 或 Replace：Replace 只备份并移除链接节点，再创建 managed link 或 copy，绝不写穿外部目标；shared-root divergent 只能 Preserve。`--yes` 不会执行这些决策或拓扑替换。仓库是经过用户确认的配置事实源，不是本机回滚备份。
 
-Project-scope Deploy（`mcv deploy <profile> --target <path>`）把选中的 Skills 以完整目录复制写入项目：Codex 与 Gemini CLI 共用 `<target>/.agents/skills/<name>/`，Claude Code 使用 `<target>/.claude/skills/<name>/`，不建立指向 Repository 或 HOME 的链接；相同内容视为已满足，未知或 divergent 包需要 Preserve/Replace，`--yes` 不会覆盖。写入记入 `<target>/.mcv/managed.json`，并参与备份与回滚。
+Project-scope Deploy（`mcv deploy <profile>` 或 `--target <path>`）把选中的 Skills 以完整目录复制写入项目：Codex 与 Gemini CLI 共用 `<target>/.agents/skills/<name>/`，Claude Code 使用 `<target>/.claude/skills/<name>/`，不建立指向 Repository 或 HOME 的链接；相同内容视为已满足，未知或 divergent 包需要 Preserve/Replace，`--yes` 不会覆盖。写入记入 `<target>/.mcv/managed.json`（Managed Receipt v1），并参与备份与回滚。
 
 每个选中变化都会在首次写入前备份并验证；写入或本机状态提交失败时，已写入变化会从验证过的备份回滚。成功后只更新实际 Apply 范围的 Baseline Snapshot、managed inventory，以及仅保存在本机、按 IDE/capability 记录的最近 Deploy selection。再次部署相同内容不会创建新备份。
 
@@ -126,7 +133,7 @@ mcv restore --dry-run
 mcv restore
 ```
 
-- 裸 `mcv` 与 `status` 从同一份只读 Overview Report 汇总 Repository、限定在 MCV Repository 路径内的可选 Git 状态、Pending Deployment Change、相对 Baseline Snapshot 的 unchanged/Drift/missing、IDE/Surface、实际配置缺失变量和本设备最近操作。Pending 对同一 Surface 的多文件 Skill projection 按 package 聚合，Canonical materialization 不重复计数，默认未选拓扑迁移进入 `optional`，Advanced Cleanup 只进入 `advancedCleanupExcluded`。Environment 只解释 manifest、MCP 和 Native structured configuration；Rules、Skills、references 和普通 Markdown 中的示例变量不检查。`status --json` 完全省略 `changes`，完整候选由 `deploy --dry-run --json` 提供。JSON Deploy operation 使用 schema v3；其他 JSON operation 使用其各自 schema。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
+- 裸 `mcv` 与 `status` 从同一份只读 Overview Report 汇总 Repository、限定在 MCV Repository 路径内的可选 Git 状态、Pending Deployment Change、相对 Baseline Snapshot 的 unchanged/Drift/missing、IDE/Surface、实际配置缺失变量和本设备最近操作。Pending 对同一 Surface 的多文件 Skill projection 按 package 聚合，Canonical materialization 不重复计数，默认未选拓扑迁移进入 `optional`，Advanced Cleanup 只进入 `advancedCleanupExcluded`。Environment 只解释 manifest、MCP 和 Native structured configuration；Rules、Skills、references 和普通 Markdown 中的示例变量不检查。`status --json` 完全省略 `changes`，完整候选由 `deploy --dry-run --json` 提供。JSON Deploy operation 使用 schema v3；其他 JSON operation 使用其各自 schema。消费方必须检查 `schemaVersion` 并拒绝未知版本，不得假定字段集合固定。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
 - `restore --dry-run` 默认选择当前项目（`--target` 或 `process.cwd()`）最近一次完整且内容可验证的 project-scope Deploy backup；`--global` 选择最近一次全局 Deploy backup。展示备份时间、将恢复或删除的路径，并区分 ordinary file、managed-link projection、copy projection 与 physical package；内容或拓扑（链接重定向、目录/链接互换等）在部署后发生变化时，以独立的 Restore Conflict 阻止覆盖。
 - `restore` 默认在终端确认完整 Plan；自动化场景可在审阅后使用 `restore --yes`，并可组合 `--json` 取得结构化 Result。`--target` 与 `--global` 互斥。为避免无监督删除，包含删除的 Plan 必须交互确认，`--yes` 会在写入前阻断。Apply 会重验 operation ID、完整 selection、backup 来源、当前节点类型、链接目标和物理身份；事务开始时先创建并验证当前状态 backup（含目录与符号链接拓扑）。事务前按 Ctrl+C 以 130 退出；写入、删除或本机状态提交失败时仅回滚已尝试路径，backup/commit/rollback 期间忽略普通取消；不完整回滚会保留并报告 recovery backup。成功 Restore 会清除 Baseline Snapshot、managed inventory 与 managed Skill layout，需重新 Deploy 或 Capture 建立事实基线。
 
@@ -135,7 +142,7 @@ mcv restore
 ```text
 mcv            TTY 中打印简洁 Overview 后退出；非 TTY 打印 help
 mcv capture    一次性 Capture Plan/确认/Apply；--dry-run/--yes/--json
-mcv deploy     一次性 Deploy Plan/确认/Apply；需 Profile 或 --global；--dry-run/--yes/--json
+mcv deploy     一次性 Deploy Plan/确认/Apply；默认项目 scope；需 Profile 或 --global；裸调用 exit 2
 mcv profile    Profile 维护 TUI（TTY）或 list/show/create/edit/delete 子命令
 
 mcv status     Overview 兼容别名；--json 输出结构化 Report
@@ -146,6 +153,7 @@ mcv unbind     打印 Unbind Plan；--yes/--dry-run/--json 控制写入
 mcv migrate    打印 Migration Plan；--yes/--dry-run/--json 控制写入
 mcv discover   打印 Environment Report；--json 输出结构化 Report
 mcv restore    一次性 Restore Plan/确认/Apply；--dry-run/--yes/--json
+mcv mcp        本地 stdio MCP Server（集成入口；含 inspect_inventory / read_assets / update_profiles / deploy_profiles）
 ```
 
 删除默认不执行。只有 `mcv deploy --prune-managed` 经交互确认后，才会清理不再需要且仍由 MCV 拥有的内容：全局 scope 删除本机 state 中已记录为 managed、但仓库已不再生成的文件，以及与本次 Canonical 部署逐文件完全一致的旧 `$CODEX_HOME/skills` Skill 副本；项目 scope 仅删除出现在 `<target>/.mcv/managed.json`、哈希未漂移、且当前 selection 已不再需要的资产（Rules 只去掉未修改的 Managed Block）。`--yes` 永远拒绝删除、topology migration 与项目 prune 候选。普通 deploy 检测到 legacy Codex Skill 重复时会提示，不会自动删除；内容不同或包含链接的 legacy Skill 会保留。缺少 `managed.json` 时项目 Deploy 退回保守模式，不执行清理。
@@ -175,6 +183,7 @@ targets:
 ```text
 my-mcv-config/
 ├── mcv.yaml
+├── profiles.yaml
 ├── common/
 │   ├── AGENTS.md
 │   ├── skills/
@@ -220,8 +229,7 @@ MCV 对配置内容保持中立，不提供保密保证。
 ## 当前限制
 
 - 仅支持 Codex、Claude Code 和 Gemini。
-- Profile 管理：TTY 中 `mcv profile` / `mcv profile edit <id>` 打开专用全屏 TUI；CLI mutation flags 与隐藏的 `mcv mcp` 集成入口（含 `update_profiles` / `deploy_profiles` 与按需分类指南 Resource）继续可用。
-
+- Profile 管理：TTY 中 `mcv profile` / `mcv profile edit <id>` 打开专用全屏 TUI；非交互 mutation 走 `mcv profile` 子命令；Agent 集成走 `mcv mcp`（`inspect_inventory`、`read_assets`、`update_profiles`、`deploy_profiles`，以及按需 `mcv://guides/profile-classification` Resource）。
 - `restore` 只恢复本机 Deploy backup（默认当前项目；`--global` 选择全局），不读取仓库。
 - 没有变化的重复 deploy 不生成新备份。
 - restore 后清除部署基线，要求重新 deploy 或 capture 后再建立事实基线。

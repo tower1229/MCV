@@ -2,12 +2,12 @@
 
 **项目名称：** MCV
 **项目全称：** Mobile Configuration Vehicle
-**版本：** PRD 0.2 beta
+**版本：** PRD 0.3 beta
 **项目口号：** 可以随处部署的个人生产力，帝国的第一个建筑。
 **项目属性：** 数字主权生态基础设施
 **目标平台：** macOS、Windows
 **首期目标 IDE：** Codex、Claude Code、Gemini (涵盖 Gemini CLI 和 Antigravity)
-**实现状态（2026-08-05）：** Repository schema v3、operation schema v2；Gemini 为单目标双 Surface；配置数据中立；支持 Repository 生命周期、v1/v2 显式迁移、事务部署、linked Skill 决策与漂移保护恢复。
+**实现状态（2026-08-08）：** Repository schema v4、Profiles schema v1、operation schema v3、device state v3、Managed Receipt v1；项目为默认 Deploy scope；内置 global Profile；专用 Profile TUI 与本地 MCP Profile 工具；配置数据中立；事务部署与 Overlay 保留。0.3 详细设计见 `docs/prd/MCV-v0.3-Profile-Deploy-Technical-Design.md` 与 ADR 0011–0014。
 
 ---
 
@@ -676,14 +676,16 @@ MCV 是忠实转移用户配置的数据工具，不是密钥管理器，也不�
 
 Repository schema v3 删除 `security` 字段。v2→v3 只升级版本并删除该字段，不修改配置内容；v1→v3 在既有布局规范化后执行同一删除。旧 schema 在迁移前不得执行普通业务操作。
 
-Operation schema v2 的附加契约：
+Repository schema v4 将 Profile 数据移出 `mcv.yaml`，写入根级 `profiles.yaml`（Profiles schema v1），并在迁移时创建内置 `global` Profile。device state 升级到 v3；项目 Deploy 写入 Managed Receipt v1（`<target>/.mcv/managed.json`）。
+
+Operation schema：Deploy 使用 v3；消费 JSON 的脚本必须读取 `schemaVersion` 并拒绝未知版本。v2 起的附加契约仍适用：
 
 - Capture summary 不再包含敏感字段计数；Status JSON 不包含 `changes`。
 - 每个 warning 使用唯一稳定的 `confirmationId`，`code` 只表示类别；selection 使用 `confirmedIssueIds`。
 - Pending 输出 `add/modify/delete/total/recommended/optional/advancedCleanupExcluded`。Skill 按 `(IDE, Surface, package)` 聚合，Canonical materialization 不重复计数。
 - Environment 只扫描 MCV 实际解释的 manifest、MCP 和 Native structured configuration，不扫描 Rules、Skills、references 或普通 Markdown。
 - linked Skill 由核心 `CanonicalSkillLinkFact` 统一表达。per-package divergent 外部链接要求 Preserve/Replace；shared-root divergent 只能 Preserve；dangling、cycle、unclassified、physical-target-conflict 和 Canonical Store divergent 为 error。Replace 只移除链接节点，绝不写穿外部目标，且 `--yes` 始终阻断。
-
+- 裸 `mcv deploy` 为用法错误（exit 2）；项目为默认 Deploy scope；`--global` 恢复设备全局部署。
 ---
 
 ## 15. 仓库初始化和绑定
@@ -1227,16 +1229,15 @@ Claude Code   1 local managed change
 
 ---
 
-## 23. 本机部署选择
+## 23. 本机部署选择与 Profile
 
-当前 beta 只记录每台设备最近一次成功 Deploy 的 IDE/capability selection，并在下次 TTY Deploy 中复用。该记录：
+本机仍可记录每台设备最近一次成功 Deploy 的 IDE/capability selection，并在下次交互 Deploy 中复用。该记录：
 
 - 只保存在本机状态中，不进入 Repository；
 - 不具备名称、继承、共享或多环境语义；
-- 不是 `Profile`、`Preset` 或其他可移植资产；
 - 在实际 Apply 成功后按本次范围更新。
 
-未来是否需要命名、可移植、按项目或按环境作用域的配置资产，必须先通过用户研究定义场景和边界，再以独立 PRD/ADR 决定名称、存储布局与迁移方式。当前文档不预留 `profiles/` 或 `presets/` 目录。
+可移植的资产选择由 Repository 根级 `profiles.yaml` 中的 Profile 承担（见 0.3 技术方案与 ADR 0011–0012）：Profile 只选择 Asset，Deploy scope（默认项目，或 `--global`）只决定写入位置。不引入 Profile 继承、组合声明、tag 查询或跨设备 Project Binding。
 
 ---
 
@@ -1245,6 +1246,7 @@ Claude Code   1 local managed change
 ```text
 my-mcv/
 ├─ mcv.yaml
+├─ profiles.yaml
 ├─ common/
 │  ├─ AGENTS.md
 │  ├─ skills/
@@ -1628,9 +1630,9 @@ MCV 默认遵循：
 - JSON 优先实现字段级 Overlay；
 - TOML 和 YAML 先采用预定义字段合并；
 - 不提供复杂 Capture 历史；
-- 不提供图形界面；
+- 不提供图形界面（Profile 维护保留专用全屏 TUI；裸 `mcv` 为 plain Overview）；
 - 不自动操作 Git；
-- 不提供命名 Profile/Preset 资产管理；
+- 不提供 Profile 继承、组合声明、tag 查询或跨设备 Project Binding；
 - 不安装 IDE；
 - 不提供独立的凭据清单、Vault 或凭据生命周期；支持配置中的同类值仍忠实传输。
 
@@ -1638,37 +1640,38 @@ MCV 默认遵循：
 
 ## 35. 后续路线
 
-`0.2.0-beta.1` 之后的路线尚未承诺版本。先用 beta 验证首次成功、跨设备恢复、失败可诊断性和支持矩阵，再从以下候选主题中选择一个主目标：
+`0.3.0-beta.1` 之后的路线尚未承诺版本。先用 beta 验证 Profile Deploy、项目 Managed Receipt、Agent MCP 写入和双平台终端行为，再从以下候选主题中选择一个主目标：
 
 - 可靠性与可诊断性：`doctor`/support bundle、兼容性证据、恢复演练和更清晰的错误行动建议；
-- 配置组织：命名且有明确作用域的资产，但必须先验证用户是在解决设备、项目、身份还是团队环境问题；
-- 支持面扩展：新的 IDE、Surface 或开发工具，必须以实际配置所有权与 loader evidence 为准；
+- 配置组织深化：Profile 继承/条件、多文件 Canonical Rules、项目本地资产反向 Capture（须先定义作用域）；
+- 支持面扩展：新的 IDE、Surface 或开发工具，必须以实际配置所有权与 loader evidence 为准（含 Antigravity 项目级 loader）；
 - 分发体验：独立二进制、安装升级与发布通道；
 - 外部安全集成：用户自选的加密、访问控制或 Secret Provider，不改变 MCV 的配置数据中立边界。
 
-候选进入开发前必须补充对应 PRD/ADR、成功指标、迁移策略和双平台验收。尤其不得在没有作用域定义时预先固化 `Profile`/`Preset` 名称或 Repository 目录。
+候选进入开发前必须补充对应 PRD/ADR、成功指标、迁移策略和双平台验收。
 
 ---
 
 ## 36. 验收标准
 
-MCV `0.2.0-beta.1` 达到预发布状态，需要满足：
+MCV `0.3.0-beta.1` 达到预发布状态，需要满足 0.2 闭环之上的 0.3 条件（详见技术方案 §20），其中包括：
 
-1. 用户可以在自选目录成功初始化数据仓库。
+1. 用户可以在自选目录成功初始化 schema v4 数据仓库与内置 global Profile。
 2. 初始化后可以在任意目录调用 MCV。
 3. MCV 始终只操作已绑定仓库，除非用户显式指定其他路径。
 4. 新设备可以绑定克隆后的同一仓库。
 5. 至少三个目标 IDE (Codex, Claude Code, Gemini) 都能被正确检测。
 6. 每个目标 IDE 至少支持原生配置收集和恢复。
-7. 支持的通用规则、Skills 和 MCP 可以跨 IDE 部署。
-8. Capture 不会未经确认修改仓库。
-9. 部署不会未经确认覆盖本机配置。
-10. 所有覆盖操作都有可恢复备份。
+7. 支持的通用规则、Skills 和 MCP 可以跨 IDE 部署；项目 scope 为默认，`--global` 保留设备全局事务安全。
+8. Capture 不会未经确认修改仓库；新 Asset 默认进入 Unassigned。
+9. 部署不会未经确认覆盖本机配置；裸 `mcv deploy` 以 exit 2 拒绝无目标写入。
+10. 所有覆盖操作都有可恢复备份；项目清理只作用于 Managed Receipt 且未漂移的内容。
 11. 支持范围内的配置内容保持忠实，明文密钥可以进入数据仓库且责任边界有明确说明。
 12. 未知 IDE 原生字段不会因为 MCV 不认识而丢失。
-13. macOS 与 Windows 的核心流程行为一致。
+13. macOS 与 Windows 的核心流程行为一致；Profile TUI 保留 PTY/ConPTY 门。
 14. 仓库移动后可以重新绑定。
-15. 普通用户只通过交互式菜单即可完成完整流程。
+15. Agent 可通过本地 MCP 完成多 Profile 更新与 Deploy，无需打开 TUI Apply。
+16. JSON 消费方按 `schemaVersion` 拒绝未知 operation schema。
 
 ---
 

@@ -1,12 +1,12 @@
 # Release checklist
 
-Use this checklist for `0.2.0-beta.1`. Publishing and tagging are maintainer-confirmed actions; repository changes alone do not publish a package.
+Use this checklist for `0.3.0-beta.1`. Publishing and tagging are maintainer-confirmed actions; repository changes alone do not publish a package.
 
 ## Release candidate
 
-- [ ] `package.json` and `package-lock.json` use `0.2.0-beta.1`.
-- [ ] `CHANGELOG.md` describes user-visible changes, security updates, and migration requirements.
-- [ ] README, PRD, ADRs, and maintainer instructions agree on the current product contract.
+- [ ] `package.json` and `package-lock.json` use `0.3.0-beta.1`.
+- [ ] `CHANGELOG.md` describes user-visible changes, the breaking Deploy CLI change, every schema bump, security updates, and migration requirements.
+- [ ] README, CONTEXT, PRD, ADRs 0011–0014, and maintainer instructions agree on the current product contract (project is the default Deploy scope; bare `mcv deploy` exits 2).
 - [ ] `npm audit` reports zero known vulnerabilities.
 - [ ] `npm ci` completes with Node.js `>=22.12.0`.
 - [ ] `npm run typecheck` passes.
@@ -29,9 +29,9 @@ Profile TUI PTY notes: macOS Verify requires `/usr/bin/expect` and `/bin/zsh`; W
 
 - [ ] Merge the verified release candidate.
 - [ ] Run `npm publish --tag beta` from a clean `master` checkout.
-- [ ] Verify `npm view @tower1229/mcv@0.2.0-beta.1 version`.
-- [ ] Create and push annotated tag `v0.2.0-beta.1`.
+- [ ] Verify `npm view @tower1229/mcv@0.3.0-beta.1 version`.
+- [ ] Create and push annotated tag `v0.3.0-beta.1`.
 - [ ] Create a GitHub prerelease from the matching changelog entry.
 - [ ] Install the published package in a clean environment and run `mcv --help`, `mcv --version`, and `mcv discover`.
 
-Do not move the npm `latest` tag until beta feedback confirms migration, terminal behavior, and cross-device deployment on both supported operating systems.
+Do not move the npm `latest` tag until beta feedback confirms migration, Profile Deploy scopes, terminal behavior, and cross-device deployment on both supported operating systems.

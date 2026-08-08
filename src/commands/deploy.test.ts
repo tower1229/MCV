@@ -315,10 +315,12 @@ describe('mcv deploy', () => {
     expect(fs.readFileSync(path.join(divergentLegacySkill, 'SKILL.md'), 'utf8')).toBe('# Legacy TDD\n');
     expect(fs.readFileSync(path.join(homeDir, '.agents', 'skills', 'grill-me', 'SKILL.md'), 'utf8')).toBe('# Grill Me\n');
 
+    // Interactive confirmation is required: this Plan both restores pruned legacy
+    // files and deletes the newly deployed Canonical Skill copies. --yes blocks deletes.
     await restoreLatestBackup(
       deviceContext('win32'),
       { confirmRestore: async () => true },
-      { global: true, yes: true },
+      { global: true },
     );
     expect(fs.readFileSync(path.join(duplicateLegacySkill, 'SKILL.md'), 'utf8')).toBe('# Grill Me\n');
     expect(fs.readFileSync(path.join(duplicateLegacySkill, 'references', 'questions.md'), 'utf8')).toBe('# Questions\n');

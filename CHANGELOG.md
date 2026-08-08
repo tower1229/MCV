@@ -6,12 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.0-beta.1] - 2026-08-08
+
+This prerelease adds Profiles, project-default Deploy, Managed Receipts, and local MCP Profile tools on top of the 0.2 transaction and Overlay contracts. Treat Repository files, backups, terminal previews, and JSON output as data that may contain plaintext credentials.
+
+### Breaking
+
+- Bare `mcv deploy` (and `mcv deploy --yes` without a Profile) is now a usage error: exit code 2, no writes. Project is the default Deploy scope; restore the previous “deploy everything globally” behavior with `mcv deploy --global` (equivalent to `mcv deploy global --global`).
+- JSON Deploy operations use schema v3. Consumers must read `schemaVersion` and reject unknown versions rather than assuming a fixed shape.
+
 ### Added
 
-- MCP write tools `update_profiles` and `deploy_profiles`, plus the on-demand `mcv://guides/profile-classification` resource, so Agents can atomically mutate Profiles and invoke Deploy over the local stdio server without opening the TUI.
-- Dedicated Profile maintenance TUI (`mcv profile`, `mcv profile edit <id>`) with a three-pane Ink layout, search, Asset-type and technical-compatibility filters, ProfileService-backed save with Revision conflict reporting, and macOS PTY / Windows ConPTY restoration gates.
+- Repository schema v4 with root `profiles.yaml` (Profiles schema v1) and a built-in undeletable `global` Profile seeded with all Assets at migration.
+- Device state schema v3 (managed inventory scoped as `global`) and project Managed Receipt v1 at `<target>/.mcv/managed.json`.
+- Profile CLI (`mcv profile` list/show/create/edit/delete) and a dedicated Profile maintenance TUI (`mcv profile`, `mcv profile edit <id>`) with search, Asset-type and technical-compatibility filters, Revision conflict reporting, and macOS PTY / Windows ConPTY restoration gates.
 - Project-scope Deploy overlays selected MCP servers at key granularity into Codex `.codex/config.toml`, Claude Code `.mcp.json`, and Gemini CLI `.gemini/settings.json`, preserving non-MCV servers and recording Managed Receipt ownership; unrecorded same-name conflicts require Preserve/Replace and are never cleared by `--yes`. Antigravity remains global-only with a `projectScopeUnsupported` notice.
 - Project-scope `--prune-managed` offers Advanced Cleanup deletion candidates for Managed Receipt–owned assets that left the current selection, still match the receipt hash, and have no Drift — Rules strip unmodified Managed Blocks only; Skills/MCP remove owned packages or server keys; missing `managed.json` stays conservative with no cleanup. Ordinary Deploy never deletes; `--yes` still blocks prune candidates.
+- MCP write tools `update_profiles` and `deploy_profiles`, plus the on-demand `mcv://guides/profile-classification` resource, so Agents can atomically mutate Profiles and invoke Deploy over the local stdio server without opening the TUI.
+- Newly captured Assets land in Unassigned until a Profile references them; Unassigned Assets are never deployed.
 
 ### Changed
 
@@ -23,6 +35,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Removed
 
 - Global Shell routes, shell state, snapshots, and the former multi-route Shell PTY release gates. Profile maintenance keeps a dedicated fullscreen TUI.
+
+### Upgrade notes
+
+- Existing schema v3 repositories must review `mcv migrate --dry-run`, then run `mcv migrate` before Capture or Deploy. Migration creates `profiles.yaml` with `global` containing every then-existing Asset and upgrades the manifest to schema v4 without rewriting Canonical or Native content.
+- Scripts that previously ran bare `mcv deploy` must pass `--global` (or an explicit Profile plus `--global`) for device-global writes, or pass one or more Profile IDs for project-scope Deploy.
+- Scripts that consume JSON output must support operation schema v3 for Deploy and reject unknown `schemaVersion` values.
 
 ## [0.2.0-beta.1] - 2026-08-05
 
@@ -57,4 +75,5 @@ This prerelease replaces the stale public `0.1.0` package with the current repos
 - Schema v3 removes the former `security` manifest field. Migration does not rewrite configuration values.
 - Scripts that consume JSON output must support operation schema v2.
 
+[0.3.0-beta.1]: https://github.com/tower1229/MCV/releases/tag/v0.3.0-beta.1
 [0.2.0-beta.1]: https://github.com/tower1229/MCV/releases/tag/v0.2.0-beta.1

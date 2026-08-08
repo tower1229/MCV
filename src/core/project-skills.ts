@@ -111,5 +111,5 @@ export function projectSkillPackage(
 }
 
 function normalizeSkillRelativePath(relativePath: string): string {
-  return relativePath.split(path.sep).join('/');
+  return relativePath.replace(/\\/g, '/');
 }

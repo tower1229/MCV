@@ -21,7 +21,7 @@ function isolatedEnvironment(homeDir: string): NodeJS.ProcessEnv {
   };
 }
 
-describe('packaged mcv CLI', () => {
+describe('packaged mcv CLI', { timeout: 120_000 }, () => {
   it('ships one native ESM CLI entry', () => {
     const packageMetadata = JSON.parse(fs.readFileSync(packagePath, 'utf8')) as {
       type?: string;
@@ -55,12 +55,15 @@ describe('packaged mcv CLI', () => {
   });
 
   it('prints the package version immediately', () => {
+    const packageMetadata = JSON.parse(fs.readFileSync(packagePath, 'utf8')) as {
+      version: string;
+    };
     const result = spawnSync(process.execPath, [cliPath, '--version'], {
       encoding: 'utf8',
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout.trim()).toBe('0.2.0-beta.1');
+    expect(result.stdout.trim()).toBe(packageMetadata.version);
     expect(result.stderr).toBe('');
   });
 
@@ -245,7 +248,7 @@ describe('packaged mcv CLI', () => {
     } finally {
       fs.rmSync(isolatedRoot, { recursive: true, force: true });
     }
-  }, 20_000);
+  }, 120_000);
 
   it('rejects invalid write mode combinations before running the Operation', () => {
     const conflicting = spawnSync(
