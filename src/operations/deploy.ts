@@ -60,16 +60,23 @@ import {
   projectCanonicalRulesFile,
   type ProjectRulesFileName,
 } from '../core/project-rules.js';
-import { managedReceiptKey } from '../core/managed-block.js';
+import {
+  extractManagedBlock,
+  hashManagedBlockBody,
+  managedReceiptKey,
+  removeManagedBlock,
+} from '../core/managed-block.js';
 import {
   projectSkillDestinationRoots,
   projectSkillPackage,
   type ProjectSkillRelativeRoot,
 } from '../core/project-skills.js';
 import {
+  hashProjectMcpServerValue,
   overlayProjectMcpFile,
   projectMcpDestinationTargets,
   projectMcpServer,
+  removeProjectMcpServers,
   type ProjectMcpTarget,
 } from '../core/project-mcp.js';
 import { toNativeMcpServers } from '../core/mcp.js';
@@ -142,7 +149,8 @@ export type DeployDeploymentKind =
   | 'topology-migration'
   | 'external-link-replacement'
   | 'project-skill-package'
-  | 'project-mcp-overlay';
+  | 'project-mcp-overlay'
+  | 'project-managed-prune';
 
 export type DeployIde = CanonicalSkillIde;
 
@@ -188,6 +196,7 @@ export type DeployPlan = Plan<DeployChange> & DeployContextFields & {
   linkOutcomes: DeployLinkOutcome[];
   linkFacts: CanonicalSkillLinkFact[];
   decisions: DeployDecision[];
+  pruneManaged?: boolean;
 };
 
 export interface DeploySelection {
@@ -264,6 +273,12 @@ interface DeployMutation {
     target: ProjectMcpTarget;
     serversToWrite: Record<string, Record<string, unknown>>;
   };
+  mcpPrune?: {
+    target: ProjectMcpTarget;
+    serverNames: string[];
+  };
+  receiptKey?: string;
+  receiptEntry?: { assetId: string; hash: string };
 }
 
 interface ActiveDeployPlan {
@@ -426,10 +441,12 @@ async function buildDeployPlan(
 
   let desired: SourcedDeployFile[] = [];
   const receiptEntries = new Map<string, { assetId: string; hash: string }>();
+  const prunedReceiptKeys = new Set<string>();
   const projectSkillChanges: DeployChange[] = [];
   const projectSkillDecisions: DeployDecision[] = [];
   const projectMcpChanges: DeployChange[] = [];
   const projectMcpDecisions: DeployDecision[] = [];
+  const projectPruneChanges: DeployChange[] = [];
   if (activeRequest.scope === 'project') {
     const validated = validateProjectTargetRoot(activeRequest.targetRoot, context, {
       boundRepositoryPath: repositoryPath,
@@ -454,6 +471,7 @@ async function buildDeployPlan(
         }],
         nextActions: validated.error.nextActions,
         error: validated.error,
+        pruneManaged: activeRequest.pruneManaged === true,
         ...activeFields,
       };
     }
@@ -563,6 +581,18 @@ async function buildDeployPlan(
       mutations,
       selectionIssues,
     );
+
+    if (activeRequest.pruneManaged === true) {
+      appendProjectManagedPrunePlan(
+        activeRequest.targetRoot,
+        receipt,
+        receiptEntries,
+        prunedReceiptKeys,
+        projectPruneChanges,
+        mutations,
+        selectionIssues,
+      );
+    }
 
     if (selectionIssues.some((issue) => issue.severity === 'error')) {
       const errorIssue = selectionIssues.find((issue) => issue.severity === 'error')!;
@@ -699,6 +729,7 @@ async function buildDeployPlan(
   ];
   changes.push(...projectSkillChanges);
   changes.push(...projectMcpChanges);
+  changes.push(...projectPruneChanges);
 
   const legacyDuplicates = findLegacyCodexSkillDuplicates(
     context,
@@ -850,6 +881,7 @@ async function buildDeployPlan(
     activeRequest,
     manifest.repositoryId,
     receiptEntries,
+    prunedReceiptKeys,
     changes,
     mutations,
     issues,
@@ -882,6 +914,7 @@ async function buildDeployPlan(
     nextActions: blocked
       ? ['Resolve every decisionRequired or error Issue, then regenerate the Deploy Plan.']
       : [],
+    pruneManaged: activeRequest.pruneManaged === true,
     ...activeFields,
   };
 }
@@ -1157,7 +1190,8 @@ export async function applyDeployPlan(
       selected.has(change.id)
       && (asProjectRulesFileName(path.relative(plan.targetRoot, change.targetPath)) !== undefined
         || change.deploymentKind === 'project-skill-package'
-        || change.deploymentKind === 'project-mcp-overlay'));
+        || change.deploymentKind === 'project-mcp-overlay'
+        || change.deploymentKind === 'project-managed-prune'));
     if (receiptChange && managedSelected && !selected.has(receiptChange.id)) {
       selected.add(receiptChange.id);
       selectedIds.push(receiptChange.id);
@@ -1247,6 +1281,7 @@ export async function applyDeployPlan(
 
   applyProjectSkillReceiptDecisions(plan, selection, selected, selectedIds, active.mutations);
   applyProjectMcpOverlayDecisions(plan, selection, active.mutations);
+  applyProjectPruneReceiptDecisions(plan, selected, selectedIds, active.mutations);
   const selectedChanges = plan.changes.filter((change) => selected.has(change.id));
   const prepared = prepareDeployWrites(selectedChanges, active.mutations);
   if (selectedChanges.length === 0) {
@@ -1385,7 +1420,9 @@ function deployBlockingIssues(
   if (options.nonInteractive) {
     const unsafe = plan.issues.some((issue) => issue.severity !== 'notice')
       || plan.changes.some((change) =>
-        change.change === 'delete' || change.deploymentKind === 'topology-migration');
+        change.change === 'delete'
+        || change.deploymentKind === 'topology-migration'
+        || change.deploymentKind === 'project-managed-prune');
     return unsafe ? [{
       severity: 'decisionRequired',
       code: 'deploy.nonInteractiveBlocked',
@@ -1434,6 +1471,7 @@ function deployRequestFromPlan(plan: DeployPlan): DeployRequest {
       catalogRevision: plan.catalogRevision,
       assetIds: [...plan.assetIds],
     },
+    pruneManaged: plan.pruneManaged === true,
   };
 }
 
@@ -1460,6 +1498,20 @@ function prepareDeployWrites(
   return [...grouped].map(([targetPath, targetChanges]) => {
     if (targetChanges.some((change) => change.change === 'delete')) {
       return { targetPath, change: 'delete' as const };
+    }
+    const mcpPruneChanges = targetChanges.filter((change) =>
+      mutations.get(change.id)?.mcpPrune !== undefined);
+    if (mcpPruneChanges.length > 0) {
+      const serverNames = [...new Set(mcpPruneChanges.flatMap((change) =>
+        mutations.get(change.id)?.mcpPrune?.serverNames ?? []))];
+      const target = mutations.get(mcpPruneChanges[0].id)?.mcpPrune?.target;
+      if (!target) throw new Error(`Missing active Deploy MCP prune mutation for ${targetPath}.`);
+      const existing = fs.existsSync(targetPath) ? fs.readFileSync(targetPath, 'utf8') : '';
+      return {
+        targetPath,
+        change: 'write' as const,
+        content: Buffer.from(removeProjectMcpServers(existing, target, serverNames), 'utf8'),
+      };
     }
     const mutation = mutations.get(targetChanges[0].id);
     if (targetChanges.some((change) => change.deploymentKind === 'topology-migration')) {
@@ -2294,11 +2346,13 @@ function appendManagedReceiptChange(
   request: DeployRequest,
   repositoryId: string,
   receiptEntries: Map<string, { assetId: string; hash: string }>,
+  prunedReceiptKeys: Set<string>,
   changes: DeployChange[],
   mutations: Map<string, DeployMutation>,
   issues: Issue[],
 ): void {
-  if (request.scope !== 'project' || receiptEntries.size === 0) return;
+  if (request.scope !== 'project') return;
+  if (receiptEntries.size === 0 && prunedReceiptKeys.size === 0) return;
 
   const existing = readManagedReceipt(request.targetRoot);
   const next: ManagedReceipt = {
@@ -2308,6 +2362,9 @@ function appendManagedReceiptChange(
   };
   for (const [key, entry] of receiptEntries) {
     next.managed[key] = entry;
+  }
+  for (const key of prunedReceiptKeys) {
+    delete next.managed[key];
   }
   const receiptPath = managedReceiptPath(request.targetRoot);
   try {
@@ -2348,6 +2405,213 @@ function appendManagedReceiptChange(
         : `Update Managed Receipt at ${receiptPath}`,
     },
   });
+}
+
+function appendProjectManagedPrunePlan(
+  targetRoot: string,
+  receipt: ManagedReceipt | undefined,
+  receiptEntries: Map<string, { assetId: string; hash: string }>,
+  prunedReceiptKeys: Set<string>,
+  changes: DeployChange[],
+  mutations: Map<string, DeployMutation>,
+  issues: Issue[],
+): void {
+  if (!receipt) return;
+
+  const mcpTargets = new Map(
+    projectMcpDestinationTargets({
+      codex: true,
+      claudeCode: true,
+      geminiCli: true,
+    }).map((target) => [target.relativePath, target]),
+  );
+
+  for (const [key, entry] of Object.entries(receipt.managed)) {
+    if (receiptEntries.has(key)) continue;
+    const parsed = parseManagedReceiptKey(key);
+    try {
+      if (parsed.assetId === CANONICAL_RULES_ASSET_ID) {
+        const rulesName = asProjectRulesFileName(parsed.relativePath);
+        if (!rulesName) continue;
+        const targetPath = path.join(targetRoot, rulesName);
+        assertPathContainedInProjectRoot(targetRoot, targetPath);
+        if (!fs.existsSync(targetPath)) continue;
+        const previous = fs.readFileSync(targetPath, 'utf8');
+        const body = extractManagedBlock(previous, CANONICAL_RULES_ASSET_ID);
+        if (body === undefined || hashManagedBlockBody(body) !== entry.hash) continue;
+        const nextContent = Buffer.from(removeManagedBlock(previous, CANONICAL_RULES_ASSET_ID), 'utf8');
+        const id = selectionId('project-prune', 'rules', `${targetPath}\0${key}`);
+        mutations.set(id, {
+          content: nextContent,
+          receiptKey: key,
+          receiptEntry: entry,
+        });
+        changes.push({
+          id,
+          owner: 'ide',
+          ide: 'codex',
+          capability: 'rules',
+          name: displayName(targetPath, 'rules'),
+          targetPath,
+          change: 'modify',
+          defaultSelected: false,
+          group: 'advanced',
+          strategy: 'replace-entire-file',
+          deploymentKind: 'project-managed-prune',
+          preview: preview(targetPath, 'codex', 'rules', nextContent, Buffer.from(previous), issues),
+        });
+        prunedReceiptKeys.add(key);
+        continue;
+      }
+
+      if (parsed.assetId?.startsWith('mcp:')) {
+        const target = mcpTargets.get(parsed.relativePath);
+        if (!target) continue;
+        const serverName = parsed.assetId.slice('mcp:'.length);
+        const targetPath = path.join(targetRoot, ...target.relativePath.split('/'));
+        assertPathContainedInProjectRoot(targetRoot, targetPath);
+        if (!fs.existsSync(targetPath)) continue;
+        let document: Record<string, unknown>;
+        try {
+          document = parseStructuredObject(
+            fs.readFileSync(targetPath, 'utf8'),
+            target.format,
+            targetPath,
+          );
+        } catch {
+          continue;
+        }
+        const servers = isRecord(document[target.serversKey])
+          ? document[target.serversKey] as Record<string, unknown>
+          : undefined;
+        if (!servers || !(serverName in servers)) continue;
+        if (hashProjectMcpServerValue(servers[serverName]) !== entry.hash) continue;
+        const id = selectionId('project-prune', 'mcp', `${targetPath}\0${key}`);
+        mutations.set(id, {
+          mcpPrune: { target, serverNames: [serverName] },
+          receiptKey: key,
+          receiptEntry: entry,
+        });
+        changes.push({
+          id,
+          owner: 'ide',
+          ide: target.ide,
+          capability: 'mcp',
+          name: serverName,
+          targetPath,
+          change: 'modify',
+          defaultSelected: false,
+          group: 'advanced',
+          strategy: 'replace-entire-file',
+          deploymentKind: 'project-managed-prune',
+          preview: {
+            targetPath,
+            kind: 'text',
+            bytes: 0,
+            sha256: hashText(`prune-mcp:${serverName}`),
+            diff: `Remove MCV-owned MCP server ${serverName} from ${targetPath}`,
+          },
+        });
+        prunedReceiptKeys.add(key);
+        continue;
+      }
+
+      // Skill package keys are relative paths without an #mcv: suffix.
+      if (parsed.assetId !== undefined) continue;
+      const targetPath = path.join(targetRoot, ...parsed.relativePath.split('/'));
+      assertPathContainedInProjectRoot(targetRoot, targetPath);
+      if (!deployPathExists(targetPath)) continue;
+      try {
+        const stat = fs.lstatSync(targetPath);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      if (hashSkillPackageContent(targetPath) !== entry.hash) continue;
+      const id = selectionId('project-prune', 'skills', targetPath);
+      mutations.set(id, {
+        receiptKey: key,
+        receiptEntry: entry,
+      });
+      changes.push({
+        id,
+        owner: 'ide',
+        ide: parsed.relativePath.startsWith('.claude/') ? 'claude-code' : 'codex',
+        surface: parsed.relativePath.startsWith('.claude/') ? 'claude-code' : 'codex',
+        capability: 'skills',
+        name: path.basename(targetPath),
+        targetPath,
+        change: 'delete',
+        defaultSelected: false,
+        group: 'advanced',
+        strategy: 'replace-entire-file',
+        deploymentKind: 'project-managed-prune',
+        preview: {
+          targetPath,
+          kind: 'text',
+          bytes: 0,
+          sha256: hashText(`prune-skill:${parsed.relativePath}`),
+          diff: `Remove MCV-owned Skill package at ${targetPath}`,
+        },
+      });
+      prunedReceiptKeys.add(key);
+    } catch (error) {
+      issues.push({
+        severity: 'error',
+        code: 'deploy.containmentFailed',
+        message: errorMessage(error),
+      });
+    }
+  }
+}
+
+function parseManagedReceiptKey(key: string): { relativePath: string; assetId?: string } {
+  const marker = '#mcv:';
+  const index = key.indexOf(marker);
+  if (index < 0) return { relativePath: key };
+  return {
+    relativePath: key.slice(0, index),
+    assetId: key.slice(index + marker.length),
+  };
+}
+
+function applyProjectPruneReceiptDecisions(
+  plan: DeployPlan,
+  selected: Set<string>,
+  selectedIds: string[],
+  mutations: Map<string, DeployMutation>,
+): void {
+  if (plan.scope !== 'project') return;
+  const receiptChange = plan.changes.find((change) =>
+    change.name === 'Managed Receipt'
+    && change.targetPath === managedReceiptPath(plan.targetRoot));
+  if (!receiptChange) return;
+  const receiptMutation = mutations.get(receiptChange.id);
+  if (!receiptMutation?.content) return;
+
+  const parsed = JSON.parse(receiptMutation.content.toString('utf8')) as ManagedReceipt;
+  let changed = false;
+  for (const change of plan.changes) {
+    if (change.deploymentKind !== 'project-managed-prune') continue;
+    const mutation = mutations.get(change.id);
+    if (!mutation?.receiptKey || !mutation.receiptEntry) continue;
+    if (selected.has(change.id)) continue;
+    parsed.managed[mutation.receiptKey] = mutation.receiptEntry;
+    changed = true;
+  }
+  if (!changed) return;
+
+  const nextContent = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+  const previous = fs.existsSync(receiptChange.targetPath)
+    ? fs.readFileSync(receiptChange.targetPath)
+    : undefined;
+  if (previous?.equals(nextContent)) {
+    selected.delete(receiptChange.id);
+    const index = selectedIds.indexOf(receiptChange.id);
+    if (index >= 0) selectedIds.splice(index, 1);
+    return;
+  }
+  mutations.set(receiptChange.id, { content: nextContent });
 }
 
 function appendProjectSkillPlan(

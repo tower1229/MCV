@@ -31,6 +31,18 @@ export function extractManagedBlock(content, assetId) {
     const inner = content.slice(range.bodyStart, range.bodyEnd);
     return normalizeBlockBody(inner);
 }
+/** Remove an MCV Managed Block and keep surrounding file content. */
+export function removeManagedBlock(content, assetId) {
+    const range = findManagedBlockRange(content, assetId);
+    if (!range)
+        return content;
+    let before = content.slice(0, range.start);
+    let after = content.slice(range.end);
+    if (before.endsWith('\n') && after.startsWith('\n')) {
+        after = after.slice(1);
+    }
+    return `${before}${after}`;
+}
 export function managedBlockDrifted(content, assetId, expectedBody) {
     const current = extractManagedBlock(content, assetId);
     if (current === undefined)

@@ -169,6 +169,25 @@ export function overlayProjectMcpFile(
   }, target.format);
 }
 
+/** Remove named MCP server keys while preserving the rest of the document. */
+export function removeProjectMcpServers(
+  existingContent: string,
+  target: ProjectMcpTarget,
+  serverNames: readonly string[],
+): string {
+  const document = parseStructuredObject(existingContent, target.format, target.relativePath);
+  const currentServers = isRecord(document[target.serversKey])
+    ? { ...(document[target.serversKey] as Record<string, unknown>) }
+    : {};
+  for (const name of serverNames) {
+    delete currentServers[name];
+  }
+  const next = { ...document };
+  if (Object.keys(currentServers).length === 0) delete next[target.serversKey];
+  else next[target.serversKey] = currentServers;
+  return stringifyStructuredObject(next, target.format);
+}
+
 function stableValue(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableValue).join(',')}]`;
   if (isRecord(value)) {

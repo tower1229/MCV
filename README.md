@@ -148,7 +148,7 @@ mcv discover   打印 Environment Report；--json 输出结构化 Report
 mcv restore    一次性 Restore Plan/确认/Apply；--dry-run/--yes/--json
 ```
 
-删除默认不执行。只有 `mcv deploy --prune-managed` 经交互确认后，才会删除本机 state 中已记录为 MCV managed、但仓库已不再生成的文件，以及与本次 Canonical 部署逐文件完全一致的旧 `$CODEX_HOME/skills` Skill 副本；`--yes` 永远拒绝删除与 topology migration。普通 deploy 检测到后一种重复时会提示，不会自动删除；内容不同或包含链接的 legacy Skill 会保留。
+删除默认不执行。只有 `mcv deploy --prune-managed` 经交互确认后，才会清理不再需要且仍由 MCV 拥有的内容：全局 scope 删除本机 state 中已记录为 managed、但仓库已不再生成的文件，以及与本次 Canonical 部署逐文件完全一致的旧 `$CODEX_HOME/skills` Skill 副本；项目 scope 仅删除出现在 `<target>/.mcv/managed.json`、哈希未漂移、且当前 selection 已不再需要的资产（Rules 只去掉未修改的 Managed Block）。`--yes` 永远拒绝删除、topology migration 与项目 prune 候选。普通 deploy 检测到 legacy Codex Skill 重复时会提示，不会自动删除；内容不同或包含链接的 legacy Skill 会保留。缺少 `managed.json` 时项目 Deploy 退回保守模式，不执行清理。
 
 对于 managed Skill layout：禁用某一个 IDE 只会把该 IDE 的 projection 列为 Advanced Cleanup 候选，不会在其他已启用 projection 仍引用同一 Canonical Device Skill Store package 时删除物理 package。当 Skill 已从仓库移除且所有 projection 都不再需要时，最终物理 package 会作为单独的 Advanced Cleanup 候选（`physical-materialization`，默认不选中），且仅当该 package 完全由 MCV 拥有（记录在 managed Skill layout）时才会出现；外部链接与外部拥有的物理 package 永远不会成为 Restore 写入目标或 cleanup 删除候选。Store 中未登记但与 Canonical 完全一致的 package 会原样复用，只有 MCV 新建的 projection link 会进入 managed state；未登记且内容不同、含额外文件、链接不可验证或拓扑不安全的 package 会阻断 Deploy，不会被覆盖、认领或生成整包 cleanup。
 

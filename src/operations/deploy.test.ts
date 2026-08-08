@@ -2897,6 +2897,163 @@ describe('Deploy operations', () => {
     expect(result4.status).toBe('failed');
     expect(fs.readFileSync(path.join(agentsPackage, 'SKILL.md'), 'utf8')).toBe(beforeAgents);
   });
+
+  it('prunes unneeded Managed Receipt assets only with pruneManaged', async () => {
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'deploy-operation-test',
+      repositoryPath,
+    });
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 4',
+      'repositoryId: deploy-operation-test',
+      'initializedAt: 2026-07-22T00:00:00.000Z',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets:',
+      '  codex: { enabled: true }',
+      '  claudeCode: { enabled: true }',
+      '  gemini:',
+      '    enabled: true',
+      '    surfaces: { geminiCli: true, antigravity: false }',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'review'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md'),
+      '---\nname: review\n---\n# Review\n',
+    );
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: {
+        global: {
+          title: 'Global',
+          assets: ['rule:canonical', 'skill:review', 'mcp:docs'],
+        },
+        full: {
+          title: 'Full',
+          assets: ['rule:canonical', 'skill:review', 'mcp:docs'],
+        },
+        empty: {
+          title: 'Empty',
+          assets: [],
+        },
+      },
+    });
+    const projectRoot = path.join(testRoot, 'project-prune');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), '# Local intro\n');
+
+    const deployFull = buildDeployRequest(repositoryPath, {
+      profileIds: ['full'],
+      scope: 'project',
+      targetRoot: projectRoot,
+    });
+    if ('error' in deployFull) throw new Error(deployFull.error.message);
+    const fullPlan = await createDeployPlan(context, deployFull.request);
+    const fullResult = await applyDeployPlan(context, fullPlan, {
+      changeIds: fullPlan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+    });
+    expect(fullResult.status).toBe('succeeded');
+    expect(fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8')).toContain('<!-- mcv:begin rule:canonical -->');
+    expect(fs.existsSync(path.join(projectRoot, '.agents', 'skills', 'review'))).toBe(true);
+    expect(JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcp.json'), 'utf8')).mcpServers.docs)
+      .toEqual({ command: 'docs-server' });
+
+    const withoutPrune = buildDeployRequest(repositoryPath, {
+      profileIds: ['empty'],
+      scope: 'project',
+      targetRoot: projectRoot,
+    });
+    if ('error' in withoutPrune) throw new Error(withoutPrune.error.message);
+    const ordinaryPlan = await createDeployPlan(context, withoutPrune.request);
+    expect(ordinaryPlan.changes.some((change) => change.group === 'advanced')).toBe(false);
+    expect(fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8')).toContain('<!-- mcv:begin rule:canonical -->');
+
+    const withPrune = buildDeployRequest(repositoryPath, {
+      profileIds: ['empty'],
+      scope: 'project',
+      targetRoot: projectRoot,
+    });
+    if ('error' in withPrune) throw new Error(withPrune.error.message);
+    withPrune.request.pruneManaged = true;
+    const prunePlan = await createDeployPlan(context, withPrune.request);
+    const advanced = prunePlan.changes.filter((change) => change.group === 'advanced');
+    expect(advanced.length).toBeGreaterThan(0);
+    expect(advanced.every((change) => change.defaultSelected === false)).toBe(true);
+    expect(advanced.some((change) =>
+      change.targetPath === path.join(projectRoot, 'AGENTS.md') && change.change === 'modify')).toBe(true);
+    expect(advanced.some((change) =>
+      change.targetPath === path.join(projectRoot, '.agents', 'skills', 'review')
+      && change.change === 'delete')).toBe(true);
+
+    const blocked = await applyDeployPlan(
+      context,
+      prunePlan,
+      { changeIds: advanced.map((change) => change.id) },
+      { nonInteractive: true },
+    );
+    expect(blocked.status).toBe('blocked');
+
+    const pruned = await applyDeployPlan(context, prunePlan, {
+      changeIds: advanced.map((change) => change.id),
+    });
+    expect(pruned.status).toBe('succeeded');
+    const agents = fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8');
+    expect(agents).toBe('# Local intro\n');
+    expect(agents).not.toContain('mcv:begin');
+    expect(fs.existsSync(path.join(projectRoot, '.agents', 'skills', 'review'))).toBe(false);
+    const mcp = JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcp.json'), 'utf8'));
+    expect(mcp.mcpServers?.docs).toBeUndefined();
+    const receipt = JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcv', 'managed.json'), 'utf8'));
+    expect(receipt.managed['AGENTS.md#mcv:rule:canonical']).toBeUndefined();
+    expect(receipt.managed['.agents/skills/review']).toBeUndefined();
+
+    // Drifted owned content is never a deletion candidate.
+    fs.mkdirSync(path.join(projectRoot, '.mcv'), { recursive: true });
+    const driftedBlock = [
+      '# Local intro',
+      '<!-- mcv:begin rule:canonical -->',
+      '# Drifted',
+      '<!-- mcv:end rule:canonical -->',
+      '',
+    ].join('\n');
+    fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), driftedBlock);
+    fs.writeFileSync(path.join(projectRoot, '.mcv', 'managed.json'), `${JSON.stringify({
+      schemaVersion: 1,
+      repositoryId: 'deploy-operation-test',
+      managed: {
+        'AGENTS.md#mcv:rule:canonical': {
+          assetId: 'rule:canonical',
+          hash: crypto.createHash('sha256').update('# Deployed\n', 'utf8').digest('hex'),
+        },
+      },
+    }, null, 2)}\n`);
+    const driftPrune = buildDeployRequest(repositoryPath, {
+      profileIds: ['empty'],
+      scope: 'project',
+      targetRoot: projectRoot,
+    });
+    if ('error' in driftPrune) throw new Error(driftPrune.error.message);
+    driftPrune.request.pruneManaged = true;
+    const driftPlan = await createDeployPlan(context, driftPrune.request);
+    expect(driftPlan.changes.some((change) =>
+      change.group === 'advanced' && change.targetPath === path.join(projectRoot, 'AGENTS.md'))).toBe(false);
+
+    // Missing Managed Receipt → conservative no-cleanup.
+    fs.rmSync(path.join(projectRoot, '.mcv', 'managed.json'));
+    fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), driftedBlock);
+    const noReceipt = buildDeployRequest(repositoryPath, {
+      profileIds: ['empty'],
+      scope: 'project',
+      targetRoot: projectRoot,
+    });
+    if ('error' in noReceipt) throw new Error(noReceipt.error.message);
+    noReceipt.request.pruneManaged = true;
+    const noReceiptPlan = await createDeployPlan(context, noReceipt.request);
+    expect(noReceiptPlan.changes.some((change) => change.group === 'advanced')).toBe(false);
+  });
 });
 
 function createDirectoryLink(target: string, linkPath: string): void {

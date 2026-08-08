@@ -6,6 +6,8 @@ export interface DeployRequest {
   targetRoot: string;
   profileIds: string[];
   selection: AssetSelection;
+  /** When true, project-scope Plans may include Advanced Cleanup prune candidates from the Managed Receipt. */
+  pruneManaged?: boolean;
 }
 
 export interface DeployContextFields {

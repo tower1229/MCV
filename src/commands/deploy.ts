@@ -113,6 +113,9 @@ export async function deployConfigurations(
     process.exitCode = built.error.code === 'deploy.profileNotFound' ? 2 : 1;
     return;
   }
+  if (options.pruneManaged === true) {
+    built.request.pruneManaged = true;
+  }
 
   const reviewPlan = await createDeployPlan(context, built.request);
   if (options.dryRun) {
@@ -167,7 +170,8 @@ export async function deployConfigurations(
     ? []
     : reviewPlan.changes
       .filter((change) => change.defaultSelected
-        || (options.pruneManaged === true && change.change === 'delete'))
+        || (options.pruneManaged === true
+          && (change.change === 'delete' || change.deploymentKind === 'project-managed-prune')))
       .map((change) => change.id);
   const selection: DeploySelection = {
     changeIds: selectedIds,

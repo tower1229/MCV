@@ -58,7 +58,7 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         .option('--dry-run', 'Show the deployment plan without writing')
         .option('--json', 'Print a machine-readable plan')
         .option('--yes', 'Deploy without prompting after a reviewed dry-run')
-        .option('--prune-managed', 'Delete stale managed files and exact duplicate Skills from the legacy Codex directory')
+        .option('--prune-managed', 'Delete stale MCV-owned files (project Managed Receipt or global inventory) and exact duplicate Skills from the legacy Codex directory')
         .action(async (profiles, options) => {
         validateWriteOutputOptions(deployCommand, options);
         await deployConfigurations(context, deployDependencies, {
