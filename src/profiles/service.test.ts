@@ -192,6 +192,58 @@ describe('ProfileService', () => {
     });
   });
 
+  it('applies an atomic upsert/delete mutation batch and refuses deleting global', () => {
+    const repositoryPath = createRepositoryWithAssets();
+    seedProfiles(repositoryPath, {
+      global: { assets: ['rule:canonical'] },
+      old: { assets: ['skill:a'] },
+    });
+    const service = createProfileService(repositoryPath);
+    const inventory = service.inspect();
+
+    const rejected = service.applyMutations({
+      expectedProfilesRevision: inventory.profilesRevision,
+      expectedCatalogRevision: inventory.catalogRevision,
+      mutations: [
+        { operation: 'upsert', id: 'dev', assets: ['skill:b'] },
+        { operation: 'delete', id: 'global' },
+      ],
+    });
+    expect(rejected).toMatchObject({
+      status: 'rejected',
+      error: { code: 'profile.globalRequired' },
+    });
+    expect(service.inspect().profilesRevision).toBe(inventory.profilesRevision);
+
+    const updated = service.applyMutations({
+      expectedProfilesRevision: inventory.profilesRevision,
+      expectedCatalogRevision: inventory.catalogRevision,
+      mutations: [
+        {
+          operation: 'upsert',
+          id: 'global',
+          description: 'Stable',
+          assets: ['rule:canonical', 'mcp:context7'],
+        },
+        { operation: 'upsert', id: 'dev', assets: ['skill:b'] },
+        { operation: 'delete', id: 'old' },
+      ],
+    });
+    expect(updated).toMatchObject({
+      status: 'updated',
+      created: ['dev'],
+      updated: ['global'],
+      deleted: ['old'],
+      diff: {
+        global: { added: 1, removed: 0, total: 2 },
+        dev: { added: 1, removed: 0, total: 1 },
+        old: { added: 0, removed: 1, total: 0 },
+      },
+    });
+    expect(fs.existsSync(path.join(repositoryPath, 'common', 'skills', 'a', 'SKILL.md'))).toBe(true);
+    expect(Object.keys(service.inspect().profiles).sort()).toEqual(['dev', 'global']);
+  });
+
   it('Profiles Revision is the SHA-256 of normalized profiles.yaml content', () => {
     const document = emptyProfilesDocument();
     document.profiles.global = { title: 'Global', assets: ['rule:canonical'] };

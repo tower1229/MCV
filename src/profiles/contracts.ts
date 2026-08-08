@@ -46,6 +46,25 @@ export interface ReplaceProfilesInput extends ProfileMutationBase {
   profiles: Record<string, Profile>;
 }
 
+export interface ProfileUpsertMutation {
+  operation: 'upsert';
+  id: string;
+  title?: string;
+  description?: string;
+  assets?: string[];
+}
+
+export interface ProfileDeleteMutation {
+  operation: 'delete';
+  id: string;
+}
+
+export type ProfileBatchMutation = ProfileUpsertMutation | ProfileDeleteMutation;
+
+export interface ApplyProfileMutationsInput extends ProfileMutationBase {
+  mutations: ProfileBatchMutation[];
+}
+
 export interface ProfileAssetDiff {
   added: number;
   removed: number;

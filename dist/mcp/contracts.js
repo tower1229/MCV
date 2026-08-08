@@ -52,3 +52,79 @@ export const ReadAssetsOutputSchema = z.object({
         message: z.string(),
     }).optional(),
 });
+export const ProfileUpsertMutationSchema = z.object({
+    operation: z.literal('upsert'),
+    id: z.string().min(1),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    assets: z.array(z.string()).optional(),
+});
+export const ProfileDeleteMutationSchema = z.object({
+    operation: z.literal('delete'),
+    id: z.string().min(1),
+});
+export const UpdateProfilesInputSchema = z.object({
+    expectedCatalogRevision: z.string().min(1),
+    expectedProfilesRevision: z.string().min(1),
+    mutations: z.array(z.discriminatedUnion('operation', [
+        ProfileUpsertMutationSchema,
+        ProfileDeleteMutationSchema,
+    ])).min(1),
+});
+export const ProfileAssetDiffSchema = z.object({
+    added: z.number().int().nonnegative(),
+    removed: z.number().int().nonnegative(),
+    total: z.number().int().nonnegative(),
+});
+export const UpdateProfilesOutputSchema = z.object({
+    status: z.enum(['updated', 'error']),
+    created: z.array(z.string()).optional(),
+    updated: z.array(z.string()).optional(),
+    deleted: z.array(z.string()).optional(),
+    diff: z.record(z.string(), ProfileAssetDiffSchema).optional(),
+    profilesRevision: z.string().optional(),
+    catalogRevision: z.string().optional(),
+    error: z.object({
+        code: z.string(),
+        message: z.string(),
+    }).optional(),
+});
+export const DeployProfilesInputSchema = z.object({
+    profiles: z.array(z.string().min(1)).min(1),
+    scope: z.enum(['project', 'global']).optional(),
+    targetDirectory: z.string().optional(),
+    dryRun: z.boolean().optional(),
+});
+export const DeployIssueSchema = z.object({
+    severity: z.enum(['notice', 'warning', 'decisionRequired', 'error']),
+    code: z.string(),
+    message: z.string(),
+    confirmationId: z.string().optional(),
+    decisionId: z.string().optional(),
+});
+export const DeployChangeSummarySchema = z.object({
+    id: z.string(),
+    change: z.string(),
+    name: z.string(),
+    targetPath: z.string(),
+    defaultSelected: z.boolean(),
+    deploymentKind: z.string().optional(),
+});
+export const DeployProfilesOutputSchema = z.object({
+    status: z.enum(['ok', 'blocked', 'failed', 'error']),
+    dryRun: z.boolean().optional(),
+    scope: z.enum(['project', 'global']).optional(),
+    targetRoot: z.string().optional(),
+    operationId: z.string().optional(),
+    profilesRevision: z.string().optional(),
+    catalogRevision: z.string().optional(),
+    changes: z.array(DeployChangeSummarySchema).optional(),
+    issues: z.array(DeployIssueSchema).optional(),
+    appliedChangeIds: z.array(z.string()).optional(),
+    writtenPaths: z.array(z.string()).optional(),
+    nextActions: z.array(z.string()).optional(),
+    error: z.object({
+        code: z.string(),
+        message: z.string(),
+    }).optional(),
+});

@@ -3,6 +3,7 @@ import { isValidAssetId } from '../assets/ids.js';
 import {
   GLOBAL_PROFILE_ID,
   PROFILE_ID_PATTERN,
+  type ApplyProfileMutationsInput,
   type CreateProfileInput,
   type DeleteProfileInput,
   type Profile,
@@ -26,6 +27,7 @@ export interface ProfileService {
   update(input: UpdateProfileInput): ProfileMutationResult;
   delete(input: DeleteProfileInput): ProfileMutationResult;
   replaceAll(input: ReplaceProfilesInput): ProfileMutationResult;
+  applyMutations(input: ApplyProfileMutationsInput): ProfileMutationResult;
 }
 
 export function createProfileService(repositoryPath: string): ProfileService {
@@ -149,6 +151,79 @@ export function createProfileService(repositoryPath: string): ProfileService {
         document.profiles = Object.fromEntries(
           Object.entries(input.profiles).map(([id, profile]) => [id, normalizeProfile(profile)]),
         );
+        return { created, updated, deleted, beforeAssets };
+      });
+    },
+
+    applyMutations(input: ApplyProfileMutationsInput): ProfileMutationResult {
+      return mutate(repositoryPath, input, (document) => {
+        if (!Array.isArray(input.mutations) || input.mutations.length === 0) {
+          return reject('profile.emptyMutations', 'At least one Profile mutation is required.');
+        }
+
+        const beforeAssets: Record<string, Set<string>> = {};
+        for (const [id, profile] of Object.entries(document.profiles)) {
+          beforeAssets[id] = new Set(profile.assets);
+        }
+        const created: string[] = [];
+        const updated: string[] = [];
+        const deleted: string[] = [];
+
+        for (const mutation of input.mutations) {
+          if (mutation.operation === 'delete') {
+            if (mutation.id === GLOBAL_PROFILE_ID) {
+              return reject('profile.globalRequired', 'The built-in global Profile cannot be deleted.');
+            }
+            const existing = document.profiles[mutation.id];
+            if (!existing) {
+              return reject('profile.notFound', `Profile ${mutation.id} does not exist.`);
+            }
+            if (!(mutation.id in beforeAssets)) {
+              beforeAssets[mutation.id] = new Set(existing.assets);
+            }
+            delete document.profiles[mutation.id];
+            if (!deleted.includes(mutation.id)) deleted.push(mutation.id);
+            const createdIndex = created.indexOf(mutation.id);
+            if (createdIndex >= 0) created.splice(createdIndex, 1);
+            const updatedIndex = updated.indexOf(mutation.id);
+            if (updatedIndex >= 0) updated.splice(updatedIndex, 1);
+            continue;
+          }
+
+          if (!PROFILE_ID_PATTERN.test(mutation.id) || mutation.id.length > 64) {
+            return reject('profile.invalidId', `Invalid Profile ID: ${mutation.id}`);
+          }
+          const existing = document.profiles[mutation.id];
+          if (!existing) {
+            document.profiles[mutation.id] = normalizeProfile({
+              title: mutation.title,
+              description: mutation.description,
+              assets: mutation.assets ?? [],
+            });
+            const deletedIndex = deleted.indexOf(mutation.id);
+            if (deletedIndex >= 0) deleted.splice(deletedIndex, 1);
+            const updatedIndex = updated.indexOf(mutation.id);
+            if (updatedIndex >= 0) updated.splice(updatedIndex, 1);
+            if (!created.includes(mutation.id)) created.push(mutation.id);
+            continue;
+          }
+
+          if (!(mutation.id in beforeAssets)) {
+            beforeAssets[mutation.id] = new Set(existing.assets);
+          }
+          const next: Profile = {
+            assets: mutation.assets !== undefined ? [...mutation.assets] : [...existing.assets],
+          };
+          if (mutation.title !== undefined) next.title = mutation.title;
+          else if (existing.title !== undefined) next.title = existing.title;
+          if (mutation.description !== undefined) next.description = mutation.description;
+          else if (existing.description !== undefined) next.description = existing.description;
+          document.profiles[mutation.id] = normalizeProfile(next);
+          if (!created.includes(mutation.id) && !updated.includes(mutation.id)) {
+            updated.push(mutation.id);
+          }
+        }
+
         return { created, updated, deleted, beforeAssets };
       });
     },

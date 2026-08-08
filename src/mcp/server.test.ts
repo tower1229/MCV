@@ -1,10 +1,12 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import * as yaml from 'yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import type { DeviceContext } from '../adapters/types.js';
 import {
   createMcvMcpServer,
   MCP_SERVER_INSTRUCTIONS,
@@ -21,7 +23,7 @@ import {
   emptyProfilesDocument,
   writeProfilesDocument,
 } from '../profiles/store.js';
-
+import { writeState } from '../utils/state.js';
 describe('MCV MCP server', () => {
   let testRoot: string;
   let repositoryPath: string;
@@ -36,16 +38,20 @@ describe('MCV MCP server', () => {
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
 
-  it('advertises short instructions and the two read-only tools with schemas and annotations', async () => {
+  it('advertises short instructions, four tools with schemas/annotations, and the classification resource', async () => {
     const { client, close } = await connectInMemory(repositoryPath);
     try {
       expect(client.getInstructions()).toBe(MCP_SERVER_INSTRUCTIONS);
       expect(PINNED_PROTOCOL_VERSION).toBe('2025-03-26');
+      expect(MCP_SERVER_INSTRUCTIONS.toLowerCase()).not.toContain('global:');
+      expect(MCP_SERVER_INSTRUCTIONS).not.toMatch(/AGENTS\.md|CLAUDE\.md|GEMINI\.md/);
 
       const { tools } = await client.listTools();
       expect(tools.map((tool) => tool.name).sort()).toEqual([
+        'deploy_profiles',
         'inspect_inventory',
         'read_assets',
+        'update_profiles',
       ]);
 
       for (const name of ['inspect_inventory', 'read_assets'] as const) {
@@ -57,6 +63,205 @@ describe('MCV MCP server', () => {
         expect(tool?.inputSchema).toMatchObject({ type: 'object' });
         expect(tool?.outputSchema).toMatchObject({ type: 'object' });
       }
+
+      const update = tools.find((entry) => entry.name === 'update_profiles');
+      expect(update?.annotations).toEqual({
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+      });
+      expect(update?.inputSchema).toMatchObject({ type: 'object' });
+      expect(update?.outputSchema).toMatchObject({ type: 'object' });
+
+      const deploy = tools.find((entry) => entry.name === 'deploy_profiles');
+      expect(deploy?.annotations).toEqual({
+        readOnlyHint: false,
+        destructiveHint: true,
+        openWorldHint: false,
+      });
+      expect(deploy?.inputSchema).toMatchObject({ type: 'object' });
+      expect(deploy?.outputSchema).toMatchObject({ type: 'object' });
+
+      const { resources } = await client.listResources();
+      expect(resources.map((resource) => resource.uri)).toEqual([
+        'mcv://guides/profile-classification',
+      ]);
+      const guide = await client.readResource({
+        uri: 'mcv://guides/profile-classification',
+      });
+      const text = guide.contents
+        .map((entry) => ('text' in entry ? entry.text : ''))
+        .join('\n');
+      expect(text).toContain('global');
+      expect(text).toContain('Unassigned');
+      expect(text.toLowerCase()).toContain('rules');
+      expect(text.toLowerCase()).toContain('mcp');
+    } finally {
+      await close();
+    }
+  });
+
+  it('update_profiles validates the whole batch then atomically upserts and deletes', async () => {
+    const { client, close } = await connectInMemory(repositoryPath);
+    try {
+      const inventory = await callStructured(client, 'inspect_inventory', {});
+      const result = await callStructured(client, 'update_profiles', {
+        expectedCatalogRevision: inventory.catalogRevision,
+        expectedProfilesRevision: inventory.profilesRevision,
+        mutations: [
+          {
+            operation: 'upsert',
+            id: 'global',
+            description: 'Stable cross-project assets',
+            assets: ['rule:canonical', 'mcp:context7'],
+          },
+          {
+            operation: 'upsert',
+            id: 'dev',
+            description: 'General development assets',
+            assets: ['skill:debug'],
+          },
+          {
+            operation: 'delete',
+            id: 'missing-profile',
+          },
+        ],
+      });
+      expect(result).toMatchObject({
+        status: 'error',
+        error: { code: 'profile.notFound' },
+      });
+      const afterReject = await callStructured(client, 'inspect_inventory', {});
+      expect(afterReject.profilesRevision).toBe(inventory.profilesRevision);
+
+      const applied = await callStructured(client, 'update_profiles', {
+        expectedCatalogRevision: inventory.catalogRevision,
+        expectedProfilesRevision: inventory.profilesRevision,
+        mutations: [
+          {
+            operation: 'upsert',
+            id: 'global',
+            description: 'Stable cross-project assets',
+            assets: ['rule:canonical', 'mcp:context7'],
+          },
+          {
+            operation: 'upsert',
+            id: 'dev',
+            description: 'General development assets',
+            assets: ['skill:debug'],
+          },
+        ],
+      });
+      expect(applied).toMatchObject({
+        status: 'updated',
+        created: ['dev'],
+        updated: ['global'],
+        deleted: [],
+        diff: {
+          global: { added: 1, removed: 0, total: 2 },
+          dev: { added: 1, removed: 0, total: 1 },
+        },
+      });
+      expect(applied.profilesRevision).toMatch(/^[a-f0-9]{64}$/);
+      expect(applied.profilesRevision).not.toBe(inventory.profilesRevision);
+
+      const stale = await callStructured(client, 'update_profiles', {
+        expectedCatalogRevision: inventory.catalogRevision,
+        expectedProfilesRevision: inventory.profilesRevision,
+        mutations: [{ operation: 'upsert', id: 'dev', assets: ['skill:debug'] }],
+      });
+      expect(stale).toMatchObject({
+        status: 'error',
+        error: { code: 'profile.revisionConflict' },
+        profilesRevision: applied.profilesRevision,
+        catalogRevision: inventory.catalogRevision,
+      });
+
+      const refuseGlobal = await callStructured(client, 'update_profiles', {
+        expectedCatalogRevision: inventory.catalogRevision,
+        expectedProfilesRevision: applied.profilesRevision,
+        mutations: [{ operation: 'delete', id: 'global' }],
+      });
+      expect(refuseGlobal).toMatchObject({
+        status: 'error',
+        error: { code: 'profile.globalRequired' },
+      });
+
+      const deleted = await callStructured(client, 'update_profiles', {
+        expectedCatalogRevision: inventory.catalogRevision,
+        expectedProfilesRevision: applied.profilesRevision,
+        mutations: [{ operation: 'delete', id: 'dev' }],
+      });
+      expect(deleted).toMatchObject({
+        status: 'updated',
+        deleted: ['dev'],
+        diff: { dev: { added: 0, removed: 1, total: 0 } },
+      });
+      expect(fs.existsSync(path.join(repositoryPath, 'common', 'skills', 'debug', 'SKILL.md'))).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  it('update_profiles persists a 50-Skill multi-Profile classification in one mutation', async () => {
+    const skillIds: string[] = [];
+    for (let index = 1; index <= 50; index += 1) {
+      const name = `skill-${String(index).padStart(2, '0')}`;
+      const dir = path.join(repositoryPath, 'common', 'skills', name);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, 'SKILL.md'),
+        `---\nname: ${name}\ndescription: skill ${index}\n---\n`,
+      );
+      skillIds.push(`skill:${name}`);
+    }
+    const { client, close } = await connectInMemory(repositoryPath);
+    try {
+      const inventory = await callStructured(client, 'inspect_inventory', { limit: 200 });
+      expect(inventory.assets?.filter((asset: { type: string }) => asset.type === 'skill').length)
+        .toBeGreaterThanOrEqual(50);
+
+      const firstHalf = skillIds.slice(0, 25);
+      const secondHalf = skillIds.slice(25);
+      const result = await callStructured(client, 'update_profiles', {
+        expectedCatalogRevision: inventory.catalogRevision,
+        expectedProfilesRevision: inventory.profilesRevision,
+        mutations: [
+          {
+            operation: 'upsert',
+            id: 'global',
+            assets: ['rule:canonical', ...firstHalf.slice(0, 5)],
+          },
+          {
+            operation: 'upsert',
+            id: 'dev',
+            description: 'Development skills',
+            assets: firstHalf,
+          },
+          {
+            operation: 'upsert',
+            id: 'design',
+            description: 'Design skills',
+            assets: secondHalf,
+          },
+        ],
+      });
+      expect(result).toMatchObject({
+        status: 'updated',
+        created: expect.arrayContaining(['dev', 'design']),
+        updated: ['global'],
+      });
+      expect(result.diff?.dev?.total).toBe(25);
+      expect(result.diff?.design?.total).toBe(25);
+
+      const after = await callStructured(client, 'inspect_inventory', { limit: 200 });
+      const owned = new Set(
+        (after.assets as Array<{ id: string; profileIds: string[] }>)
+          .filter((asset) => asset.id.startsWith('skill:skill-'))
+          .flatMap((asset) => asset.profileIds),
+      );
+      expect(owned.has('dev')).toBe(true);
+      expect(owned.has('design')).toBe(true);
     } finally {
       await close();
     }
@@ -195,6 +400,96 @@ describe('MCV MCP server', () => {
       await close();
     }
   });
+
+  it('deploy_profiles requires targetDirectory for project scope and never uses process cwd', async () => {
+    const homeDir = path.join(testRoot, 'home');
+    const context = deviceContextFor(testRoot, homeDir);
+    enableClaudeDeployFixture(repositoryPath, context);
+    const { client, close } = await connectInMemory(repositoryPath, context);
+    try {
+      const missing = await callStructured(client, 'deploy_profiles', {
+        profiles: ['global'],
+        scope: 'project',
+      });
+      expect(missing).toMatchObject({
+        status: 'error',
+        error: { code: 'deploy.targetRequired' },
+      });
+
+      const projectRoot = path.join(testRoot, 'project');
+      fs.mkdirSync(projectRoot, { recursive: true });
+      fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), '# Local intro\n');
+      const dry = await callStructured(client, 'deploy_profiles', {
+        profiles: ['global'],
+        scope: 'project',
+        targetDirectory: projectRoot,
+        dryRun: true,
+      });
+      expect(dry).toMatchObject({
+        status: 'ok',
+        dryRun: true,
+        scope: 'project',
+        targetRoot: fs.realpathSync(projectRoot),
+      });
+      expect(dry.changes?.length).toBeGreaterThan(0);
+      expect(fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8')).toBe('# Local intro\n');
+
+      const applied = await callStructured(client, 'deploy_profiles', {
+        profiles: ['global'],
+        scope: 'project',
+        targetDirectory: projectRoot,
+        dryRun: false,
+      });
+      expect(applied).toMatchObject({
+        status: 'ok',
+        dryRun: false,
+        scope: 'project',
+      });
+      expect(applied.writtenPaths?.length).toBeGreaterThan(0);
+      expect(fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8')).toContain('# rules');
+      expect(fs.existsSync(path.join(projectRoot, '.mcv', 'managed.json'))).toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  it('deploy_profiles returns structured Issues when non-interactive apply is blocked', async () => {
+    const homeDir = path.join(testRoot, 'home');
+    fs.mkdirSync(path.join(homeDir, '.claude'), { recursive: true });
+    const context = deviceContextFor(testRoot, homeDir);
+    enableClaudeDeployFixture(repositoryPath, context);
+    const stalePath = path.join(homeDir, '.claude', 'skills', 'stale', 'SKILL.md');
+    fs.mkdirSync(path.dirname(stalePath), { recursive: true });
+    fs.writeFileSync(stalePath, 'stale\n');
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'repository-id',
+      repositoryPath,
+      managedInventory: {
+        [stalePath]: {
+          source: repositoryPath,
+          hash: crypto.createHash('sha256').update('stale\n').digest('hex'),
+        },
+      },
+    });
+
+    const { client, close } = await connectInMemory(repositoryPath, context);
+    try {
+      const blocked = await callStructured(client, 'deploy_profiles', {
+        profiles: ['global'],
+        scope: 'global',
+        dryRun: false,
+      });
+      expect(blocked).toMatchObject({
+        status: 'blocked',
+        error: { code: 'deploy.nonInteractiveBlocked' },
+      });
+      expect(blocked.issues?.length).toBeGreaterThan(0);
+      expect(fs.existsSync(stalePath)).toBe(true);
+    } finally {
+      await close();
+    }
+  });
 });
 
 describe('MCV MCP host client configurations', () => {
@@ -242,10 +537,28 @@ describe('MCV MCP host client configurations', () => {
         try {
           expect(client.getInstructions()).toBe(MCP_SERVER_INSTRUCTIONS);
           const { tools } = await client.listTools();
+          expect(tools.map((tool) => tool.name).sort()).toEqual([
+            'deploy_profiles',
+            'inspect_inventory',
+            'read_assets',
+            'update_profiles',
+          ]);
           const inspect = tools.find((tool) => tool.name === 'inspect_inventory');
           const read = tools.find((tool) => tool.name === 'read_assets');
+          const update = tools.find((tool) => tool.name === 'update_profiles');
+          const deploy = tools.find((tool) => tool.name === 'deploy_profiles');
           expect(inspect?.annotations).toEqual({ readOnlyHint: true, openWorldHint: false });
           expect(read?.annotations).toEqual({ readOnlyHint: true, openWorldHint: false });
+          expect(update?.annotations).toEqual({
+            readOnlyHint: false,
+            destructiveHint: true,
+            idempotentHint: true,
+          });
+          expect(deploy?.annotations).toEqual({
+            readOnlyHint: false,
+            destructiveHint: true,
+            openWorldHint: false,
+          });
           expect(inspect?.inputSchema).toMatchObject({
             type: 'object',
             properties: {
@@ -278,13 +591,15 @@ describe('MCV MCP host client configurations', () => {
               nextCursor: expect.any(Object),
             },
           });
+          expect(update?.outputSchema).toMatchObject({ type: 'object' });
+          expect(deploy?.outputSchema).toMatchObject({ type: 'object' });
         } finally {
           await client.close();
         }
       } finally {
         fs.rmSync(testRoot, { recursive: true, force: true });
       }
-    });
+    }, 30_000);
   }
 });
 
@@ -299,14 +614,21 @@ describe('mcv mcp CLI registration', () => {
     const help = program.helpInformation();
     expect(help).not.toMatch(/\bmcp\b/);
     expect(program.commands.some((command) => command.name() === 'mcp')).toBe(true);
-  });
+  }, 30_000);
 });
 
-async function connectInMemory(repositoryPath: string): Promise<{
+async function connectInMemory(
+  repositoryPath: string,
+  context: DeviceContext = {
+    homeDir: os.tmpdir(),
+    platform: process.platform,
+    env: {},
+  },
+): Promise<{
   client: Client;
   close: () => Promise<void>;
 }> {
-  const server = createMcvMcpServer(repositoryPath);
+  const server = createMcvMcpServer(repositoryPath, context);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   const client = new Client({ name: 'mcv-test', version: '0.0.0' });
@@ -328,6 +650,52 @@ async function callStructured(
   const result = await client.callTool({ name, arguments: args });
   expect(result.structuredContent).toEqual(expect.any(Object));
   return result.structuredContent as Record<string, any>;
+}
+
+function deviceContextFor(testRoot: string, homeDir: string): DeviceContext {
+  return {
+    homeDir,
+    platform: process.platform === 'win32' ? 'win32' : 'darwin',
+    env: { APPDATA: path.join(testRoot, 'state') },
+  };
+}
+
+function enableClaudeDeployFixture(repositoryPath: string, context: DeviceContext): void {
+  fs.mkdirSync(path.join(context.homeDir, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+    'schemaVersion: 4',
+    'repositoryId: repository-id',
+    'initializedAt: 2026-07-19T00:00:00.000Z',
+    'targets:',
+    '  codex: { enabled: true }',
+    '  claudeCode: { enabled: true }',
+    '  gemini:',
+    '    enabled: true',
+    '    surfaces: { geminiCli: true, antigravity: false }',
+    'variables: {}',
+    'capture:',
+    '  preserveUnknownNativeFields: true',
+    'deploy:',
+    '  backupBeforeWrite: true',
+    '  useSymlinks: false',
+    '',
+  ].join('\n'));
+  fs.mkdirSync(path.join(repositoryPath, 'ide', 'claude-code', 'native'), { recursive: true });
+  fs.writeFileSync(
+    path.join(repositoryPath, 'ide', 'claude-code', 'native', 'settings.json'),
+    `${JSON.stringify({ theme: 'dark' }, null, 2)}\n`,
+  );
+  writeProfilesDocument(repositoryPath, {
+    ...emptyProfilesDocument(),
+    profiles: {
+      global: { title: 'Global', assets: ['rule:canonical'] },
+    },
+  });
+  writeState(context, {
+    schemaVersion: 2,
+    defaultRepositoryId: 'repository-id',
+    repositoryPath,
+  });
 }
 
 function seedRepository(repositoryPath: string): void {

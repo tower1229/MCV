@@ -5,5 +5,5 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio';
 
 export async function startMcpServer(context: DeviceContext): Promise<void> {
   const repositoryPath = resolveBoundRepository(context);
-  await serveStdio(() => createMcvMcpServer(repositoryPath));
+  await serveStdio(() => createMcvMcpServer(repositoryPath, context));
 }

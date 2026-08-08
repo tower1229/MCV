@@ -1,17 +1,21 @@
 import { readFileSync } from 'fs';
 import { DEFAULT_NEGOTIATED_PROTOCOL_VERSION, McpServer, } from '@modelcontextprotocol/server';
-import { InspectInventoryInputSchema, InspectInventoryOutputSchema, ReadAssetsInputSchema, ReadAssetsOutputSchema, } from './contracts.js';
+import { DeployProfilesInputSchema, DeployProfilesOutputSchema, InspectInventoryInputSchema, InspectInventoryOutputSchema, ReadAssetsInputSchema, ReadAssetsOutputSchema, UpdateProfilesInputSchema, UpdateProfilesOutputSchema, } from './contracts.js';
 import { inspectInventory } from './inventory.js';
+import { PROFILE_CLASSIFICATION_GUIDE, PROFILE_CLASSIFICATION_URI, } from './profile-classification.js';
 import { readAssets } from './read-assets.js';
+import { updateProfiles } from './update-profiles.js';
 export const PINNED_PROTOCOL_VERSION = DEFAULT_NEGOTIATED_PROTOCOL_VERSION;
 export const MCP_SERVER_INSTRUCTIONS = [
-    'MCV exposes read-only Profile and Asset inventory for the bound Repository.',
+    'MCV manages Profiles and Assets for the bound Repository over MCP.',
     'Call inspect_inventory for summaries, then read_assets only for Assets you need.',
+    'Use update_profiles for one atomic batch of upsert/delete mutations with expected revisions.',
+    'Use deploy_profiles to plan or apply; project scope requires targetDirectory and never uses process cwd.',
     'read_assets returns faithful plaintext content; do not assume values are masked.',
-    'Prefer Unassigned for uncertain classification; writes are out of scope for these tools.',
+    'For Profile assignment rules, read mcv://guides/profile-classification on demand.',
 ].join(' ');
 const packageVersion = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
-export function createMcvMcpServer(repositoryPath) {
+export function createMcvMcpServer(repositoryPath, context) {
     const server = new McpServer({
         name: 'mcv',
         version: packageVersion,
@@ -20,6 +24,7 @@ export function createMcvMcpServer(repositoryPath) {
         supportedProtocolVersions: [PINNED_PROTOCOL_VERSION],
         capabilities: {
             tools: {},
+            resources: {},
         },
     });
     server.registerTool('inspect_inventory', {
@@ -42,6 +47,44 @@ export function createMcvMcpServer(repositoryPath) {
             openWorldHint: false,
         },
     }, async (args) => toolResult(readAssets(repositoryPath, args)));
+    server.registerTool('update_profiles', {
+        title: 'Update profiles',
+        description: 'Atomically apply a validated batch of Profile upsert/delete mutations. Requires expectedCatalogRevision and expectedProfilesRevision. Deleting global fails; deleting a Profile removes only the set, not Assets.',
+        inputSchema: UpdateProfilesInputSchema,
+        outputSchema: UpdateProfilesOutputSchema,
+        annotations: {
+            readOnlyHint: false,
+            destructiveHint: true,
+            idempotentHint: true,
+        },
+    }, async (args) => toolResult(updateProfiles(repositoryPath, args)));
+    server.registerTool('deploy_profiles', {
+        title: 'Deploy profiles',
+        description: 'Plan and optionally apply Deploy for the named Profiles. Scope defaults to project and then requires absolute targetDirectory (never process cwd). Global ignores targetDirectory. dryRun returns the Plan only; otherwise safe Plans apply in one call. Blocking warnings, decisions, deletions, and topology changes return structured Issues.',
+        inputSchema: DeployProfilesInputSchema,
+        outputSchema: DeployProfilesOutputSchema,
+        annotations: {
+            readOnlyHint: false,
+            destructiveHint: true,
+            openWorldHint: false,
+        },
+    }, async (args) => {
+        const { deployProfiles } = await import('./deploy-profiles.js');
+        return toolResult(await deployProfiles(repositoryPath, context, args));
+    });
+    server.registerResource('profile-classification', PROFILE_CLASSIFICATION_URI, {
+        title: 'Profile classification guidelines',
+        description: 'On-demand guidelines for assigning Assets to global, ordinary Profiles, or Unassigned.',
+        mimeType: 'text/markdown',
+    }, async (uri) => ({
+        contents: [
+            {
+                uri: typeof uri === 'string' ? uri : uri.href,
+                mimeType: 'text/markdown',
+                text: PROFILE_CLASSIFICATION_GUIDE,
+            },
+        ],
+    }));
     return server;
 }
 function toolResult(output) {

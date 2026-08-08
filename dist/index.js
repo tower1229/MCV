@@ -233,7 +233,7 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
     });
     program
         .command('mcp', { hidden: true })
-        .description('Start the local stdio MCP server for Profile and Asset inspection')
+        .description('Start the local stdio MCP server for Profile and Asset inspection and mutation')
         .action(async () => {
         await startMcpServer(context);
     });

@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- MCP write tools `update_profiles` and `deploy_profiles`, plus the on-demand `mcv://guides/profile-classification` resource, so Agents can atomically mutate Profiles and invoke Deploy over the local stdio server without opening the TUI.
 - Dedicated Profile maintenance TUI (`mcv profile`, `mcv profile edit <id>`) with a three-pane Ink layout, search, Asset-type and technical-compatibility filters, ProfileService-backed save with Revision conflict reporting, and macOS PTY / Windows ConPTY restoration gates.
 - Project-scope Deploy overlays selected MCP servers at key granularity into Codex `.codex/config.toml`, Claude Code `.mcp.json`, and Gemini CLI `.gemini/settings.json`, preserving non-MCV servers and recording Managed Receipt ownership; unrecorded same-name conflicts require Preserve/Replace and are never cleared by `--yes`. Antigravity remains global-only with a `projectScopeUnsupported` notice.
 - Project-scope `--prune-managed` offers Advanced Cleanup deletion candidates for Managed Receipt–owned assets that left the current selection, still match the receipt hash, and have no Drift — Rules strip unmodified Managed Blocks only; Skills/MCP remove owned packages or server keys; missing `managed.json` stays conservative with no cleanup. Ordinary Deploy never deletes; `--yes` still blocks prune candidates.

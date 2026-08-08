@@ -220,7 +220,7 @@ MCV 对配置内容保持中立，不提供保密保证。
 ## 当前限制
 
 - 仅支持 Codex、Claude Code 和 Gemini。
-- Profile 管理：TTY 中 `mcv profile` / `mcv profile edit <id>` 打开专用全屏 TUI；CLI mutation flags 与隐藏的 `mcv mcp` 集成入口继续可用。
+- Profile 管理：TTY 中 `mcv profile` / `mcv profile edit <id>` 打开专用全屏 TUI；CLI mutation flags 与隐藏的 `mcv mcp` 集成入口（含 `update_profiles` / `deploy_profiles` 与按需分类指南 Resource）继续可用。
 
 - `restore` 只恢复本机 Deploy backup（默认当前项目；`--global` 选择全局），不读取仓库。
 - 没有变化的重复 deploy 不生成新备份。
