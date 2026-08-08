@@ -73,8 +73,8 @@ export interface IdeAdapter {
   /**
    * Project selected Canonical/Native content for a DeployRequest.
    * Profile semantics never enter Adapters — only the selected view and request.
-   * Project scope currently projects Canonical Rules as Managed Blocks; Skills/MCP
-   * project writers land in later tickets (#55/#57).
+   * Project scope projects Canonical Rules as Managed Blocks here; Skills and MCP
+   * key-level writers are planned in Deploy operations.
    */
   project(
     source: SelectedRepositoryView,

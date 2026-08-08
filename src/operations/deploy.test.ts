@@ -10,7 +10,7 @@ import {
   applyDeployPlan,
   buildDeployRequest,
   createDeployPlan,
-  PROJECT_MCP_PROJECTION_PENDING_CODE,
+  PROJECT_SCOPE_UNSUPPORTED_CODE,
   PROJECT_SKILL_PROJECTION_PENDING_CODE,
 } from './deploy.js';
 import { createGlobalDeployPlan, seedGlobalProfileWithCatalog } from './deploy-request-helpers.js';
@@ -2293,7 +2293,20 @@ describe('Deploy operations', () => {
     });
     const projectRoot = path.join(testRoot, 'project-empty-apply');
     fs.mkdirSync(projectRoot, { recursive: true });
-    // Profile with MCP only — Skills are active; MCP still emits a pending notice.
+    // Profile with MCP only — project overlay emits Antigravity unsupported notice when enabled.
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 4',
+      'repositoryId: deploy-operation-test',
+      'initializedAt: 2026-07-22T00:00:00.000Z',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets:',
+      '  gemini:',
+      '    enabled: true',
+      '    surfaces: { geminiCli: true, antigravity: true }',
+      'variables: {}',
+      '',
+    ].join('\n'));
     writeProfilesDocument(repositoryPath, {
       schemaVersion: 1,
       profiles: {
@@ -2319,7 +2332,7 @@ describe('Deploy operations', () => {
       profileIds: ['global'],
     });
     expect(result.issues).toContainEqual(expect.objectContaining({
-      code: PROJECT_MCP_PROJECTION_PENDING_CODE,
+      code: PROJECT_SCOPE_UNSUPPORTED_CODE,
     }));
   });
 
@@ -2475,16 +2488,62 @@ describe('Deploy operations', () => {
     expect(plan.changes.some((change) => change.targetPath === path.join(projectRoot, 'CLAUDE.md'))).toBe(false);
   });
 
-  it('returns a pending notice for project MCP while planning Rules and Skills', async () => {
+  it('overlays selected MCP servers into project configs and notices Antigravity', async () => {
     writeState(context, {
       schemaVersion: 2,
       defaultRepositoryId: 'deploy-operation-test',
       repositoryPath,
     });
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 4',
+      'repositoryId: deploy-operation-test',
+      'initializedAt: 2026-07-22T00:00:00.000Z',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets:',
+      '  codex: { enabled: true }',
+      '  claudeCode: { enabled: true }',
+      '  gemini:',
+      '    enabled: true',
+      '    surfaces: { geminiCli: true, antigravity: true }',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(
+      path.join(repositoryPath, 'ide', 'claude-code', 'mcp-overrides.yaml'),
+      'docs:\n  timeout: 45\n',
+    );
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: {
+        global: {
+          title: 'Global',
+          assets: ['rule:canonical', 'skill:review', 'mcp:docs'],
+        },
+        dev: {
+          title: 'Dev',
+          assets: ['mcp:docs'],
+        },
+      },
+    });
     const projectRoot = path.join(testRoot, 'project');
-    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.mkdirSync(path.join(projectRoot, '.codex'), { recursive: true });
+    fs.mkdirSync(path.join(projectRoot, '.gemini'), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectRoot, '.mcp.json'),
+      `${JSON.stringify({ mcpServers: { team: { command: 'team-server' } } }, null, 2)}\n`,
+    );
+    fs.writeFileSync(
+      path.join(projectRoot, '.codex', 'config.toml'),
+      'model = "o4"\n[mcp_servers.team]\ncommand = "team-server"\n',
+    );
+    fs.writeFileSync(
+      path.join(projectRoot, '.gemini', 'settings.json'),
+      `${JSON.stringify({ theme: 'dark', mcpServers: { team: { command: 'team-server' } } }, null, 2)}\n`,
+    );
+
     const built = buildDeployRequest(repositoryPath, {
-      profileIds: ['global'],
+      profileIds: ['dev'],
       scope: 'project',
       targetRoot: projectRoot,
     });
@@ -2496,17 +2555,173 @@ describe('Deploy operations', () => {
       code: PROJECT_SKILL_PROJECTION_PENDING_CODE,
     }));
     expect(plan.issues).toContainEqual(expect.objectContaining({
-      code: PROJECT_MCP_PROJECTION_PENDING_CODE,
+      code: PROJECT_SCOPE_UNSUPPORTED_CODE,
+      message: expect.stringContaining('Antigravity'),
     }));
-    expect(plan.changes.some((change) => change.targetPath.endsWith('CLAUDE.md'))).toBe(true);
     expect(plan.changes.some((change) =>
-      change.deploymentKind === 'project-skill-package'
-      && change.targetPath === path.join(projectRoot, '.claude', 'skills', 'review'))).toBe(true);
+      change.deploymentKind === 'project-mcp-overlay'
+      && change.targetPath === path.join(projectRoot, '.mcp.json'))).toBe(true);
+    expect(plan.changes.some((change) =>
+      change.deploymentKind === 'project-mcp-overlay'
+      && change.targetPath === path.join(projectRoot, '.codex', 'config.toml'))).toBe(true);
+    expect(plan.changes.some((change) =>
+      change.deploymentKind === 'project-mcp-overlay'
+      && change.targetPath === path.join(projectRoot, '.gemini', 'settings.json'))).toBe(true);
     expect(plan).toMatchObject({
       scope: 'project',
-      profileIds: ['global'],
-      assetIds: expect.arrayContaining(['rule:canonical', 'skill:review']),
+      profileIds: ['dev'],
+      assetIds: ['mcp:docs'],
     });
+
+    const result = await applyDeployPlan(context, plan, {
+      changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+    });
+    expect(result.status).toBe('succeeded');
+
+    expect(JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcp.json'), 'utf8'))).toEqual({
+      mcpServers: {
+        team: { command: 'team-server' },
+        docs: { command: 'docs-server', timeout: 45 },
+      },
+    });
+    expect(fs.readFileSync(path.join(projectRoot, '.codex', 'config.toml'), 'utf8')).toContain('model = "o4"');
+    expect(fs.readFileSync(path.join(projectRoot, '.codex', 'config.toml'), 'utf8')).toContain('[mcp_servers.team]');
+    expect(fs.readFileSync(path.join(projectRoot, '.codex', 'config.toml'), 'utf8')).toContain('[mcp_servers.docs]');
+    expect(JSON.parse(fs.readFileSync(path.join(projectRoot, '.gemini', 'settings.json'), 'utf8'))).toEqual({
+      theme: 'dark',
+      mcpServers: {
+        team: { command: 'team-server' },
+        docs: { command: 'docs-server' },
+      },
+    });
+
+    const receipt = JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcv', 'managed.json'), 'utf8'));
+    expect(receipt.managed['.mcp.json#mcv:mcp:docs']).toMatchObject({
+      assetId: 'mcp:docs',
+      hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(receipt.managed['.codex/config.toml#mcv:mcp:docs']).toBeDefined();
+    expect(receipt.managed['.gemini/settings.json#mcv:mcp:docs']).toBeDefined();
+  });
+
+  it('requires Preserve/Replace for unrecorded MCP conflicts and blocks --yes', async () => {
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'deploy-operation-test',
+      repositoryPath,
+    });
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: {
+        global: {
+          title: 'Global',
+          assets: ['mcp:docs'],
+        },
+      },
+    });
+    const projectRoot = path.join(testRoot, 'project-mcp-conflict');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectRoot, '.mcp.json'),
+      `${JSON.stringify({ mcpServers: { docs: { command: 'local-docs' } } }, null, 2)}\n`,
+    );
+
+    const built = buildDeployRequest(repositoryPath, {
+      profileIds: ['global'],
+      scope: 'project',
+      targetRoot: projectRoot,
+    });
+    if ('error' in built) throw new Error(built.error.message);
+    const plan = await createDeployPlan(context, built.request);
+    expect(plan.readyToApply).toBe(false);
+    const decision = plan.decisions.find((entry) => entry.kind === 'project-mcp-divergence');
+    expect(decision).toMatchObject({
+      kind: 'project-mcp-divergence',
+      packageNames: ['docs'],
+      choices: ['preserve-external', 'replace-with-repository'],
+    });
+    expect(plan.issues).toContainEqual(expect.objectContaining({
+      severity: 'decisionRequired',
+      code: 'deploy.projectMcpDivergence',
+      decisionId: decision?.id,
+    }));
+
+    const blocked = await applyDeployPlan(
+      context,
+      plan,
+      { changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id) },
+      { nonInteractive: true },
+    );
+    expect(blocked).toMatchObject({
+      status: 'blocked',
+      issues: [expect.objectContaining({ code: 'deploy.nonInteractiveBlocked' })],
+    });
+    expect(JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcp.json'), 'utf8'))).toEqual({
+      mcpServers: { docs: { command: 'local-docs' } },
+    });
+
+    const replaced = await applyDeployPlan(context, plan, {
+      changeIds: decision?.replacementChangeIds ?? [],
+      decisions: { [decision!.id]: 'replace-with-repository' },
+    });
+    expect(replaced.status).toBe('succeeded');
+    expect(JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcp.json'), 'utf8'))).toEqual({
+      mcpServers: { docs: { command: 'docs-server' } },
+    });
+  });
+
+  it('preserves a conflicting project MCP server key without claiming Receipt ownership', async () => {
+    writeState(context, {
+      schemaVersion: 2,
+      defaultRepositoryId: 'deploy-operation-test',
+      repositoryPath,
+    });
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: {
+        global: {
+          title: 'Global',
+          assets: ['mcp:docs'],
+        },
+      },
+    });
+    const projectRoot = path.join(testRoot, 'project-mcp-preserve');
+    fs.mkdirSync(projectRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectRoot, '.mcp.json'),
+      `${JSON.stringify({
+        mcpServers: {
+          docs: { command: 'local-docs' },
+          team: { command: 'team-server' },
+        },
+      }, null, 2)}\n`,
+    );
+
+    const built = buildDeployRequest(repositoryPath, {
+      profileIds: ['global'],
+      scope: 'project',
+      targetRoot: projectRoot,
+    });
+    if ('error' in built) throw new Error(built.error.message);
+    const plan = await createDeployPlan(context, built.request);
+    const decision = plan.decisions.find((entry) => entry.kind === 'project-mcp-divergence');
+    expect(decision).toBeDefined();
+
+    const preserved = await applyDeployPlan(context, plan, {
+      changeIds: decision?.replacementChangeIds ?? [],
+      decisions: { [decision!.id]: 'preserve-external' },
+    });
+    expect(preserved.status).toBe('succeeded');
+    expect(JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcp.json'), 'utf8'))).toEqual({
+      mcpServers: {
+        docs: { command: 'local-docs' },
+        team: { command: 'team-server' },
+      },
+    });
+    if (fs.existsSync(path.join(projectRoot, '.mcv', 'managed.json'))) {
+      const receipt = JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcv', 'managed.json'), 'utf8'));
+      expect(receipt.managed['.mcp.json#mcv:mcp:docs']).toBeUndefined();
+    }
   });
 
   it('copies selected Skills into project skill directories and records the Managed Receipt', async () => {

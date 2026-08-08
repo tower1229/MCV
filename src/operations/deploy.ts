@@ -60,11 +60,19 @@ import {
   projectCanonicalRulesFile,
   type ProjectRulesFileName,
 } from '../core/project-rules.js';
+import { managedReceiptKey } from '../core/managed-block.js';
 import {
   projectSkillDestinationRoots,
   projectSkillPackage,
   type ProjectSkillRelativeRoot,
 } from '../core/project-skills.js';
+import {
+  overlayProjectMcpFile,
+  projectMcpDestinationTargets,
+  projectMcpServer,
+  type ProjectMcpTarget,
+} from '../core/project-mcp.js';
+import { toNativeMcpServers } from '../core/mcp.js';
 import {
   managedReceiptPath,
   readManagedReceipt,
@@ -133,7 +141,8 @@ export type DeployDeploymentKind =
   | 'copy-projection'
   | 'topology-migration'
   | 'external-link-replacement'
-  | 'project-skill-package';
+  | 'project-skill-package'
+  | 'project-mcp-overlay';
 
 export type DeployIde = CanonicalSkillIde;
 
@@ -167,7 +176,7 @@ export type DeployLinkOutcome = CanonicalSkillLinkOutcome;
 export interface DeployDecision {
   id: string;
   factId: string;
-  kind: 'external-skill-divergence' | 'project-skill-divergence';
+  kind: 'external-skill-divergence' | 'project-skill-divergence' | 'project-mcp-divergence';
   packageNames: string[];
   linkPaths: string[];
   choices: ['preserve-external', 'replace-with-repository'];
@@ -211,11 +220,9 @@ export type DeployResult = Result<DeployResultData, DeployChange> & Partial<Depl
   linkFacts?: CanonicalSkillLinkFact[];
 };
 
-/**
- * MCP project writers land in #57. Rules (#54) and Skills (#55) project projection are active.
- */
+/** @deprecated Skills project projection is active; retained for older test imports. */
 export const PROJECT_SKILL_PROJECTION_PENDING_CODE = 'deploy.projectSkillProjectionPending' as const;
-export const PROJECT_MCP_PROJECTION_PENDING_CODE = 'deploy.projectMcpProjectionPending' as const;
+export const PROJECT_SCOPE_UNSUPPORTED_CODE = 'deploy.projectScopeUnsupported' as const;
 
 export function buildDeployRequest(
   repositoryPath: string,
@@ -253,6 +260,10 @@ interface DeployMutation {
   content?: Buffer;
   linkTarget?: string;
   packageFiles?: Array<{ relativePath: string; content: Buffer }>;
+  mcpOverlay?: {
+    target: ProjectMcpTarget;
+    serversToWrite: Record<string, Record<string, unknown>>;
+  };
 }
 
 interface ActiveDeployPlan {
@@ -417,6 +428,8 @@ async function buildDeployPlan(
   const receiptEntries = new Map<string, { assetId: string; hash: string }>();
   const projectSkillChanges: DeployChange[] = [];
   const projectSkillDecisions: DeployDecision[] = [];
+  const projectMcpChanges: DeployChange[] = [];
+  const projectMcpDecisions: DeployDecision[] = [];
   if (activeRequest.scope === 'project') {
     const validated = validateProjectTargetRoot(activeRequest.targetRoot, context, {
       boundRepositoryPath: repositoryPath,
@@ -452,15 +465,6 @@ async function buildDeployPlan(
       activeRequest.selection,
       deployContext,
     );
-    const assetIds = activeRequest.selection.assetIds;
-    if (assetIds.some((id) => id.startsWith('mcp:'))) {
-      selectionIssues.push({
-        severity: 'notice',
-        code: PROJECT_MCP_PROJECTION_PENDING_CODE,
-        message: 'Project-scope MCP projection is not active yet; selected MCP servers were skipped.',
-      });
-    }
-
     const receipt = readManagedReceipt(activeRequest.targetRoot);
     desired = (await Promise.all(definitions.map(async (definition) => {
       const operation = await definition.adapter.project(
@@ -543,6 +547,19 @@ async function buildDeployPlan(
       receiptEntries,
       projectSkillChanges,
       projectSkillDecisions,
+      mutations,
+      selectionIssues,
+    );
+
+    appendProjectMcpPlan(
+      activeRequest.targetRoot,
+      selectedView.mcpServers,
+      selectedView.mcpOverrides,
+      manifest,
+      receipt,
+      receiptEntries,
+      projectMcpChanges,
+      projectMcpDecisions,
       mutations,
       selectionIssues,
     );
@@ -678,8 +695,10 @@ async function buildDeployPlan(
       issues,
     ),
     ...projectSkillDecisions,
+    ...projectMcpDecisions,
   ];
   changes.push(...projectSkillChanges);
+  changes.push(...projectMcpChanges);
 
   const legacyDuplicates = findLegacyCodexSkillDuplicates(
     context,
@@ -1137,7 +1156,8 @@ export async function applyDeployPlan(
     const managedSelected = plan.changes.some((change) =>
       selected.has(change.id)
       && (asProjectRulesFileName(path.relative(plan.targetRoot, change.targetPath)) !== undefined
-        || change.deploymentKind === 'project-skill-package'));
+        || change.deploymentKind === 'project-skill-package'
+        || change.deploymentKind === 'project-mcp-overlay'));
     if (receiptChange && managedSelected && !selected.has(receiptChange.id)) {
       selected.add(receiptChange.id);
       selectedIds.push(receiptChange.id);
@@ -1157,6 +1177,17 @@ export async function applyDeployPlan(
     if (!choice) continue;
     const replacementSelected = decision.replacementChangeIds.every((id) => selected.has(id));
     const replacementPartiallySelected = decision.replacementChangeIds.some((id) => selected.has(id));
+    if (decision.kind === 'project-mcp-divergence') {
+      // Preserve may keep the file change selected so non-conflicting server keys still deploy.
+      if (choice === 'replace-with-repository' && !replacementSelected) {
+        return failedDeployResult(plan.repositoryPath, {
+          code: 'deploy.invalidSelection',
+          message: 'The selected project MCP decision does not match its replacement changes.',
+          nextActions: ['Regenerate the Deploy Plan and choose Preserve or Replace again.'],
+        });
+      }
+      continue;
+    }
     if ((choice === 'replace-with-repository' && !replacementSelected)
       || (choice === 'preserve-external' && replacementPartiallySelected)) {
       return failedDeployResult(plan.repositoryPath, {
@@ -1215,6 +1246,7 @@ export async function applyDeployPlan(
   }
 
   applyProjectSkillReceiptDecisions(plan, selection, selected, selectedIds, active.mutations);
+  applyProjectMcpOverlayDecisions(plan, selection, active.mutations);
   const selectedChanges = plan.changes.filter((change) => selected.has(change.id));
   const prepared = prepareDeployWrites(selectedChanges, active.mutations);
   if (selectedChanges.length === 0) {
@@ -2435,6 +2467,148 @@ function appendProjectSkillPlan(
   }
 }
 
+function appendProjectMcpPlan(
+  targetRoot: string,
+  mcpServers: Record<string, unknown>,
+  mcpOverrides: Record<string, Record<string, unknown>>,
+  manifest: McvManifest,
+  receipt: ManagedReceipt | undefined,
+  receiptEntries: Map<string, { assetId: string; hash: string }>,
+  changes: DeployChange[],
+  decisions: DeployDecision[],
+  mutations: Map<string, DeployMutation>,
+  issues: Issue[],
+): void {
+  const serverNames = Object.keys(mcpServers).sort((left, right) => left.localeCompare(right));
+  if (serverNames.length === 0) return;
+
+  if (manifest.targets.gemini.enabled
+    && manifest.targets.gemini.surfaces.antigravity !== false) {
+    issues.push({
+      severity: 'notice',
+      code: PROJECT_SCOPE_UNSUPPORTED_CODE,
+      message: 'Antigravity does not support project-scope MCP; existing global projection is unchanged.',
+    });
+  }
+
+  const targets = projectMcpDestinationTargets({
+    codex: manifest.targets.codex.enabled,
+    claudeCode: manifest.targets.claudeCode.enabled,
+    geminiCli: manifest.targets.gemini.enabled
+      && manifest.targets.gemini.surfaces.geminiCli !== false,
+  });
+  if (targets.length === 0) return;
+
+  for (const target of targets) {
+    const serversToWrite: Record<string, Record<string, unknown>> = {};
+    const conflictNames: string[] = [];
+    let fileExisted = false;
+    const targetPath = path.join(targetRoot, ...target.relativePath.split('/'));
+
+    for (const name of serverNames) {
+      const native = toNativeMcpServers(
+        { [name]: mcpServers[name] },
+        target.surface,
+        mcpOverrides[target.surface],
+      );
+      const desired = native[name];
+      if (!isRecord(desired)) continue;
+
+      let projection;
+      try {
+        projection = projectMcpServer(
+          targetRoot,
+          target,
+          { assetId: `mcp:${name}`, name, desired },
+          receipt,
+        );
+      } catch (error) {
+        issues.push({
+          severity: 'error',
+          code: 'deploy.containmentFailed',
+          message: errorMessage(error),
+        });
+        continue;
+      }
+
+      receiptEntries.set(projection.receiptKey, {
+        assetId: projection.assetId,
+        hash: projection.serverHash,
+      });
+      if (projection.status === 'identical') continue;
+      serversToWrite[name] = desired;
+      if (projection.status === 'conflict') conflictNames.push(name);
+    }
+
+    if (Object.keys(serversToWrite).length === 0) continue;
+
+    try {
+      assertPathContainedInProjectRoot(targetRoot, targetPath);
+    } catch (error) {
+      issues.push({
+        severity: 'error',
+        code: 'deploy.containmentFailed',
+        message: errorMessage(error),
+      });
+      continue;
+    }
+
+    fileExisted = fs.existsSync(targetPath);
+    const previous = fileExisted ? fs.readFileSync(targetPath) : undefined;
+    const nextContent = Buffer.from(
+      overlayProjectMcpFile(
+        previous?.toString('utf8'),
+        target,
+        serversToWrite,
+      ),
+      'utf8',
+    );
+    if (previous?.equals(nextContent)) continue;
+
+    const id = selectionId(target.ide, 'mcp', targetPath);
+    const mcpChange: DeployChange = {
+      id,
+      owner: 'ide',
+      ide: target.ide,
+      capability: 'mcp',
+      name: displayName(targetPath, 'mcp'),
+      targetPath,
+      change: fileExisted ? 'modify' : 'add',
+      defaultSelected: conflictNames.length === 0
+        || Object.keys(serversToWrite).some((name) => !conflictNames.includes(name)),
+      group: 'standard',
+      strategy: 'replace-entire-file',
+      deploymentKind: 'project-mcp-overlay',
+      preview: preview(targetPath, target.ide, 'mcp', nextContent, previous, issues),
+    };
+    mutations.set(id, {
+      content: nextContent,
+      mcpOverlay: { target, serversToWrite },
+    });
+    changes.push(mcpChange);
+
+    for (const name of conflictNames) {
+      const decisionId = selectionId(target.ide, 'mcp', `${targetPath}\0mcp:${name}`);
+      decisions.push({
+        id: decisionId,
+        factId: decisionId,
+        kind: 'project-mcp-divergence',
+        packageNames: [name],
+        linkPaths: [targetPath],
+        choices: ['preserve-external', 'replace-with-repository'],
+        replacementChangeIds: [id],
+      });
+      issues.push({
+        severity: 'decisionRequired',
+        code: 'deploy.projectMcpDivergence',
+        decisionId,
+        message: `Unknown or divergent project MCP server "${name}" blocks silent overwrite: ${targetPath}`,
+        details: 'Choose Preserve to keep the local server definition, or Replace to write the Repository definition.',
+      });
+    }
+  }
+}
+
 function projectSkillOwner(
   relativeRoot: ProjectSkillRelativeRoot,
   manifest: McvManifest,
@@ -2490,6 +2664,65 @@ function applyProjectSkillReceiptDecisions(
     return;
   }
   mutations.set(receiptChange.id, { content: nextContent });
+}
+
+function applyProjectMcpOverlayDecisions(
+  plan: DeployPlan,
+  selection: DeploySelection,
+  mutations: Map<string, DeployMutation>,
+): void {
+  if (plan.scope !== 'project') return;
+
+  const preservedByChange = new Map<string, Set<string>>();
+  for (const decision of plan.decisions) {
+    if (decision.kind !== 'project-mcp-divergence') continue;
+    const choice = selection.decisions?.[decision.id];
+    if (choice !== 'preserve-external') continue;
+    for (const changeId of decision.replacementChangeIds) {
+      const names = preservedByChange.get(changeId) ?? new Set<string>();
+      for (const name of decision.packageNames) names.add(name);
+      preservedByChange.set(changeId, names);
+    }
+  }
+  if (preservedByChange.size === 0) return;
+
+  for (const [changeId, preservedNames] of preservedByChange) {
+    const mutation = mutations.get(changeId);
+    if (!mutation?.mcpOverlay) continue;
+    const { target, serversToWrite } = mutation.mcpOverlay;
+    const nextServers = Object.fromEntries(
+      Object.entries(serversToWrite).filter(([name]) => !preservedNames.has(name)),
+    );
+    const targetPath = plan.changes.find((change) => change.id === changeId)?.targetPath;
+    if (!targetPath) continue;
+    const previous = fs.existsSync(targetPath) ? fs.readFileSync(targetPath, 'utf8') : undefined;
+    const nextContent = Buffer.from(overlayProjectMcpFile(previous, target, nextServers), 'utf8');
+    mutations.set(changeId, {
+      content: nextContent,
+      mcpOverlay: { target, serversToWrite: nextServers },
+    });
+  }
+
+  const receiptChange = plan.changes.find((change) =>
+    change.name === 'Managed Receipt'
+    && change.targetPath === managedReceiptPath(plan.targetRoot));
+  if (!receiptChange) return;
+  const receiptMutation = mutations.get(receiptChange.id);
+  if (!receiptMutation?.content) return;
+  const parsed = JSON.parse(receiptMutation.content.toString('utf8')) as ManagedReceipt;
+  for (const decision of plan.decisions) {
+    if (decision.kind !== 'project-mcp-divergence') continue;
+    if (selection.decisions?.[decision.id] !== 'preserve-external') continue;
+    for (const targetPath of decision.linkPaths) {
+      const relative = path.relative(plan.targetRoot, targetPath).split(path.sep).join('/');
+      for (const name of decision.packageNames) {
+        delete parsed.managed[managedReceiptKey(relative, `mcp:${name}`)];
+      }
+    }
+  }
+  mutations.set(receiptChange.id, {
+    content: Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, 'utf8'),
+  });
 }
 
 function compareChanges(left: DeployChange, right: DeployChange): number {

@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Project-scope Deploy overlays selected MCP servers at key granularity into Codex `.codex/config.toml`, Claude Code `.mcp.json`, and Gemini CLI `.gemini/settings.json`, preserving non-MCV servers and recording Managed Receipt ownership; unrecorded same-name conflicts require Preserve/Replace and are never cleared by `--yes`. Antigravity remains global-only with a `projectScopeUnsupported` notice.
+
 ### Changed
 
 - Bare `mcv` prints a concise plain-text Overview in a TTY (help in a non-TTY) and exits immediately; the persistent fullscreen Ink Shell, alternate-screen routing, and deep-link semantics are removed from the default path.
