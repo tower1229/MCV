@@ -23,6 +23,13 @@ import {
 import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
 import { readProfilesDocument } from '../profiles/store.js';
 import { isRecord, mergeRecords } from '../utils/objects.js';
+import {
+  acquireOperationLock,
+  OperationLockBusyError,
+  releaseOperationLock,
+  repositoryOperationLockResource,
+  type OperationLockHandle,
+} from '../utils/operation-lock.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
 import { readState } from '../utils/state.js';
 import {
@@ -347,12 +354,51 @@ export async function applyCapturePlan(
     activeCapturePlans.delete(plan);
     return failedCaptureResult(plan.repositoryPath, stalePlanError());
   }
+  const repositoryPath = plan.repositoryPath;
+
+  let lock: OperationLockHandle;
+  try {
+    lock = acquireOperationLock(repositoryOperationLockResource(repositoryPath));
+  } catch (error) {
+    if (!(error instanceof OperationLockBusyError)) throw error;
+    activeCapturePlans.delete(plan);
+    return failedCaptureResult(plan.repositoryPath, {
+      code: 'capture.repositoryBusy',
+      message: 'Another MCV process is modifying this Repository; generate a new Capture Plan and retry shortly.',
+      nextActions: ['Wait for the other MCV operation to finish, then generate and review a new Capture Plan.'],
+    });
+  }
+
+  try {
+    return await applyCapturePlanWhileLocked(
+      context,
+      plan,
+      repositoryPath,
+      active,
+      selected,
+      selectedIds,
+      options,
+    );
+  } finally {
+    releaseOperationLock(lock);
+  }
+}
+
+async function applyCapturePlanWhileLocked(
+  context: DeviceContext,
+  plan: CapturePlan,
+  repositoryPath: string,
+  active: ActiveCapturePlan,
+  selected: Set<string>,
+  selectedIds: string[],
+  options: CaptureApplyOptions,
+): Promise<CaptureResult> {
 
   let freshPlan: CapturePlan;
   try {
     freshPlan = await buildCapturePlan(
       context,
-      plan.repositoryPath,
+      repositoryPath,
       plan.operationId,
       new Map<string, CaptureMutation>(),
     );
@@ -377,14 +423,14 @@ export async function applyCapturePlan(
 
   try {
     const applied = applyCaptureTransaction(
-      plan.repositoryPath,
+      repositoryPath,
       selectedMutations as CaptureMutation[],
       options.moveFile ?? fs.renameSync,
       options.restoreFile ?? ((targetPath, content) => fs.writeFileSync(targetPath, content)),
     );
     activeCapturePlans.delete(plan);
     const newUnassignedAssetIds = computeNewUnassignedAssetIds(
-      plan.repositoryPath,
+      repositoryPath,
       selectedChanges,
     );
     const newUnassignedCount = newUnassignedAssetIds.length;

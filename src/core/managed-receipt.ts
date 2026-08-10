@@ -33,10 +33,14 @@ export function readManagedReceipt(targetRoot: string): ManagedReceipt | undefin
 
 export function writeManagedReceipt(targetRoot: string, receipt: ManagedReceipt): void {
   const receiptPath = managedReceiptPath(targetRoot);
-  atomicWriteFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  atomicWriteFile(receiptPath, serializeManagedReceipt(receipt));
 }
 
-function parseManagedReceipt(raw: unknown): ManagedReceipt | undefined {
+export function serializeManagedReceipt(receipt: ManagedReceipt): string {
+  return `${JSON.stringify(receipt, null, 2)}\n`;
+}
+
+export function parseManagedReceipt(raw: unknown): ManagedReceipt | undefined {
   if (!isRecord(raw)
     || raw.schemaVersion !== 1
     || typeof raw.repositoryId !== 'string'

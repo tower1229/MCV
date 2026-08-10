@@ -196,12 +196,12 @@ function ProfileEditorApp({
 
   useInput((input, key) => {
     const current = stateRef.current;
-    if (current.status === 'loading' || current.status === 'saving') return;
-
     if (key.ctrl && input === 'c') {
       finishInterrupted(current, exit, exitingRef);
       return;
     }
+
+    if (current.status === 'loading' || current.status === 'saving') return;
 
     if (current.focus === 'search') {
       handleSearchInput(current.searchQuery, input, key, dispatch);

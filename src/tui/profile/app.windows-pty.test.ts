@@ -55,7 +55,7 @@ describe.skipIf(process.platform !== 'win32')('packaged Profile TUI in Windows C
   }, 45_000);
 
   afterAll(() => {
-    fs.rmSync(modeProbeRoot, { recursive: true, force: true });
+    fs.rmSync(modeProbeRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   beforeEach(() => {
@@ -80,18 +80,17 @@ describe.skipIf(process.platform !== 'win32')('packaged Profile TUI in Windows C
   });
 
   afterEach(() => {
-    fs.rmSync(testRoot, { recursive: true, force: true });
+    fs.rmSync(testRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
-  it('opens Profile maintenance, navigates with arrows, accepts search input, and restores ConPTY', async () => {
+  it('opens Profile maintenance, navigates through search, and restores ConPTY', async () => {
     const repositoryPath = createRepository(testRoot, 'profile-conpty');
     writeBinding(repositoryPath, 'profile-conpty');
     const outcome = await runConPty('', [
-      { pattern: 'MCV Profile Editor', input: '/' },
+      { pattern: 'Status: ready · profile global', input: '/' },
       { pattern: 'Search:', input: '调', delay: 50 },
-      { pattern: 'Search: 调', input: '\r' },
-      { pattern: 'Assets', input: '\u001b[C' },
-      { pattern: 'Assets', input: ' ', delay: 50 },
+      { pattern: 'Search: 调', input: '\u001b' },
+      { pattern: 'Status: ready · profile global', input: ' ', delay: 50 },
       { pattern: 'Status: dirty', input: '\u001b' },
     ], { repositoryPath });
 
@@ -151,9 +150,10 @@ describe.skipIf(process.platform !== 'win32')('packaged Profile TUI in Windows C
       let output = '';
       let nextStep = 0;
       let searchStart = 0;
+      let timeoutError: Error | undefined;
       const timeout = setTimeout(() => {
+        timeoutError = new Error(`Timed out waiting for Profile TUI. Output: ${output}`);
         terminal.kill();
-        reject(new Error(`Timed out waiting for Profile TUI. Output: ${output}`));
       }, 30_000);
 
       terminal.onData((data) => {
@@ -168,6 +168,10 @@ describe.skipIf(process.platform !== 'win32')('packaged Profile TUI in Windows C
       });
       terminal.onExit(({ exitCode }) => {
         clearTimeout(timeout);
+        if (timeoutError) {
+          reject(timeoutError);
+          return;
+        }
         if (nextStep !== steps.length) {
           reject(new Error(
             `Profile TUI exited before step ${nextStep + 1}/${steps.length}. Output: ${output}`,

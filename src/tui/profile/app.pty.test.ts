@@ -26,27 +26,27 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged Profile TUI in a real PTY'
     const outcome = await runExpect([
       'set timeout 8',
       'log_user 1',
-      'spawn /bin/zsh -f -c {stty rows 30 columns 120; cd "$MCV_TEST_REPO"; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI" profile; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
-      'expect -exact {MCV Profile Editor}',
-      'expect -exact {Profiles}',
-      'expect -exact {Assets}',
+      'spawn /bin/zsh -f -c {trap : INT; stty rows 30 columns 120; cd "$MCV_TEST_REPO"; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI" profile; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      expectExact('MCV Profile Editor', 'Profile title'),
+      expectExact('Status: ready · profile global', 'ready status'),
+      expectExact('Ctrl+C quit', 'ready frame footer'),
       'send "/"',
-      'send "调"',
-      'expect -exact {Search: 调}',
-      'send "\\r"',
-      'send "\\033\\[C"',
       'after 100',
-      'send " "',
-      'expect -exact {Status: dirty}',
+      'send "调"',
+      expectExact('Search: 调', 'CJK search'),
       'send "\\033"',
-      'expect -exact {Profile edits discarded.}',
-      'expect -exact {EXIT_CODE:0}',
-      'expect eof',
-      'set result [wait]',
-      'exit [lindex $result 3]',
+      expectExact('Status: ready · profile global', 'post-search ready status'),
+      expectExact('Ctrl+C quit', 'post-search frame footer'),
+      'send " "',
+      expectExact('Status: dirty', 'dirty status'),
+      'send "\\033"',
+      expectExact('Profile edits discarded.', 'discard result'),
+      expectExact('EXIT_CODE:0', 'exit marker'),
+      expectEof(),
+      'exit 0',
     ], { MCV_TEST_REPO: repositoryPath });
 
-    expect(outcome.code).toBe(0);
+    expect(outcome.code, outcome.output).toBe(0);
     expectRestoredTerminal(outcome.output);
   }, 20_000);
 
@@ -56,16 +56,15 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged Profile TUI in a real PTY'
     const outcome = await runExpect([
       'set timeout 8',
       'log_user 1',
-      'spawn /bin/zsh -f -c {stty rows 24 columns 100; cd "$MCV_TEST_REPO"; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI" profile edit global; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
-      'expect -exact {MCV Profile Editor}',
+      'spawn /bin/zsh -f -c {trap : INT; stty rows 24 columns 100; cd "$MCV_TEST_REPO"; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI" profile edit global; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      expectExact('MCV Profile Editor', 'Profile title'),
       'send "\\003"',
-      'expect -exact {EXIT_CODE:130}',
-      'expect eof',
-      'set result [wait]',
-      'exit [lindex $result 3]',
+      expectExact('EXIT_CODE:130', 'interrupt exit marker'),
+      expectEof(),
+      'exit 130',
     ], { MCV_TEST_REPO: repositoryPath });
 
-    expect(outcome.code).toBe(130);
+    expect(outcome.code, outcome.output).toBe(130);
     expectRestoredTerminal(outcome.output);
   }, 20_000);
 
@@ -126,6 +125,25 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged Profile TUI in a real PTY'
     return path.join(testRoot, '.config', 'mcv', 'config.json');
   }
 });
+
+function expectExact(marker: string, label: string): string {
+  return [
+    'expect {',
+    `  -exact {${marker}} {}`,
+    `  timeout { puts stderr {Missing ${label}}; exit 124 }`,
+    `  eof { puts stderr {EOF before ${label}}; exit 125 }`,
+    '}',
+  ].join('\n');
+}
+
+function expectEof(): string {
+  return [
+    'expect {',
+    '  eof {}',
+    '  timeout { puts stderr {Timed out waiting for EOF}; exit 124 }',
+    '}',
+  ].join('\n');
+}
 
 function expectRestoredTerminal(output: string): void {
   expect(output).toContain('\u001b[?1049h');

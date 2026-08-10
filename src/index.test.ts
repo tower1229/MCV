@@ -109,7 +109,7 @@ describe('mcv default path without fullscreen Shell', () => {
     });
   });
 
-  it('prints help instead of an Overview when stdout is not a TTY', async () => {
+  it('prints a plain-text Overview when stdout is not a TTY', async () => {
     Object.defineProperty(process.stdout, 'isTTY', {
       configurable: true,
       value: false,
@@ -120,8 +120,8 @@ describe('mcv default path without fullscreen Shell', () => {
 
     await cli.parseAsync(['node', 'mcv']);
 
-    expect(output.join('')).toContain('Usage: mcv [options] [command]');
-    expect(loggedText()).not.toContain('Repository:');
+    expect(output.join('')).not.toContain('Usage: mcv [options] [command]');
+    expect(loggedText()).toContain('Repository:');
     expect(terminalPrompt.question).not.toHaveBeenCalled();
   });
 

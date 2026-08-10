@@ -31,6 +31,13 @@ import {
   hashFile,
 } from '../utils/files.js';
 import { isRecord } from '../utils/objects.js';
+import {
+  acquireOperationLock,
+  deployOperationLockResource,
+  OperationLockBusyError,
+  releaseOperationLock,
+  type OperationLockHandle,
+} from '../utils/operation-lock.js';
 import { readManifest, resolveBoundRepository, type McvManifest } from '../utils/repository.js';
 import {
   hashSkillPackageContent,
@@ -82,7 +89,9 @@ import {
 import { toNativeMcpServers } from '../core/mcp.js';
 import {
   managedReceiptPath,
+  parseManagedReceipt,
   readManagedReceipt,
+  serializeManagedReceipt,
   type ManagedReceipt,
 } from '../core/managed-receipt.js';
 import {
@@ -1253,12 +1262,52 @@ export async function applyDeployPlan(
     activeDeployPlans.delete(plan);
     return failedDeployResult(plan.repositoryPath, stalePlanError(), undefined, deployContextFromPlan(plan));
   }
+  const repositoryPath = plan.repositoryPath;
 
+  let lock: OperationLockHandle;
+  try {
+    lock = acquireOperationLock(deployOperationLockResource(plan.scope, plan.targetRoot));
+  } catch (error) {
+    if (!(error instanceof OperationLockBusyError)) throw error;
+    activeDeployPlans.delete(plan);
+    return failedDeployResult(plan.repositoryPath, {
+      code: 'deploy.targetBusy',
+      message: 'Another MCV process is modifying this Deploy target; generate a new Deploy Plan and retry shortly.',
+      nextActions: ['Wait for the other MCV operation to finish, then generate and review a new Deploy Plan.'],
+    }, undefined, deployContextFromPlan(plan));
+  }
+
+  try {
+    return await applyDeployPlanWhileLocked(
+      context,
+      plan,
+      repositoryPath,
+      selection,
+      options,
+      active,
+      selected,
+      selectedIds,
+    );
+  } finally {
+    releaseOperationLock(lock);
+  }
+}
+
+async function applyDeployPlanWhileLocked(
+  context: DeviceContext,
+  plan: DeployPlan,
+  repositoryPath: string,
+  selection: DeploySelection,
+  options: DeployApplyOptions,
+  active: ActiveDeployPlan,
+  selected: Set<string>,
+  selectedIds: string[],
+): Promise<DeployResult> {
   let freshPlan: DeployPlan;
   try {
     freshPlan = await buildDeployPlan(
       context,
-      plan.repositoryPath,
+      repositoryPath,
       plan.operationId,
       new Map<string, DeployMutation>(),
       deployRequestFromPlan(plan),
@@ -1280,14 +1329,14 @@ export async function applyDeployPlan(
   }
 
   applyProjectSkillReceiptDecisions(plan, selection, selected, selectedIds, active.mutations);
-  applyProjectMcpOverlayDecisions(plan, selection, active.mutations);
+  applyProjectMcpOverlayDecisions(plan, selection, selected, selectedIds, active.mutations);
   applyProjectPruneReceiptDecisions(plan, selected, selectedIds, active.mutations);
   const selectedChanges = plan.changes.filter((change) => selected.has(change.id));
   const prepared = prepareDeployWrites(selectedChanges, active.mutations);
   if (selectedChanges.length === 0) {
     try {
       if (plan.scope !== 'project') {
-        updateDeployState(context, plan.repositoryPath, selectedChanges, options.updateState);
+        updateDeployState(context, repositoryPath, selectedChanges, options.updateState);
       }
     } catch (error) {
       activeDeployPlans.delete(plan);
@@ -1354,7 +1403,7 @@ export async function applyDeployPlan(
         if (plan.scope !== 'project') {
           updateDeployState(
             context,
-            plan.repositoryPath as string,
+            repositoryPath,
             selectedChanges,
             options.updateState,
           );
@@ -2377,7 +2426,7 @@ function appendManagedReceiptChange(
     });
     return;
   }
-  const nextContent = Buffer.from(`${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  const nextContent = Buffer.from(serializeManagedReceipt(next), 'utf8');
   const previous = fs.existsSync(receiptPath) ? fs.readFileSync(receiptPath) : undefined;
   if (previous?.equals(nextContent)) return;
 
@@ -2575,11 +2624,12 @@ function parseManagedReceiptKey(key: string): { relativePath: string; assetId?: 
   };
 }
 
-function applyProjectPruneReceiptDecisions(
+function updateSelectedManagedReceipt(
   plan: DeployPlan,
   selected: Set<string>,
   selectedIds: string[],
   mutations: Map<string, DeployMutation>,
+  update: (receipt: ManagedReceipt) => boolean,
 ): void {
   if (plan.scope !== 'project') return;
   const receiptChange = plan.changes.find((change) =>
@@ -2589,19 +2639,15 @@ function applyProjectPruneReceiptDecisions(
   const receiptMutation = mutations.get(receiptChange.id);
   if (!receiptMutation?.content) return;
 
-  const parsed = JSON.parse(receiptMutation.content.toString('utf8')) as ManagedReceipt;
-  let changed = false;
-  for (const change of plan.changes) {
-    if (change.deploymentKind !== 'project-managed-prune') continue;
-    const mutation = mutations.get(change.id);
-    if (!mutation?.receiptKey || !mutation.receiptEntry) continue;
-    if (selected.has(change.id)) continue;
-    parsed.managed[mutation.receiptKey] = mutation.receiptEntry;
-    changed = true;
+  let receipt: ManagedReceipt | undefined;
+  try {
+    receipt = parseManagedReceipt(JSON.parse(receiptMutation.content.toString('utf8')) as unknown);
+  } catch {
+    return;
   }
-  if (!changed) return;
+  if (!receipt || !update(receipt)) return;
 
-  const nextContent = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+  const nextContent = Buffer.from(serializeManagedReceipt(receipt), 'utf8');
   const previous = fs.existsSync(receiptChange.targetPath)
     ? fs.readFileSync(receiptChange.targetPath)
     : undefined;
@@ -2611,7 +2657,28 @@ function applyProjectPruneReceiptDecisions(
     if (index >= 0) selectedIds.splice(index, 1);
     return;
   }
+  selected.add(receiptChange.id);
+  if (!selectedIds.includes(receiptChange.id)) selectedIds.push(receiptChange.id);
   mutations.set(receiptChange.id, { content: nextContent });
+}
+
+function applyProjectPruneReceiptDecisions(
+  plan: DeployPlan,
+  selected: Set<string>,
+  selectedIds: string[],
+  mutations: Map<string, DeployMutation>,
+): void {
+  updateSelectedManagedReceipt(plan, selected, selectedIds, mutations, (receipt) => {
+    let changed = false;
+    for (const change of plan.changes) {
+      if (change.deploymentKind !== 'project-managed-prune') continue;
+      const mutation = mutations.get(change.id);
+      if (!mutation?.receiptKey || !mutation.receiptEntry || selected.has(change.id)) continue;
+      receipt.managed[mutation.receiptKey] = mutation.receiptEntry;
+      changed = true;
+    }
+    return changed;
+  });
 }
 
 function appendProjectSkillPlan(
@@ -2893,14 +2960,6 @@ function applyProjectSkillReceiptDecisions(
   selectedIds: string[],
   mutations: Map<string, DeployMutation>,
 ): void {
-  if (plan.scope !== 'project') return;
-  const receiptChange = plan.changes.find((change) =>
-    change.name === 'Managed Receipt'
-    && change.targetPath === managedReceiptPath(plan.targetRoot));
-  if (!receiptChange) return;
-  const mutation = mutations.get(receiptChange.id);
-  if (!mutation?.content) return;
-
   const preservedKeys = new Set<string>();
   for (const decision of plan.decisions) {
     if (decision.kind !== 'project-skill-divergence') continue;
@@ -2912,27 +2971,17 @@ function applyProjectSkillReceiptDecisions(
     }
   }
   if (preservedKeys.size === 0) return;
-
-  const parsed = JSON.parse(mutation.content.toString('utf8')) as ManagedReceipt;
-  for (const key of preservedKeys) {
-    delete parsed.managed[key];
-  }
-  const nextContent = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
-  const previous = fs.existsSync(receiptChange.targetPath)
-    ? fs.readFileSync(receiptChange.targetPath)
-    : undefined;
-  if (previous?.equals(nextContent)) {
-    selected.delete(receiptChange.id);
-    const index = selectedIds.indexOf(receiptChange.id);
-    if (index >= 0) selectedIds.splice(index, 1);
-    return;
-  }
-  mutations.set(receiptChange.id, { content: nextContent });
+  updateSelectedManagedReceipt(plan, selected, selectedIds, mutations, (receipt) => {
+    for (const key of preservedKeys) delete receipt.managed[key];
+    return true;
+  });
 }
 
 function applyProjectMcpOverlayDecisions(
   plan: DeployPlan,
   selection: DeploySelection,
+  selected: Set<string>,
+  selectedIds: string[],
   mutations: Map<string, DeployMutation>,
 ): void {
   if (plan.scope !== 'project') return;
@@ -2967,25 +3016,21 @@ function applyProjectMcpOverlayDecisions(
     });
   }
 
-  const receiptChange = plan.changes.find((change) =>
-    change.name === 'Managed Receipt'
-    && change.targetPath === managedReceiptPath(plan.targetRoot));
-  if (!receiptChange) return;
-  const receiptMutation = mutations.get(receiptChange.id);
-  if (!receiptMutation?.content) return;
-  const parsed = JSON.parse(receiptMutation.content.toString('utf8')) as ManagedReceipt;
-  for (const decision of plan.decisions) {
-    if (decision.kind !== 'project-mcp-divergence') continue;
-    if (selection.decisions?.[decision.id] !== 'preserve-external') continue;
-    for (const targetPath of decision.linkPaths) {
-      const relative = path.relative(plan.targetRoot, targetPath).split(path.sep).join('/');
-      for (const name of decision.packageNames) {
-        delete parsed.managed[managedReceiptKey(relative, `mcp:${name}`)];
+  updateSelectedManagedReceipt(plan, selected, selectedIds, mutations, (receipt) => {
+    let changed = false;
+    for (const decision of plan.decisions) {
+      if (decision.kind !== 'project-mcp-divergence') continue;
+      if (selection.decisions?.[decision.id] !== 'preserve-external') continue;
+      for (const targetPath of decision.linkPaths) {
+        const relative = path.relative(plan.targetRoot, targetPath).split(path.sep).join('/');
+        for (const name of decision.packageNames) {
+          const key = managedReceiptKey(relative, `mcp:${name}`);
+          if (key in receipt.managed) changed = true;
+          delete receipt.managed[key];
+        }
       }
     }
-  }
-  mutations.set(receiptChange.id, {
-    content: Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`, 'utf8'),
+    return changed;
   });
 }
 

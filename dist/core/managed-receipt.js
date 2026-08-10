@@ -20,9 +20,12 @@ export function readManagedReceipt(targetRoot) {
 }
 export function writeManagedReceipt(targetRoot, receipt) {
     const receiptPath = managedReceiptPath(targetRoot);
-    atomicWriteFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+    atomicWriteFile(receiptPath, serializeManagedReceipt(receipt));
 }
-function parseManagedReceipt(raw) {
+export function serializeManagedReceipt(receipt) {
+    return `${JSON.stringify(receipt, null, 2)}\n`;
+}
+export function parseManagedReceipt(raw) {
     if (!isRecord(raw)
         || raw.schemaVersion !== 1
         || typeof raw.repositoryId !== 'string'

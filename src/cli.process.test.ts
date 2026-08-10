@@ -34,14 +34,42 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
     expect(cliSource).not.toMatch(/\brequire\s*\(|\bmodule\.exports\b|\bexports\./);
   });
 
-  it('prints help and succeeds when invoked without arguments outside a TTY', () => {
-    const result = spawnSync(process.execPath, [cliPath], {
-      encoding: 'utf8',
-    });
+  it('prints the Overview and succeeds when invoked without arguments outside a TTY', () => {
+    const isolatedRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-overview-')));
+    const repositoryPath = path.join(isolatedRoot, 'repository');
+    fs.mkdirSync(repositoryPath);
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 4',
+      'repositoryId: cli-overview-test',
+      'initializedAt: 2026-08-10T00:00:00.000Z',
+      'targets: { codex: { enabled: true } }',
+      'variables: {}',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      '',
+    ].join('\n'));
+    writeProfilesDocument(repositoryPath, { schemaVersion: 1, profiles: { global: { assets: [] } } });
+    try {
+      const result = spawnSync(process.execPath, [cliPath], {
+        cwd: repositoryPath,
+        encoding: 'utf8',
+        env: isolatedEnvironment(isolatedRoot),
+      });
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain('Usage: mcv [options] [command]');
-    expect(result.stderr).toBe('');
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('Repository:');
+      expect(result.stdout).not.toContain('Usage: mcv [options] [command]');
+      expect(result.stderr).toBe('');
+
+      const missingProfile = spawnSync(process.execPath, [cliPath, 'deploy'], {
+        cwd: repositoryPath,
+        encoding: 'utf8',
+        env: isolatedEnvironment(isolatedRoot),
+      });
+      expect(missingProfile.status).toBe(2);
+    } finally {
+      fs.rmSync(isolatedRoot, { recursive: true, force: true });
+    }
   });
 
   it('prints help successfully through the published bin entry', () => {
@@ -818,7 +846,8 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
 
   it.skipIf(process.platform !== 'darwin' || !fs.existsSync('/usr/bin/expect'))('exits 130 when Ctrl+C interrupts Restore before Apply', async () => {
     const isolatedRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-restore-interrupt-')));
-    const targetPath = path.join(isolatedRoot, 'target', 'settings.json');
+    const projectRoot = path.join(isolatedRoot, 'project');
+    const targetPath = path.join(projectRoot, 'settings.json');
     const deployedContent = 'deployed content';
     const originalContent = 'original content';
     const stateRoot = process.platform === 'darwin'
@@ -834,6 +863,8 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
     fs.writeFileSync(path.join(backupDirectory, 'manifest.json'), JSON.stringify({
       createdAt: '2026-07-19T00:00:00.000Z',
       status: 'complete',
+      scope: 'project',
+      targetRoot: projectRoot,
       files: [{
         action: 'modify',
         originalPath: targetPath,
@@ -854,6 +885,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
           'set result [wait]',
           'exit [lindex $result 3]',
         ].join('\n')], {
+          cwd: projectRoot,
           env: {
             ...process.env,
             HOME: isolatedRoot,
@@ -883,7 +915,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
         });
       });
 
-      expect(outcome).toMatchObject({ code: 130, output: expect.stringContaining('MCV interrupted.') });
+      expect(outcome).toMatchObject({ code: 130, output: expect.stringContaining('restore.cancelled') });
       expect(fs.readFileSync(targetPath, 'utf8')).toBe(deployedContent);
       expect(fs.existsSync(path.join(stateRoot, 'restore-backups'))).toBe(false);
     } finally {
