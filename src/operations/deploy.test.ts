@@ -5,6 +5,11 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceContext } from '../adapters/types.js';
 import { atomicWriteFile } from '../utils/files.js';
+import {
+  acquireOperationLock,
+  deployOperationLockResource,
+  releaseOperationLock,
+} from '../utils/operation-lock.js';
 import { readState, writeState } from '../utils/state.js';
 import {
   applyDeployPlan,
@@ -155,6 +160,79 @@ describe('Deploy operations', () => {
     expect(JSON.stringify(first)).not.toContain('must-be-preserved');
     expect(hashDirectory(repositoryPath)).toBe(repositoryBefore);
     expect(readState(context)).toEqual(stateBefore);
+  });
+
+  it('fails a global Apply without backup, state, or target writes while its target lock is held', async () => {
+    const plan = await globalPlan(context);
+    const targetBefore = hashDirectory(homeDir);
+    const stateBefore = readState(context);
+    const lock = acquireOperationLock(deployOperationLockResource('global', homeDir));
+
+    try {
+      const result = await applyDeployPlan(context, plan, {
+        changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+      });
+
+      expect(result).toMatchObject({
+        status: 'failed',
+        error: { code: 'deploy.targetBusy' },
+      });
+      expect(hashDirectory(homeDir)).toBe(targetBefore);
+      expect(readState(context)).toEqual(stateBefore);
+      expect(fs.existsSync(path.join(homeDir, 'Library', 'Application Support', 'mcv', 'backups')))
+        .toBe(false);
+    } finally {
+      releaseOperationLock(lock);
+    }
+  });
+
+  it('fails a project Apply without backup, Receipt, or target writes while its target lock is held', async () => {
+    const projectRoot = path.join(testRoot, 'busy-project');
+    fs.mkdirSync(projectRoot);
+    const built = buildDeployRequest(repositoryPath, {
+      profileIds: ['global'],
+      scope: 'project',
+      targetRoot: projectRoot,
+    });
+    if ('error' in built) throw new Error(built.error.message);
+    const plan = await createDeployPlan(context, built.request);
+    const targetBefore = hashDirectory(projectRoot);
+    const lock = acquireOperationLock(deployOperationLockResource('project', projectRoot));
+
+    try {
+      const result = await applyDeployPlan(context, plan, {
+        changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+      });
+
+      expect(result).toMatchObject({
+        status: 'failed',
+        error: { code: 'deploy.targetBusy' },
+      });
+      expect(hashDirectory(projectRoot)).toBe(targetBefore);
+      expect(fs.existsSync(path.join(projectRoot, '.mcv', 'managed.json'))).toBe(false);
+      expect(fs.existsSync(path.join(homeDir, 'Library', 'Application Support', 'mcv', 'backups')))
+        .toBe(false);
+    } finally {
+      releaseOperationLock(lock);
+    }
+  });
+
+  it('keeps an empty global Apply inside the target lock', async () => {
+    const plan = await globalPlan(context);
+    const stateBefore = readState(context);
+    const lock = acquireOperationLock(deployOperationLockResource('global', homeDir));
+
+    try {
+      const result = await applyDeployPlan(context, plan, { changeIds: [] });
+
+      expect(result).toMatchObject({
+        status: 'failed',
+        error: { code: 'deploy.targetBusy' },
+      });
+      expect(readState(context)).toEqual(stateBefore);
+    } finally {
+      releaseOperationLock(lock);
+    }
   });
 
   it('shows existing local plaintext configuration in the preview without blocking replacement', async () => {

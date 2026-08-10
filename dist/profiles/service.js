@@ -1,5 +1,6 @@
 import { deriveAssetCatalog } from '../assets/catalog.js';
 import { isValidAssetId } from '../assets/ids.js';
+import { acquireOperationLock, OperationLockBusyError, releaseOperationLock, repositoryOperationLockResource, } from '../utils/operation-lock.js';
 import { GLOBAL_PROFILE_ID, PROFILE_ID_PATTERN, } from './contracts.js';
 import { computeProfilesRevision, normalizeProfile, normalizeProfilesDocument, readProfilesDocument, writeProfilesDocument, } from './store.js';
 export function createProfileService(repositoryPath) {
@@ -210,6 +211,35 @@ export function createProfileService(repositoryPath) {
     };
 }
 function mutate(repositoryPath, input, prepare) {
+    let lock;
+    try {
+        lock = acquireOperationLock(repositoryOperationLockResource(repositoryPath));
+    }
+    catch (error) {
+        if (!(error instanceof OperationLockBusyError))
+            throw error;
+        return {
+            status: 'conflict',
+            created: [],
+            updated: [],
+            deleted: [],
+            diff: {},
+            profilesRevision: input.expectedProfilesRevision,
+            catalogRevision: input.expectedCatalogRevision,
+            error: {
+                code: 'profile.repositoryBusy',
+                message: 'Another MCV process is modifying this Repository; inspect it again and retry.',
+            },
+        };
+    }
+    try {
+        return mutateWhileLocked(repositoryPath, input, prepare);
+    }
+    finally {
+        releaseOperationLock(lock);
+    }
+}
+function mutateWhileLocked(repositoryPath, input, prepare) {
     const catalog = deriveAssetCatalog(repositoryPath);
     const document = normalizeProfilesDocument(readProfilesDocument(repositoryPath));
     const profilesRevision = computeProfilesRevision(document);

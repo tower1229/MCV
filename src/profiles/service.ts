@@ -1,6 +1,13 @@
 import { deriveAssetCatalog } from '../assets/catalog.js';
 import { isValidAssetId } from '../assets/ids.js';
 import {
+  acquireOperationLock,
+  OperationLockBusyError,
+  releaseOperationLock,
+  repositoryOperationLockResource,
+  type OperationLockHandle,
+} from '../utils/operation-lock.js';
+import {
   GLOBAL_PROFILE_ID,
   PROFILE_ID_PATTERN,
   type ApplyProfileMutationsInput,
@@ -240,6 +247,37 @@ type MutationPrep =
   | ProfileMutationResult;
 
 function mutate(
+  repositoryPath: string,
+  input: { expectedProfilesRevision: string; expectedCatalogRevision: string },
+  prepare: (document: ReturnType<typeof readProfilesDocument>) => MutationPrep,
+): ProfileMutationResult {
+  let lock: OperationLockHandle;
+  try {
+    lock = acquireOperationLock(repositoryOperationLockResource(repositoryPath));
+  } catch (error) {
+    if (!(error instanceof OperationLockBusyError)) throw error;
+    return {
+      status: 'conflict',
+      created: [],
+      updated: [],
+      deleted: [],
+      diff: {},
+      profilesRevision: input.expectedProfilesRevision,
+      catalogRevision: input.expectedCatalogRevision,
+      error: {
+        code: 'profile.repositoryBusy',
+        message: 'Another MCV process is modifying this Repository; inspect it again and retry.',
+      },
+    };
+  }
+  try {
+    return mutateWhileLocked(repositoryPath, input, prepare);
+  } finally {
+    releaseOperationLock(lock);
+  }
+}
+
+function mutateWhileLocked(
   repositoryPath: string,
   input: { expectedProfilesRevision: string; expectedCatalogRevision: string },
   prepare: (document: ReturnType<typeof readProfilesDocument>) => MutationPrep,

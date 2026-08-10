@@ -3,6 +3,11 @@ import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as yaml from 'yaml';
 import { deriveAssetCatalog } from '../assets/catalog.js';
+import {
+  acquireOperationLock,
+  releaseOperationLock,
+  repositoryOperationLockResource,
+} from '../utils/operation-lock.js';
 import { createProfileService } from './service.js';
 import {
   computeProfilesRevision,
@@ -164,6 +169,32 @@ describe('ProfileService', () => {
       global: { assets: ['rule:canonical'] },
       design: { assets: ['skill:b'] },
     });
+  });
+
+  it('fails without writing while another process owns the Repository mutation lock', () => {
+    const repositoryPath = createRepositoryWithAssets();
+    seedProfiles(repositoryPath, { global: { assets: ['rule:canonical'] } });
+    const before = fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'));
+    const service = createProfileService(repositoryPath);
+    const inventory = service.inspect();
+    const lock = acquireOperationLock(repositoryOperationLockResource(repositoryPath));
+
+    try {
+      const result = service.update({
+        id: 'global',
+        addAssets: ['skill:a'],
+        expectedProfilesRevision: inventory.profilesRevision,
+        expectedCatalogRevision: inventory.catalogRevision,
+      });
+
+      expect(result).toMatchObject({
+        status: 'conflict',
+        error: { code: 'profile.repositoryBusy' },
+      });
+      expect(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'))).toEqual(before);
+    } finally {
+      releaseOperationLock(lock);
+    }
   });
 
   it('rejects unknown Asset IDs and invalid Profile IDs', () => {

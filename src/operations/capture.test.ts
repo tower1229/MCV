@@ -8,6 +8,11 @@ import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js
 import { readState, writeState } from '../utils/state.js';
 import { writeProfilesDocument } from '../profiles/store.js';
 import { createProfileService } from '../profiles/service.js';
+import {
+  acquireOperationLock,
+  releaseOperationLock,
+  repositoryOperationLockResource,
+} from '../utils/operation-lock.js';
 import { applyCapturePlan, createCapturePlan } from './capture.js';
 
 describe('Capture operations', () => {
@@ -683,6 +688,38 @@ describe('Capture operations', () => {
       .toBe('# Device rules\n');
     expect(fs.existsSync(path.join(repositoryPath, 'ide', 'claude-code', 'native', 'settings.json')))
       .toBe(false);
+  });
+
+  it('shares one Repository lock identity with Profile mutations and fails both without writing', async () => {
+    fs.writeFileSync(path.join(homeDir, '.claude', 'CLAUDE.md'), '# Device rules\n');
+    const plan = await createCapturePlan(context);
+    const profileService = createProfileService(repositoryPath);
+    const inventory = profileService.inspect();
+    const repositoryBefore = hashDirectory(repositoryPath);
+    const lock = acquireOperationLock(repositoryOperationLockResource(repositoryPath));
+
+    try {
+      const result = await applyCapturePlan(context, plan, {
+        changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
+      });
+
+      expect(result).toMatchObject({
+        status: 'failed',
+        error: { code: 'capture.repositoryBusy' },
+      });
+      expect(profileService.update({
+        id: 'global',
+        title: 'Must not be written',
+        expectedProfilesRevision: inventory.profilesRevision,
+        expectedCatalogRevision: inventory.catalogRevision,
+      })).toMatchObject({
+        status: 'conflict',
+        error: { code: 'profile.repositoryBusy' },
+      });
+      expect(hashDirectory(repositoryPath)).toBe(repositoryBefore);
+    } finally {
+      releaseOperationLock(lock);
+    }
   });
 
   it('rejects forged, source-stale, and target-stale Plans before writing', async () => {

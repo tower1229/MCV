@@ -10,6 +10,7 @@ import { collectSkills, getSkillSources, } from '../core/skills.js';
 import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
 import { readProfilesDocument } from '../profiles/store.js';
 import { isRecord, mergeRecords } from '../utils/objects.js';
+import { acquireOperationLock, OperationLockBusyError, releaseOperationLock, repositoryOperationLockResource, } from '../utils/operation-lock.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
 import { readState } from '../utils/state.js';
 import { deleteObjectPath, parseStructuredObject, stringifyStructuredObject, } from '../utils/structured-config.js';
@@ -187,9 +188,32 @@ export async function applyCapturePlan(context, plan, selection, options = {}) {
         activeCapturePlans.delete(plan);
         return failedCaptureResult(plan.repositoryPath, stalePlanError());
     }
+    const repositoryPath = plan.repositoryPath;
+    let lock;
+    try {
+        lock = acquireOperationLock(repositoryOperationLockResource(repositoryPath));
+    }
+    catch (error) {
+        if (!(error instanceof OperationLockBusyError))
+            throw error;
+        activeCapturePlans.delete(plan);
+        return failedCaptureResult(plan.repositoryPath, {
+            code: 'capture.repositoryBusy',
+            message: 'Another MCV process is modifying this Repository; generate a new Capture Plan and retry shortly.',
+            nextActions: ['Wait for the other MCV operation to finish, then generate and review a new Capture Plan.'],
+        });
+    }
+    try {
+        return await applyCapturePlanWhileLocked(context, plan, repositoryPath, active, selected, selectedIds, options);
+    }
+    finally {
+        releaseOperationLock(lock);
+    }
+}
+async function applyCapturePlanWhileLocked(context, plan, repositoryPath, active, selected, selectedIds, options) {
     let freshPlan;
     try {
-        freshPlan = await buildCapturePlan(context, plan.repositoryPath, plan.operationId, new Map());
+        freshPlan = await buildCapturePlan(context, repositoryPath, plan.operationId, new Map());
     }
     catch {
         activeCapturePlans.delete(plan);
@@ -209,9 +233,9 @@ export async function applyCapturePlan(context, plan, selection, options = {}) {
             }]);
     }
     try {
-        const applied = applyCaptureTransaction(plan.repositoryPath, selectedMutations, options.moveFile ?? fs.renameSync, options.restoreFile ?? ((targetPath, content) => fs.writeFileSync(targetPath, content)));
+        const applied = applyCaptureTransaction(repositoryPath, selectedMutations, options.moveFile ?? fs.renameSync, options.restoreFile ?? ((targetPath, content) => fs.writeFileSync(targetPath, content)));
         activeCapturePlans.delete(plan);
-        const newUnassignedAssetIds = computeNewUnassignedAssetIds(plan.repositoryPath, selectedChanges);
+        const newUnassignedAssetIds = computeNewUnassignedAssetIds(repositoryPath, selectedChanges);
         const newUnassignedCount = newUnassignedAssetIds.length;
         return {
             schemaVersion: OPERATION_SCHEMA_VERSION,

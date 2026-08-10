@@ -18,7 +18,13 @@ import {
   geminiCliMcpServersConfig,
   mcvMcpHostConfig,
 } from './host-configs.js';
-import { READ_ASSETS_MAX_RESPONSE_BYTES } from './contracts.js';
+import {
+  DeployProfilesOutputSchema,
+  InspectInventoryOutputSchema,
+  READ_ASSETS_MAX_RESPONSE_BYTES,
+  ReadAssetsOutputSchema,
+  UpdateProfilesOutputSchema,
+} from './contracts.js';
 import {
   emptyProfilesDocument,
   writeProfilesDocument,
@@ -642,14 +648,25 @@ async function connectInMemory(
   };
 }
 
-async function callStructured(
+const structuredOutputSchemas = {
+  inspect_inventory: InspectInventoryOutputSchema,
+  read_assets: ReadAssetsOutputSchema,
+  update_profiles: UpdateProfilesOutputSchema,
+  deploy_profiles: DeployProfilesOutputSchema,
+};
+
+type StructuredToolName = keyof typeof structuredOutputSchemas;
+type StructuredToolOutput<Name extends StructuredToolName> =
+  ReturnType<(typeof structuredOutputSchemas)[Name]['parse']>;
+
+async function callStructured<Name extends StructuredToolName>(
   client: Client,
-  name: string,
+  name: Name,
   args: Record<string, unknown>,
-): Promise<Record<string, any>> {
+): Promise<StructuredToolOutput<Name>> {
   const result = await client.callTool({ name, arguments: args });
   expect(result.structuredContent).toEqual(expect.any(Object));
-  return result.structuredContent as Record<string, any>;
+  return structuredOutputSchemas[name].parse(result.structuredContent) as StructuredToolOutput<Name>;
 }
 
 function deviceContextFor(testRoot: string, homeDir: string): DeviceContext {

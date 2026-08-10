@@ -238,10 +238,6 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         await startMcpServer(context);
     });
     program.action(async () => {
-        if (!process.stdout.isTTY) {
-            program.outputHelp();
-            return;
-        }
         await showStatus(context);
     });
     return program;

@@ -299,10 +299,6 @@ export function createProgram(
     });
 
   program.action(async () => {
-    if (!process.stdout.isTTY) {
-      program.outputHelp();
-      return;
-    }
     await showStatus(context);
   });
 
