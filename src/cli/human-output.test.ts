@@ -85,6 +85,32 @@ describe('human output presentation', () => {
     expect(fs.readFileSync(presentation.reviewPath!, 'utf8')).toContain('detail 40');
   });
 
+  it('keeps progressive details on demand while preserving overflow artifacts and fallback', () => {
+    const small = progressiveDocument(['hidden detail']);
+    presentHumanDocument(context, small);
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toBe('Status: concise.');
+
+    vi.mocked(console.log).mockClear();
+    presentHumanDocument(context, small, { verbose: true });
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toBe('hidden detail');
+
+    vi.mocked(console.log).mockClear();
+    const large = progressiveDocument(Array.from({ length: 41 }, (_, index) => `detail ${index}`));
+    const presentation = presentHumanDocument(context, large);
+    const output = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(output).toContain('Status: concise.');
+    expect(output).toContain('Full review:');
+    expect(output).not.toContain('detail 40');
+    expect(fs.readFileSync(presentation.reviewPath!, 'utf8')).toContain('detail 40');
+
+    vi.mocked(console.log).mockClear();
+    const invalidStateRoot = path.join(testRoot, 'not-a-progressive-directory');
+    fs.writeFileSync(invalidStateRoot, 'blocked');
+    context.env.XDG_STATE_HOME = invalidStateRoot;
+    presentHumanDocument(context, large);
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain('detail 40');
+  });
+
   it('removes expired artifacts and retains at most ten recent review files', () => {
     const reviewDirectory = path.join(context.env.XDG_STATE_HOME!, 'mcv', 'reviews');
     fs.mkdirSync(reviewDirectory, { recursive: true });
@@ -125,5 +151,16 @@ function overflowDocument(details: string[]): HumanDocument {
     details,
     nextActions: [],
     detailPolicy: 'overflow',
+  };
+}
+
+function progressiveDocument(details: string[]): HumanDocument {
+  return {
+    operation: 'status',
+    title: 'Overview Report',
+    summary: ['Status: concise.'],
+    details,
+    nextActions: [],
+    detailPolicy: 'progressive',
   };
 }

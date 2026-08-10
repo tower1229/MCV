@@ -1,6 +1,6 @@
 # ADR 0014: Agent Profile Management over Local MCP; TUI Shrinks to Profiles Only
 
-Status: Accepted
+Status: Superseded by ADR 0015
 
 Agents become first-class Profile managers through a local stdio MCP server (`mcv mcp`) exposing four tools — `inspect_inventory`, `read_assets`, `update_profiles`, `deploy_profiles` — over the same ProfileService that backs the CLI and TUI. Writes present expected Catalog and Profiles Revisions, validate every Asset reference and the global invariant, and commit as one atomic `profiles.yaml` replacement. Deploy calls reuse the existing Plan/Apply safety seam and return structured, agent-correctable issues rather than forcing a TUI open.
 

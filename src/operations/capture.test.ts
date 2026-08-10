@@ -211,6 +211,7 @@ describe('Capture operations', () => {
       expect.objectContaining({
         severity: 'warning',
         code: 'capture.sourceSkipped',
+        details: expect.stringContaining('settings.json'),
       }),
     ]);
     expect(JSON.stringify(plan)).not.toContain('malformed-secret-must-not-leak');
@@ -314,6 +315,8 @@ describe('Capture operations', () => {
     expect(choices).toHaveLength(2);
     expect(new Set(choices.map((choice) => choice.id))).toHaveLength(2);
     expect(new Set(choices.map((choice) => choice.decisionGroupId))).toHaveLength(1);
+    expect(plan.issues.find((issue) => issue.code === 'capture.mcpCoreConflict')?.decisionId)
+      .toBe(choices[0].decisionGroupId);
     expect(new Set(choices.map((choice) => choice.sourceLabel))).toEqual(
       new Set(['codex / config.toml', 'claude-code / .claude.json']),
     );

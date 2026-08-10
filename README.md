@@ -46,7 +46,7 @@ MCV 仓库中的配置分为：
 
 直接运行 `mcv` 会打印简洁的 plain-text Overview（与 `mcv status` 同一份只读报告）后立即退出；无论 stdout 是否为 TTY 都不会进入 alternate screen，也不会把无参数调用改成 help。日常入口是 `mcv`、`mcv capture`、`mcv deploy` 和 `mcv profile`；`status` 保留为兼容别名，但不作为新的日常概念宣传。低频命令（`init`、`bind`、`unbind`、`migrate`、`restore`、`repo`、`discover`）仍可用。
 
-Capture、Deploy、Restore 以及 Repository 生命周期命令一律走一次性 Command 层：TTY 中展示分组 Plan / Diff 摘要并确认，非交互场景使用 `--dry-run`、`--yes` 或 `--json`。只读命令直接打印 Report。全屏 TUI 已从默认路径移除；仅 `mcv profile`（以及无 mutation flag 的 `mcv profile edit <id>`）保留专用 Profile 维护界面。
+Deploy、Restore 以及 Repository 生命周期命令走一次性 Command 层；Capture 对简单 Plan 使用增强行式审阅，对至少包含两个交互事项（可解决决策组、warning 或删除候选）的复杂 Plan 在 TTY 中自动打开专用 Review TUI。`mcv capture --tui` / `--no-tui` 可强制选择界面；`--verbose` 保持行式输出。非交互场景继续使用 `--dry-run`、`--yes` 或 `--json`。裸 `mcv` 不进入全屏界面，Profile 维护继续使用独立 TUI。
 
 
 ### 1. 创建私人配置仓库
@@ -77,7 +77,7 @@ mcv discover --json
 mcv capture
 ```
 
-Capture 在终端打印按 IDE 与 File、Skill、MCP 分组的决策摘要，并把完整预览写入短期本地 Review Artifact（可能包含明文密钥）；交互模式在用户确认后写入仓库。可用 `--dry-run` 只审阅、`--verbose` 同时把完整预览打印到终端、`--yes` 在审阅后非交互应用默认非冲突变更，并可组合 `--json`。删除候选默认不选；warning 与 decision required 在交互路径中处理，`--yes` 不会执行有风险的决策。处理包括：
+Capture 在终端打印按 IDE 与 File、Skill、MCP 分组的决策摘要，并把完整预览写入短期本地 Review Artifact（可能包含明文密钥）。简单 Plan 逐项显示冲突、删除和 warning 后确认；交互事项合计至少两项时，在完整 TTY 中自动打开专用 Capture Review TUI，可浏览选择和 Diff、单选权威来源、逐项确认 warning，并只在最终页面按 Enter 后 Apply。可用 `--tui` / `--no-tui` 覆盖自动分流；`--dry-run` 只审阅，`--verbose` 同时把完整预览打印到终端，`--yes` 在审阅后非交互应用安全默认项，并可组合 `--json`。删除候选默认不选；`--yes` 不会执行 warning、决策或删除。处理包括：
 
 - 对 Adapter/Skill 已发现的支持内容保留原值和文件，不按文件名或字段名判断敏感性；
 - 用户已选择的 `${env:VARIABLE_NAME}` 引用保持引用，明文值保持明文；
@@ -141,7 +141,7 @@ mcv restore
 
 ```text
 mcv            打印简洁 Overview 后退出；TTY 与非 TTY 行为一致
-mcv capture    一次性 Capture Plan/确认/Apply；--dry-run/--yes/--json/--verbose
+mcv capture    简单 Plan 行式审阅、复杂 Plan 自动 TUI；--tui/--no-tui/--dry-run/--yes/--json/--verbose
 mcv deploy     一次性 Deploy Plan/确认/Apply；默认项目 scope；需 Profile 或 --global；支持 --verbose；裸调用 exit 2
 mcv profile    Profile 维护 TUI（TTY）或 list/show/create/edit/delete 子命令
 

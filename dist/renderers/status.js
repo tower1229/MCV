@@ -1,25 +1,30 @@
 import { displaySkillSurface } from '../core/skill-surfaces.js';
 import { styleText } from './color.js';
 export function renderStatusDocument(report) {
-    const full = renderStatusPlain(report);
-    const overflowSummary = full.filter((line) => line.startsWith('Repository:')
-        || line.startsWith('Git:')
-        || line.startsWith('Pending deployment:')
-        || line.startsWith('Post-deploy local state:')
-        || line.startsWith('Environment:')
-        || line.startsWith('Last operation'));
-    overflowSummary.push(`Details: ${report.linkFacts.length} linked Skill facts, ${report.postDeployLocalState.contentDrifts.length + report.postDeployLocalState.topologyDrifts.length} Skill Drift entries, ${report.environment.ideSupport.length} IDEs.`);
     return {
         operation: 'status',
         title: 'Overview Report',
-        summary: [],
-        overflowSummary,
-        details: full,
+        summary: renderStatusSummary(report),
+        details: renderStatusPlain(report),
         nextActions: [],
-        detailPolicy: 'overflow',
+        detailPolicy: 'progressive',
     };
 }
 export function renderStatusPlain(report) {
+    return [
+        ...renderStatusLead(report),
+        ...renderLinkedSkillDetails(report.linkFacts),
+        ...renderStatusTail(report),
+    ];
+}
+function renderStatusSummary(report) {
+    return [
+        ...renderStatusLead(report),
+        ...renderLinkedSkillSummary(report.linkFacts),
+        ...renderStatusTail(report),
+    ];
+}
+function renderStatusLead(report) {
     const lines = [
         `Repository: ${report.repository.path}`,
         `Repository ID: ${report.repository.id}`,
@@ -32,21 +37,10 @@ export function renderStatusPlain(report) {
     }
     const pending = report.pendingDeployment;
     lines.push(`Pending deployment: ${pending.total} ${plural(pending.total, 'change')} (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete; ${pending.recommended} recommended, ${pending.optional} optional; ${pending.advancedCleanupExcluded} Advanced Cleanup excluded)`);
-    for (const fact of report.linkFacts) {
-        const surface = fact.surfaces.length === 0
-            ? displaySkillSurface('canonical-store')
-            : fact.surfaces.map(({ surface: surfaceId }) => displaySkillSurface(surfaceId)).join(' + ');
-        const state = fact.severity === 'error'
-            ? 'Blocked'
-            : fact.severity === 'decisionRequired'
-                ? 'Needs decision'
-                : fact.severity === 'warning'
-                    ? 'Preserve external'
-                    : fact.ownership === 'managed'
-                        ? 'Already satisfied projection'
-                        : 'Satisfied via link';
-        lines.push(`Linked Skills: ${surface} · ${state} · ${fact.ownership} · ${fact.packageNames.length} ${plural(fact.packageNames.length, 'package')} · ${fact.affectedFileCount} affected ${plural(fact.affectedFileCount, 'file')}`);
-    }
+    return lines;
+}
+function renderStatusTail(report) {
+    const lines = [];
     const local = report.postDeployLocalState;
     lines.push(`Post-deploy local state: ${local.unchanged} unchanged, ${styleText(String(local.contentDrift), local.contentDrift > 0 ? 'yellow' : 'green')} content Drift, ${styleText(String(local.topologyDrift), local.topologyDrift > 0 ? 'yellow' : 'green')} topology Drift, ${styleText(String(local.drift), local.drift > 0 ? 'yellow' : 'green')} Drift, ${styleText(String(local.missing), local.missing > 0 ? 'red' : 'green')} missing`);
     for (const entry of local.contentDrifts) {
@@ -79,6 +73,138 @@ export function renderStatusPlain(report) {
         lines.push('Last operation: none');
     }
     return lines;
+}
+const LINK_SEVERITY_RANK = {
+    notice: 0,
+    warning: 1,
+    decisionRequired: 2,
+    error: 3,
+};
+const SURFACE_ORDER = ['codex', 'claude-code', 'gemini-cli', 'antigravity'];
+function renderLinkedSkillSummary(facts) {
+    if (facts.length === 0)
+        return ['Linked Skills: none'];
+    const packageSeverities = new Map();
+    const packagesBySurface = new Map();
+    const ideSurfacesByPackage = new Map();
+    const canonicalStorePackages = new Set();
+    for (const fact of facts) {
+        for (const packageName of fact.packageNames) {
+            const current = packageSeverities.get(packageName);
+            if (!current || LINK_SEVERITY_RANK[fact.severity] > LINK_SEVERITY_RANK[current]) {
+                packageSeverities.set(packageName, fact.severity);
+            }
+            if (fact.surfaces.length === 0)
+                canonicalStorePackages.add(packageName);
+            for (const { surface } of fact.surfaces) {
+                const surfacePackages = packagesBySurface.get(surface) ?? new Set();
+                surfacePackages.add(packageName);
+                packagesBySurface.set(surface, surfacePackages);
+                const packageSurfaces = ideSurfacesByPackage.get(packageName) ?? new Set();
+                packageSurfaces.add(surface);
+                ideSurfacesByPackage.set(packageName, packageSurfaces);
+            }
+        }
+    }
+    const severities = [...packageSeverities.values()];
+    const healthy = severities.filter((severity) => severity === 'notice').length;
+    const needsReview = severities.filter((severity) => severity === 'warning' || severity === 'decisionRequired').length;
+    const blocked = severities.filter((severity) => severity === 'error').length;
+    const packageCount = packageSeverities.size;
+    const matchVerb = packageCount === 1 ? 'matches' : 'match';
+    const reviewVerb = needsReview === 1 ? 'needs' : 'need';
+    const lines = healthy === packageCount
+        ? [`Linked Skills: ✓ ${packageCount} ${plural(packageCount, 'package')} ${matchVerb} through existing local links · no action required`]
+        : [`Linked Skills: ${packageCount} ${plural(packageCount, 'package')} · ${healthy} healthy · ${needsReview} ${reviewVerb} review · ${blocked} blocked`];
+    const coverage = SURFACE_ORDER.flatMap((surface) => {
+        const count = packagesBySurface.get(surface)?.size ?? 0;
+        return count > 0 ? [`${displaySkillSurface(surface)} ${count}`] : [];
+    });
+    if (canonicalStorePackages.size > 0) {
+        coverage.push(`${displaySkillSurface('canonical-store')} ${canonicalStorePackages.size}`);
+    }
+    const shared = [...ideSurfacesByPackage.values()].filter((surfaces) => surfaces.size > 1).length;
+    if (shared > 0)
+        coverage.push(`${shared} shared`);
+    if (coverage.length > 0)
+        lines.push(`  Coverage: ${coverage.join(' · ')}`);
+    if (facts.some((fact) => fact.ownership === 'external')) {
+        lines.push('  External links are outside MCV ownership and will be preserved.');
+    }
+    lines.push(...sortLinkFacts(facts)
+        .filter((fact) => fact.severity !== 'notice')
+        .flatMap(renderActionableLinkFact));
+    lines.push('  Details: mcv status --verbose');
+    return lines;
+}
+function renderLinkedSkillDetails(facts) {
+    if (facts.length === 0)
+        return ['Linked Skills: none'];
+    const lines = ['Linked Skill details:', ''];
+    for (const fact of sortLinkFacts(facts)) {
+        lines.push(linkFactHeadline(fact));
+        lines.push(`    Ownership: ${fact.ownership === 'managed' ? 'MCV-managed' : 'outside MCV'}`);
+        lines.push(`    ${plural(fact.linkPaths.length, 'Link')}:`);
+        for (const linkPath of fact.linkPaths)
+            lines.push(`      ${linkPath}`);
+        if (fact.resolvedPaths?.length) {
+            lines.push(`    Resolved ${plural(fact.resolvedPaths.length, 'target')}:`);
+            for (const resolvedPath of fact.resolvedPaths)
+                lines.push(`      ${resolvedPath}`);
+        }
+        const coverageState = fact.severity === 'notice' ? 'verified' : 'affected';
+        lines.push(`    Coverage: ${fact.affectedFileCount} expected file ${plural(fact.affectedFileCount, 'placement')} ${coverageState}`);
+        lines.push('');
+    }
+    return lines;
+}
+function renderActionableLinkFact(fact) {
+    const headline = linkFactHeadline(fact);
+    if (fact.severity === 'warning') {
+        return [headline, '    Acknowledge during Deploy to preserve the external shared link.'];
+    }
+    if (fact.severity === 'decisionRequired') {
+        return [headline, '    Choose Preserve or Replace during Deploy.'];
+    }
+    return [headline];
+}
+function linkFactHeadline(fact) {
+    return `  ${linkFactSymbol(fact)} ${fact.packageNames.join(', ')} · ${linkFactSurface(fact)} · ${linkFactState(fact)}`;
+}
+function sortLinkFacts(facts) {
+    return [...facts].sort((left, right) => LINK_SEVERITY_RANK[right.severity] - LINK_SEVERITY_RANK[left.severity]
+        || left.packageNames.join(',').localeCompare(right.packageNames.join(',')));
+}
+function linkFactSymbol(fact) {
+    if (fact.severity === 'notice')
+        return '✓';
+    if (fact.severity === 'error')
+        return '×';
+    return '!';
+}
+function linkFactSurface(fact) {
+    return fact.surfaces.length === 0
+        ? displaySkillSurface('canonical-store')
+        : fact.surfaces.map(({ surface }) => displaySkillSurface(surface)).join(' + ');
+}
+function linkFactState(fact) {
+    if (fact.severity === 'notice')
+        return 'Already matches';
+    if (fact.severity === 'warning')
+        return 'Review required';
+    if (fact.severity === 'decisionRequired')
+        return 'Decision required';
+    return `Blocked: ${linkFactReason(fact.reason)}`;
+}
+function linkFactReason(reason) {
+    switch (reason) {
+        case 'divergent': return 'linked content differs from the repository';
+        case 'dangling': return 'link target is missing';
+        case 'cycle': return 'link contains a cycle';
+        case 'physical-target-conflict': return 'link conflicts with a physical deployment target';
+        case 'unclassified': return 'link could not be classified safely';
+        case undefined: return 'link cannot be used safely';
+    }
 }
 function plural(count, singular) {
     return count === 1 ? singular : `${singular}s`;

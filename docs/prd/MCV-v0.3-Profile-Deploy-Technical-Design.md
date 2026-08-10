@@ -59,8 +59,8 @@ global 是初始化时自动存在的内置 Profile。它采用与普通 Profile
 | Deploy Plan/Apply 与事务引擎 | 保留，扩展 DeployRequest 和 Plan 元数据 |
 | Capture | 保留，新增资产身份和 Profile 引用校验 |
 | managed Skill layout | 全局 Deploy 继续复用 |
-| 0.2 持久化 Ink Shell | 从默认主路径彻底移除，只保留专用 Profile TUI |
-| Ink | 仅保留 Profile 管理界面 |
+| 0.2 持久化 Ink Shell | 从默认主路径彻底移除，不恢复跨命令路由 |
+| Ink | 保留独立的 Profile 管理 TUI，并增加复杂 Capture Review TUI |
 | Repository schema v3 | 迁移到 v4 |
 | Operation schema v2 | 因 Deploy 语义变化升级到 v3 |
 
@@ -926,14 +926,14 @@ Capture、Deploy 和状态不再需要全局 Shell 路由测试。
 
 验收：mcv deploy dev 在临时项目中生成正确的 Codex、Claude Code、Gemini CLI 资产；mcv deploy --global 保持旧能力。
 
-### Phase 3：CLI 收缩与 Profile TUI
+### Phase 3：CLI 收缩与专用 TUI
 
 - 裸 mcv 改为 plain Overview。
-- Capture/Deploy/Restore 退出全局 Shell。
+- Capture/Deploy/Restore 退出全局 Shell；Capture 后续仅按 Plan 复杂度进入独立 Review TUI。
 - Profile 专用 Ink App。
 - 删除不再需要的 Shell route、state 和对应快照。
 
-验收：除 mcv profile 外，没有命令进入全屏 TUI。
+验收：裸 `mcv`、Deploy、Restore 与 Repository 命令不进入全屏 TUI；只有 Profile 维护和复杂 Capture Review 使用互不导航的独立 TUI。
 
 ### Phase 4：Agent 集成
 

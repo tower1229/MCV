@@ -209,6 +209,62 @@ describe('mcv capture', () => {
     expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
   });
 
+  it('reviews a single deletion in the line flow and keeps it default-off', async () => {
+    const staleRules = path.join(repositoryPath, 'common', 'AGENTS.md');
+    fs.mkdirSync(path.dirname(staleRules), { recursive: true });
+    fs.writeFileSync(staleRules, '# Repository-only rules\n');
+    const confirmDeletion = vi.fn().mockResolvedValue(false);
+    const confirmCapture = vi.fn().mockResolvedValue(false);
+
+    await createProgram(deviceContext(), {
+      confirmDeletion,
+      confirmCapture,
+      terminal: { stdinIsTTY: true, stdoutIsTTY: true, term: 'xterm-256color' },
+    }).parseAsync(['node', 'mcv', 'capture', '--no-tui']);
+
+    expect(confirmDeletion).toHaveBeenCalledOnce();
+    expect(confirmCapture).toHaveBeenCalledOnce();
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain('Ready to apply:');
+    expect(fs.readFileSync(staleRules, 'utf8')).toBe('# Repository-only rules\n');
+  });
+
+  it('requires explicit warning acknowledgement before the final line confirmation', async () => {
+    fs.writeFileSync(path.join(homeDir, '.claude', 'settings.json'), '{ malformed }');
+    const confirmWarning = vi.fn().mockResolvedValue(false);
+    const confirmCapture = vi.fn().mockResolvedValue(true);
+
+    await createProgram(deviceContext(), {
+      confirmWarning,
+      confirmCapture,
+      terminal: { stdinIsTTY: true, stdoutIsTTY: true, term: 'xterm-256color' },
+    }).parseAsync(['node', 'mcv', 'capture', '--no-tui']);
+
+    expect(confirmWarning).toHaveBeenCalledOnce();
+    expect(confirmCapture).not.toHaveBeenCalled();
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain(
+      'Capture cancelled; repository was not changed.',
+    );
+  });
+
+  it('automatically routes two review items to the dedicated TUI', async () => {
+    fs.writeFileSync(path.join(homeDir, '.claude', 'settings.json'), '{ malformed }');
+    const staleRules = path.join(repositoryPath, 'common', 'AGENTS.md');
+    fs.mkdirSync(path.dirname(staleRules), { recursive: true });
+    fs.writeFileSync(staleRules, '# Repository-only rules\n');
+    const runTui = vi.fn().mockResolvedValue({
+      reason: 'cancelled',
+      summary: 'Capture cancelled; repository was not changed.',
+    });
+
+    await createProgram(deviceContext(), {
+      runTui,
+      terminal: { stdinIsTTY: true, stdoutIsTTY: true, term: 'xterm-256color' },
+    }).parseAsync(['node', 'mcv', 'capture']);
+
+    expect(runTui).toHaveBeenCalledOnce();
+    expect(fs.readFileSync(staleRules, 'utf8')).toBe('# Repository-only rules\n');
+  });
+
   it('writes the confirmed processed files to the local repository', async () => {
     fs.writeFileSync(
       path.join(homeDir, '.claude', 'CLAUDE.md'),

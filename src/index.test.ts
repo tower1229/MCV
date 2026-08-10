@@ -199,6 +199,21 @@ describe('mcv default path without fullscreen Shell', () => {
     expect(terminalPrompt.question).toHaveBeenCalled();
   });
 
+  it.each([
+    ['--tui', '--no-tui'],
+    ['--tui', '--dry-run'],
+    ['--no-tui', '--yes'],
+    ['--tui', '--verbose'],
+  ])('rejects incompatible Capture review flags: %s %s', async (left, right) => {
+    const cli = createProgram(context());
+    const capture = cli.commands.find((command) => command.name() === 'capture');
+    capture?.configureOutput({ writeErr: () => {} }).exitOverride();
+
+    await expect(
+      cli.parseAsync(['node', 'mcv', 'capture', left, right]),
+    ).rejects.toMatchObject({ exitCode: 2 });
+  });
+
   it('runs deploy through the one-shot command path in a TTY', async () => {
     await createProgram(context()).parseAsync(['node', 'mcv', 'deploy', '--global']);
 

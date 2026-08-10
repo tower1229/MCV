@@ -230,11 +230,12 @@ async function buildCapturePlan(
     return { definition, discovered, result };
   }));
   const issues: Issue[] = captured.flatMap(({ result }, resultIndex) =>
-    result.warnings.map((_warning, warningIndex) => ({
+    result.warnings.map((warning, warningIndex) => ({
       severity: 'warning' as const,
       code: 'capture.sourceSkipped',
       confirmationId: `capture-warning-${hashText(`source\0${resultIndex}\0${warningIndex}\0${result.warnings[warningIndex]}`).slice(0, 16)}`,
       message: 'A source item was skipped because it could not be processed safely.',
+      details: warning,
     })),
   );
   const sourcedFiles: SourcedCaptureFile[] = captured.flatMap(({ definition, result }) =>
@@ -256,6 +257,7 @@ async function buildCapturePlan(
       code: 'capture.skillSkipped',
       confirmationId: `capture-warning-${hashText(`skill\0${index}\0${skills.warnings[index]}`).slice(0, 16)}`,
       message: 'A Skill source item was skipped because it could not be processed safely.',
+      details: skills.warnings[index],
     });
   }
 
@@ -1015,6 +1017,7 @@ function addMcpChanges(
       issues.push({
         severity: 'decisionRequired',
         code: 'capture.mcpCoreConflict',
+        decisionId: decisionGroupId,
         message: `MCP server ${safeLabel(name)} has conflicting core definitions.`,
       });
       continue;
@@ -1063,12 +1066,13 @@ function addFileChanges(
     const unique = candidates.filter((candidate, index) =>
       candidates.findIndex((other) => sameContent(other.content, candidate.content)) === index);
     if (unique.length > 1) {
+      const decisionGroupId = `capture-decision-${hashText(`file\0${repositoryFile}`).slice(0, 16)}`;
       issues.push({
         severity: 'decisionRequired',
         code: 'capture.managedSourceConflict',
+        decisionId: decisionGroupId,
         message: `Capture source ${safeLabel(repositoryFile)} has conflicting definitions.`,
       });
-      const decisionGroupId = `capture-decision-${hashText(`file\0${repositoryFile}`).slice(0, 16)}`;
       for (const candidate of unique) {
         const planned = planFile(repositoryPath, candidate, issues);
         if (!planned) continue;

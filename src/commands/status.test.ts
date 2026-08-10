@@ -76,6 +76,7 @@ describe('mcv status', () => {
       'Repository ID: repository-id',
       'Repository schema: 4',
       'Pending deployment: 0 changes (0 add, 0 modify, 0 delete; 0 recommended, 0 optional; 0 Advanced Cleanup excluded)',
+      'Linked Skills: none',
       'Post-deploy local state: 1 unchanged, 0 content Drift, 0 topology Drift, 1 Drift, 1 missing',
       'Environment: 0 missing variables',
       'IDE support:',
@@ -86,6 +87,42 @@ describe('mcv status', () => {
       '    antigravity: absent',
       'Last operation on this device: deploy · failure · 2026-07-19T01:00:00.000Z',
     ]);
+  });
+
+  it('collapses healthy linked Skills consistently and reveals exact topology with --verbose', async () => {
+    const manifestPath = path.join(repositoryPath, 'mcv.yaml');
+    fs.writeFileSync(
+      manifestPath,
+      fs.readFileSync(manifestPath, 'utf8').replace('  codex:\n    enabled: false', '  codex:\n    enabled: true'),
+    );
+    const sourceSkill = path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md');
+    const externalSkill = path.join(testRoot, 'external-skills', 'review', 'SKILL.md');
+    const linkedRoot = path.join(stateRoot, '.agents', 'skills');
+    fs.mkdirSync(path.dirname(sourceSkill), { recursive: true });
+    fs.mkdirSync(path.dirname(externalSkill), { recursive: true });
+    fs.mkdirSync(path.dirname(linkedRoot), { recursive: true });
+    fs.writeFileSync(sourceSkill, '# Review\n');
+    fs.writeFileSync(externalSkill, '# Review\n');
+    fs.symlinkSync(path.dirname(path.dirname(externalSkill)), linkedRoot, process.platform === 'win32' ? 'junction' : 'dir');
+    seedGlobalProfileWithCatalog(repositoryPath);
+    writeDeviceState({});
+
+    await program().parseAsync(['node', 'mcv', 'status', '--plain']);
+    const plain = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(plain).toContain(
+      'Linked Skills: ✓ 1 package matches through existing local links · no action required',
+    );
+    expect(plain).toContain('Coverage: Codex 1');
+    expect(plain).not.toContain('✓ review · Codex · Already matches');
+    expect(plain).not.toContain(externalSkill);
+
+    vi.mocked(console.log).mockClear();
+    await program().parseAsync(['node', 'mcv', 'status', '--verbose']);
+    const verbose = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(verbose).toContain('✓ review · Codex · Already matches');
+    expect(verbose).toContain(linkedRoot);
+    expect(verbose).toContain(path.dirname(path.dirname(externalSkill)));
+    expect(verbose).toContain('1 expected file placement verified');
   });
 
   it('prints the same Overview as one machine-readable Status Report', async () => {

@@ -298,6 +298,24 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
     expect(missingMode.stderr).toContain("option '--json' requires '--dry-run' or '--yes'");
   });
 
+  it('rejects forced Capture TUI outside a TTY and conflicting TUI overrides', () => {
+    const unavailable = spawnSync(
+      process.execPath,
+      [cliPath, 'capture', '--tui'],
+      { encoding: 'utf8' },
+    );
+    const conflicting = spawnSync(
+      process.execPath,
+      [cliPath, 'capture', '--tui', '--no-tui'],
+      { encoding: 'utf8' },
+    );
+
+    expect(unavailable.status).toBe(2);
+    expect(unavailable.stderr).toContain('requires an interactive terminal');
+    expect(conflicting.status).toBe(2);
+    expect(conflicting.stderr).toContain("options '--tui' and '--no-tui' cannot be used together");
+  });
+
   it('uses exit code 2 for unknown commands and options', () => {
     const unknownCommand = spawnSync(
       process.execPath,
@@ -604,6 +622,54 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
     fs.symlinkSync(externalRoot, linkedRoot, process.platform === 'win32' ? 'junction' : 'dir');
     seedGlobalProfileWithCatalog(repositoryPath);
     try {
+      const overviewResult = spawnSync(process.execPath, [cliPath], {
+        cwd: repositoryPath,
+        encoding: 'utf8',
+        env: isolatedEnvironment(isolatedRoot),
+      });
+      const plainStatusResult = spawnSync(process.execPath, [cliPath, 'status', '--plain'], {
+        cwd: repositoryPath,
+        encoding: 'utf8',
+        env: isolatedEnvironment(isolatedRoot),
+      });
+      expect(overviewResult.status).toBe(0);
+      expect(plainStatusResult.status).toBe(0);
+      expect(overviewResult.stdout).toBe(plainStatusResult.stdout);
+      expect(plainStatusResult.stdout).toContain(
+        'Linked Skills: ✓ 1 package matches through existing local links · no action required',
+      );
+      expect(plainStatusResult.stdout).toContain('Coverage: Claude Code 1');
+      expect(plainStatusResult.stdout).not.toContain('✓ review · Claude Code · Already matches');
+      expect(plainStatusResult.stderr).toBe('');
+
+      const verboseStatusResult = spawnSync(process.execPath, [cliPath, 'status', '--verbose'], {
+        cwd: repositoryPath,
+        encoding: 'utf8',
+        env: isolatedEnvironment(isolatedRoot),
+      });
+      expect(verboseStatusResult.status).toBe(0);
+      expect(verboseStatusResult.stdout).toContain('✓ review · Claude Code · Already matches');
+      expect(verboseStatusResult.stdout).toContain(linkedRoot);
+      expect(verboseStatusResult.stdout).toContain(externalRoot);
+      expect(verboseStatusResult.stdout).toContain('1 expected file placement verified');
+      expect(verboseStatusResult.stderr).toBe('');
+
+      const jsonStatusResult = spawnSync(process.execPath, [cliPath, 'status', '--json'], {
+        cwd: repositoryPath,
+        encoding: 'utf8',
+        env: isolatedEnvironment(isolatedRoot),
+      });
+      expect(jsonStatusResult.status).toBe(0);
+      expect(JSON.parse(jsonStatusResult.stdout)).toMatchObject({
+        schemaVersion: 3,
+        operation: 'status',
+        linkFacts: [expect.objectContaining({
+          packageNames: ['review'],
+          affectedFileCount: 1,
+        })],
+      });
+      expect(jsonStatusResult.stdout).not.toMatch(/\u001b\[/);
+
       const planResult = spawnSync(
         process.execPath,
         [cliPath, 'deploy', '--global', '--dry-run', '--json'],

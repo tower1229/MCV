@@ -75,8 +75,11 @@ export function createProgram(
     .option('--json', 'Print a machine-readable plan')
     .option('--yes', 'Apply default non-conflicting changes without prompting')
     .option('--verbose', 'Also print complete review details in the terminal')
+    .option('--tui', 'Force the dedicated Capture review TUI')
+    .option('--no-tui', 'Force line-oriented Capture review')
     .action(async (options) => {
       validateWriteOutputOptions(captureCommand, options);
+      validateCaptureTuiOptions(captureCommand, options);
       await captureConfigurations(context, captureDependencies, options);
     });
 
@@ -310,6 +313,43 @@ export function createProgram(
   });
 
   return program;
+}
+
+function validateCaptureTuiOptions(
+  command: Command,
+  options: { dryRun?: boolean; yes?: boolean; json?: boolean; verbose?: boolean; tui?: boolean },
+): void {
+  const rawArgs = (command.parent as (Command & { rawArgs?: string[] }) | null)?.rawArgs ?? [];
+  const forceTui = rawArgs.includes('--tui');
+  const forcePlain = rawArgs.includes('--no-tui');
+  if (forceTui && forcePlain) {
+    command.error("options '--tui' and '--no-tui' cannot be used together", {
+      exitCode: 2,
+      code: 'mcv.conflictingCaptureReviewModes',
+    });
+  }
+  if ((forceTui || forcePlain) && (options.dryRun || options.yes || options.json)) {
+    command.error("options '--tui' and '--no-tui' are only available for interactive Capture", {
+      exitCode: 2,
+      code: 'mcv.conflictingCaptureReviewMode',
+    });
+  }
+  if (forceTui && options.verbose) {
+    command.error("options '--tui' and '--verbose' cannot be used together", {
+      exitCode: 2,
+      code: 'mcv.conflictingCaptureReviewMode',
+    });
+  }
+  if (forceTui && (
+    !process.stdin.isTTY
+    || !process.stdout.isTTY
+    || process.env.TERM?.toLowerCase() === 'dumb'
+  )) {
+    command.error('option --tui requires an interactive terminal with TERM other than dumb', {
+      exitCode: 2,
+      code: 'mcv.captureTuiUnavailable',
+    });
+  }
 }
 
 function validateWriteOutputOptions(

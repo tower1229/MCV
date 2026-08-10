@@ -7,7 +7,7 @@
 **项目属性：** 数字主权生态基础设施
 **目标平台：** macOS、Windows
 **首期目标 IDE：** Codex、Claude Code、Gemini (涵盖 Gemini CLI 和 Antigravity)
-**实现状态（2026-08-10）：** Repository schema v4、Profiles schema v1、operation schema v3、device state v3、Managed Receipt v1；项目为默认 Deploy scope；内置 global Profile；专用 Profile TUI 与本地 MCP Profile 工具；配置数据中立；事务部署与 Overlay 保留；复杂人类可读详情使用短期本地 Review Artifact，并由 `--verbose` 显式输出完整终端详情。0.3 详细设计见 `docs/prd/MCV-v0.3-Profile-Deploy-Technical-Design.md` 与 ADR 0011–0014；当前界面契约见 `docs/prd/TUI-Spec.md`。
+**实现状态（2026-08-10）：** Repository schema v4、Profiles schema v1、operation schema v3、device state v3、Managed Receipt v1；项目为默认 Deploy scope；内置 global Profile；专用 Profile TUI、分级 Capture Review 与本地 MCP Profile 工具；配置数据中立；事务部署与 Overlay 保留；复杂人类可读详情使用短期本地 Review Artifact，并由 `--verbose` 显式输出完整终端详情。0.3 详细设计见 `docs/prd/MCV-v0.3-Profile-Deploy-Technical-Design.md` 与 ADR 0011–0015；当前界面契约见 `docs/prd/TUI-Spec.md`。
 
 ---
 
@@ -235,7 +235,7 @@ MCV 不强制理解每个 IDE 的全部配置字段。
 
 ### 6.4 默认可审阅，底层可自动化
 
-用户默认通过一次性 CLI 审阅 Report、Plan 和 Result；需要写入时在 TTY 中确认，或显式使用 `--dry-run`、`--yes`、`--json`。只有 Profile 维护使用专用全屏 TUI。
+用户默认通过一次性 CLI 审阅 Report、Plan 和 Result；Capture 简单 Plan 使用增强行式审阅，交互事项合计至少两项时在 TTY 自动进入专用 Review TUI。需要写入时必须确认，非交互使用 `--dry-run`、`--yes`、`--json`。Profile 维护继续使用独立全屏 TUI。
 
 底层核心逻辑必须与交互层分离，以便：
 
@@ -1178,7 +1178,7 @@ Claude Code   1 local managed change
 - 恢复；
 - 仓库重新绑定。
 
-裸 `mcv` 和所有业务命令默认在完成当前 Report、Plan 或 Result 后退出。只有 Profile 可视化维护使用专用 TUI。写操作在 TTY 中可确认；非交互使用 `--dry-run` 审阅、`--yes` 应用安全默认项或 `--json` 消费结构化契约。
+裸 `mcv` 和业务命令在完成当前 Report、Plan 或 Result 后退出，不恢复全局 Shell。Profile 可视化维护使用专用 TUI；Capture 根据可解决决策组、warning 和删除候选的合计数量，在行式审阅与独立 Capture Review TUI 之间分流。写操作在 TTY 中确认；非交互使用 `--dry-run` 审阅、`--yes` 应用安全默认项或 `--json` 消费结构化契约。
 
 ### 22.2 明确使用用户语言
 
@@ -1625,7 +1625,7 @@ MCV 默认遵循：
 - JSON 优先实现字段级 Overlay；
 - TOML 和 YAML 先采用预定义字段合并；
 - 不提供复杂 Capture 历史；
-- 不提供图形界面（Profile 维护保留专用全屏 TUI；裸 `mcv` 为 plain Overview）；
+- 不提供图形界面（Profile 维护和复杂 Capture Review 使用两个独立全屏 TUI；裸 `mcv` 为 plain Overview）；
 - 不自动操作 Git；
 - 不提供 Profile 继承、组合声明、tag 查询或跨设备 Project Binding；
 - 不安装 IDE；
@@ -1663,7 +1663,7 @@ MCV `0.3.0-beta.1` 达到预发布状态，需要满足 0.2 闭环之上的 0.3 
 10. 所有覆盖操作都有可恢复备份；项目清理只作用于 Managed Receipt 且未漂移的内容。
 11. 支持范围内的配置内容保持忠实，明文密钥可以进入数据仓库且责任边界有明确说明。
 12. 未知 IDE 原生字段不会因为 MCV 不认识而丢失。
-13. macOS 与 Windows 的核心流程行为一致；Profile TUI 保留 PTY/ConPTY 门。
+13. macOS 与 Windows 的核心流程行为一致；Profile 与 Capture TUI 保留 PTY/ConPTY 门。
 14. 仓库移动后可以重新绑定。
 15. Agent 可通过本地 MCP 完成多 Profile 更新与 Deploy，无需打开 TUI Apply。
 16. JSON 消费方按 `schemaVersion` 拒绝未知 operation schema。

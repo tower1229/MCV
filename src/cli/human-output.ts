@@ -18,7 +18,7 @@ export interface HumanDocument {
   overflowSummary?: string[];
   details: string[];
   nextActions: string[];
-  detailPolicy: 'review' | 'overflow';
+  detailPolicy: 'review' | 'overflow' | 'progressive';
 }
 
 export interface HumanPresentation {
@@ -39,6 +39,9 @@ export function presentHumanDocument(
     printNextActions(document.nextActions);
     return {};
   }
+  if (document.detailPolicy === 'progressive') {
+    return presentProgressiveDocument(context, document, options);
+  }
 
   const needsReviewFile = document.detailPolicy === 'review' || exceedsInlineBudget(document.details);
   if (!needsReviewFile) {
@@ -55,7 +58,7 @@ export function presentHumanDocument(
 
   let reviewPath: string | undefined;
   try {
-    reviewPath = createReviewArtifact(context, document);
+    reviewPath = writeHumanReviewArtifact(context, document);
     console.log('Full review:');
     console.log(`  ${pathToFileURL(reviewPath).href}`);
     console.log(`  ${reviewPath}`);
@@ -72,7 +75,37 @@ export function presentHumanDocument(
   return reviewPath ? { reviewPath } : {};
 }
 
-function createReviewArtifact(context: DeviceContext, document: HumanDocument): string {
+function presentProgressiveDocument(
+  context: DeviceContext,
+  document: HumanDocument,
+  options: HumanPresentationOptions,
+): HumanPresentation {
+  const needsReviewFile = exceedsInlineBudget(document.details);
+  let reviewPath: string | undefined;
+  if (needsReviewFile) {
+    try {
+      reviewPath = writeHumanReviewArtifact(context, document);
+    } catch (error) {
+      console.error(
+        `Could not create the local review file; printing full details instead. ${errorMessage(error)}`,
+      );
+    }
+  }
+
+  const output = options.verbose || (needsReviewFile && reviewPath === undefined)
+    ? document.details
+    : document.summary;
+  for (const line of output) console.log(line);
+  if (reviewPath) {
+    console.log('Full review:');
+    console.log(`  ${pathToFileURL(reviewPath).href}`);
+    console.log(`  ${reviewPath}`);
+  }
+  printNextActions(document.nextActions);
+  return reviewPath ? { reviewPath } : {};
+}
+
+export function writeHumanReviewArtifact(context: DeviceContext, document: HumanDocument): string {
   const now = new Date();
   const reviewDirectory = getReviewDirectory(context);
   ensurePrivateDirectory(reviewDirectory);

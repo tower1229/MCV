@@ -45,6 +45,8 @@ export function renderCapturePlanPlain(plan) {
             currentGroup = group;
         }
         lines.push(`  [${change.change}] ${change.name} (${change.id})${change.defaultSelected ? ' [selected]' : ' [not selected]'}`);
+        if (change.sourceLabel)
+            lines.push(`    Source: ${change.sourceLabel}`);
         if (change.contributingProjections && change.contributingProjections.length > 0) {
             lines.push(`    Projections: ${formatContributingProjections(change.contributingProjections)}`);
         }
@@ -80,8 +82,11 @@ export function renderCapturePlanPlain(plan) {
 }
 export function renderCaptureResultPlain(result) {
     if (result.status === 'succeeded') {
+        const appliedCount = result.changes.length > 0
+            ? result.changes.filter((change) => change.decision !== 'skip').length
+            : result.data?.appliedChangeIds.length ?? 0;
         const lines = [
-            `Captured ${result.data?.appliedChangeIds.length ?? 0} selected item(s) into ${result.repositoryPath}.`,
+            `Captured ${appliedCount} selected item(s) into ${result.repositoryPath}.`,
         ];
         const newUnassignedCount = result.data?.newUnassignedCount ?? 0;
         if (newUnassignedCount > 0) {
@@ -107,7 +112,9 @@ export function renderCaptureResultDocument(result) {
     const full = renderCaptureResultPlain(result);
     const overflowSummary = result.status === 'succeeded'
         ? [
-            `Captured ${result.data?.appliedChangeIds.length ?? 0} selected item(s) into ${result.repositoryPath}.`,
+            `Captured ${result.changes.length > 0
+                ? result.changes.filter((change) => change.decision !== 'skip').length
+                : result.data?.appliedChangeIds.length ?? 0} selected item(s) into ${result.repositoryPath}.`,
             `New Unassigned: ${result.data?.newUnassignedCount ?? 0} asset(s).`,
         ]
         : [

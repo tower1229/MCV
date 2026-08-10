@@ -1,9 +1,11 @@
 import { askInTerminal, withInterruptsIgnored } from '../cli/prompt.js';
 import { recordCaptureSuccess } from '../utils/state.js';
-import { applyCapturePlan, createCapturePlan } from '../operations/capture.js';
-import { renderCapturePlanDocument, renderCaptureResultDocument } from '../renderers/capture.js';
+import { applyCapturePlan, createCapturePlan, } from '../operations/capture.js';
+import { renderCapturePlanDocument, renderCaptureResultDocument, renderCaptureResultPlain, } from '../renderers/capture.js';
 import { renderJson } from '../renderers/json.js';
 import { presentHumanDocument } from '../cli/human-output.js';
+import { buildCaptureReviewModel, captureReviewSelection, createCaptureReviewDraft, setCaptureDecision, setCaptureWarningConfirmed, summarizeCaptureReview, toggleCaptureChange, } from '../review/capture.js';
+import { runCaptureReviewTui, } from '../tui/capture/app.js';
 export async function captureConfigurations(context, dependencies = {}, options = {}) {
     const capturePlan = await createCapturePlan(context);
     if (options.dryRun) {
@@ -28,55 +30,102 @@ export async function captureConfigurations(context, dependencies = {}, options 
         process.exitCode = 1;
         return;
     }
+    const review = buildCaptureReviewModel(capturePlan);
+    if (shouldUseCaptureTui(review, options, dependencies.terminal)) {
+        const outcome = await (dependencies.runTui ?? runCaptureReviewTui)(context, capturePlan);
+        presentCaptureTuiOutcome(outcome);
+        return;
+    }
     if (!options.json && !options.yes) {
         presentHumanDocument(context, renderCapturePlanDocument(capturePlan), {
             verbose: options.verbose,
         });
     }
-    const changeIds = capturePlan.changes
-        .filter((change) => change.defaultSelected)
-        .map((change) => change.id);
-    if (!options.yes) {
-        let interrupted = false;
-        const decisionGroups = new Map();
-        for (const change of capturePlan.changes) {
-            if (!change.decisionGroupId)
-                continue;
-            decisionGroups.set(change.decisionGroupId, [...(decisionGroups.get(change.decisionGroupId) ?? []), change]);
-        }
-        for (const choices of decisionGroups.values()) {
-            const canChoose = dependencies.selectConflict !== undefined || process.stdin.isTTY;
-            const choose = dependencies.selectConflict
-                ?? (canChoose
-                    ? async (name, candidates) => {
-                        const outcome = await selectConflictInTerminal(name, candidates);
-                        interrupted = outcome.interrupted;
-                        return outcome.choice;
-                    }
-                    : async () => undefined);
-            const choice = await choose(choices[0].repositoryPaths[0], choices.map((candidate) => candidate.sourceLabel ?? candidate.id));
-            if (interrupted)
-                break;
-            if (choice !== undefined && choices[choice]?.decision !== 'skip') {
-                changeIds.push(choices[choice].id);
-            }
-            else if (canChoose) {
-                const skip = choices.find((candidate) => candidate.decision === 'skip');
-                if (skip)
-                    changeIds.push(skip.id);
-            }
-        }
-        if (interrupted) {
-            process.exitCode = 130;
-            console.log('Capture interrupted; repository was not changed.');
-            return;
-        }
-    }
+    let draft = createCaptureReviewDraft(review);
     if (!options.yes) {
         if (!process.stdin.isTTY && !dependencies.confirmCapture) {
             throw new Error('Capture requires an interactive terminal; use --yes only after reviewing --dry-run.');
         }
-        const confirmed = await (dependencies.confirmCapture ?? confirmInTerminal)();
+        if (review.blockingIssues.length > 0) {
+            for (const group of review.decisionGroups) {
+                const skip = group.choices.find((choice) => choice.decision === 'skip');
+                if (skip)
+                    draft = setCaptureDecision(review, draft, group.id, skip.id);
+            }
+            for (const warning of review.warnings) {
+                draft = setCaptureWarningConfirmed(review, draft, warning.confirmationId, true);
+            }
+            const blocked = await applyCapturePlan(context, capturePlan, captureReviewSelection(draft));
+            process.exitCode = blocked.status === 'failed' ? 1 : 3;
+            presentHumanDocument(context, renderCaptureResultDocument(blocked), {
+                verbose: options.verbose,
+            });
+            return;
+        }
+        for (let groupIndex = 0; groupIndex < review.decisionGroups.length; groupIndex += 1) {
+            const group = review.decisionGroups[groupIndex];
+            const choices = group.choices;
+            const canChoose = dependencies.selectConflict !== undefined || process.stdin.isTTY;
+            let choice;
+            let interrupted = false;
+            if (dependencies.selectConflict) {
+                choice = await dependencies.selectConflict(choices[0].repositoryPaths[0], choices.map((candidate) => candidate.sourceLabel ?? candidate.id));
+            }
+            else if (canChoose) {
+                const outcome = await selectConflictInTerminal(groupIndex, review.decisionGroups.length, group.issue?.message ?? `Choose an authoritative source for ${choices[0].name}.`, choices[0].repositoryPaths[0], choices.map((candidate) => candidate.sourceLabel ?? candidate.id));
+                choice = outcome.choice;
+                interrupted = outcome.interrupted;
+            }
+            if (interrupted) {
+                process.exitCode = 130;
+                console.log('Capture interrupted; repository was not changed.');
+                return;
+            }
+            const selected = choice === undefined
+                ? choices.find((candidate) => candidate.decision === 'skip')
+                : choices[choice];
+            if (selected) {
+                draft = setCaptureDecision(review, draft, group.id, selected.id);
+                console.log(`Selected: ${selected.sourceLabel ?? selected.name}`);
+            }
+        }
+        for (let index = 0; index < review.deletions.length; index += 1) {
+            const deletion = review.deletions[index];
+            console.log(`Deletion ${index + 1}/${review.deletions.length}: ${deletion.name}`);
+            console.log(`Target: ${deletion.repositoryPaths.join(', ')}`);
+            const include = await resolveDeletionConfirmation(dependencies, deletion);
+            if (include === undefined) {
+                process.exitCode = 130;
+                console.log('Capture interrupted; repository was not changed.');
+                return;
+            }
+            if (include)
+                draft = toggleCaptureChange(review, draft, deletion.id);
+        }
+        for (let index = 0; index < review.warnings.length; index += 1) {
+            const warning = review.warnings[index];
+            console.log(`Warning ${index + 1}/${review.warnings.length}: ${warning.message}`);
+            if (warning.details)
+                console.log(`Details: ${warning.details}`);
+            const acknowledged = await resolveWarningConfirmation(dependencies, warning);
+            if (acknowledged === undefined) {
+                process.exitCode = 130;
+                console.log('Capture interrupted; repository was not changed.');
+                return;
+            }
+            if (!acknowledged) {
+                console.log('Capture cancelled; repository was not changed.');
+                return;
+            }
+            draft = setCaptureWarningConfirmed(review, draft, warning.confirmationId, true);
+        }
+        const summary = summarizeCaptureReview(review, draft);
+        console.log(`Ready to apply: ${summary.selectedRepositoryChanges} selected, ${summary.unselectedRepositoryChanges} excluded; `
+            + `${summary.resolvedDecisions} decisions resolved (${summary.skippedDecisions} skipped), `
+            + `${summary.confirmedWarnings} warnings acknowledged.`);
+        const confirmed = await (dependencies.confirmCapture
+            ? dependencies.confirmCapture()
+            : confirmInTerminal(summary.selectedRepositoryChanges, capturePlan.repositoryPath ?? 'the Repository'));
         if (confirmed === undefined) {
             process.exitCode = 130;
             console.log('Capture interrupted; repository was not changed.');
@@ -87,14 +136,15 @@ export async function captureConfigurations(context, dependencies = {}, options 
             return;
         }
     }
-    const result = await withInterruptsIgnored(() => applyCapturePlan(context, capturePlan, {
-        changeIds,
-        confirmedIssueIds: options.yes
-            ? []
-            : capturePlan.issues
-                .filter((issue) => issue.severity === 'warning')
-                .map((issue) => issue.confirmationId),
-    }, { nonInteractive: options.yes }));
+    const selection = options.yes
+        ? {
+            changeIds: capturePlan.changes
+                .filter((change) => change.defaultSelected)
+                .map((change) => change.id),
+            confirmedIssueIds: [],
+        }
+        : captureReviewSelection(draft);
+    const result = await withInterruptsIgnored(() => applyCapturePlan(context, capturePlan, selection, { nonInteractive: options.yes }));
     if (result.status === 'succeeded') {
         recordCaptureSuccess(context);
     }
@@ -108,18 +158,76 @@ export async function captureConfigurations(context, dependencies = {}, options 
             verbose: options.verbose,
         });
 }
-async function confirmInTerminal() {
-    const outcome = await askInTerminal('Write these changes to the repository? [y/N] ');
+export function shouldUseCaptureTui(review, options, terminal = {
+    stdinIsTTY: Boolean(process.stdin.isTTY),
+    stdoutIsTTY: Boolean(process.stdout.isTTY),
+    term: process.env.TERM,
+}) {
+    if (options.dryRun || options.yes || options.json || options.verbose || options.tui === false) {
+        return false;
+    }
+    if (review.blockingIssues.length > 0)
+        return false;
+    const available = terminal.stdinIsTTY
+        && terminal.stdoutIsTTY
+        && terminal.term?.toLowerCase() !== 'dumb';
+    if (!available)
+        return false;
+    return options.tui === true || review.interactionCount >= 2;
+}
+function presentCaptureTuiOutcome(outcome) {
+    console.log(outcome.summary);
+    if (outcome.reviewPath)
+        console.log(`Review: ${outcome.reviewPath}`);
+    if (outcome.reason === 'interrupted') {
+        process.exitCode = 130;
+        return;
+    }
+    if (!outcome.result)
+        return;
+    if (outcome.result.status !== 'succeeded') {
+        process.exitCode = outcome.result.status === 'blocked' ? 3 : 1;
+        return;
+    }
+    for (const line of renderCaptureResultPlain(outcome.result).slice(1))
+        console.log(line);
+}
+async function confirmInTerminal(selectedCount, repositoryPath) {
+    const outcome = await askInTerminal(`Apply ${selectedCount} selected repository change(s) to ${repositoryPath}? [y/N] `);
     return outcome.interrupted ? undefined : /^(y|yes)$/i.test(outcome.answer.trim());
 }
-async function selectConflictInTerminal(name, candidates) {
-    console.log(`Conflict: ${name}`);
+async function confirmDeletionInTerminal() {
+    const outcome = await askInTerminal('Include this deletion? [y/N] ');
+    return outcome.interrupted ? undefined : /^(y|yes)$/i.test(outcome.answer.trim());
+}
+async function confirmWarningInTerminal() {
+    const outcome = await askInTerminal('Acknowledge this warning and continue? [y/N] ');
+    return outcome.interrupted ? undefined : /^(y|yes)$/i.test(outcome.answer.trim());
+}
+function resolveDeletionConfirmation(dependencies, deletion) {
+    if (dependencies.confirmDeletion)
+        return dependencies.confirmDeletion(deletion);
+    return process.stdin.isTTY ? confirmDeletionInTerminal() : Promise.resolve(false);
+}
+function resolveWarningConfirmation(dependencies, warning) {
+    if (dependencies.confirmWarning)
+        return dependencies.confirmWarning(warning);
+    return process.stdin.isTTY ? confirmWarningInTerminal() : Promise.resolve(false);
+}
+async function selectConflictInTerminal(groupIndex, groupCount, message, name, candidates) {
+    console.log(`Decision ${groupIndex + 1}/${groupCount}: ${message}`);
+    console.log(`Target: ${name}`);
     candidates.forEach((candidate, index) => console.log(`  ${index + 1}. ${candidate}`));
-    const outcome = await askInTerminal('Choose authoritative source (blank to skip): ');
-    if (outcome.interrupted)
-        return { interrupted: true };
-    const answer = Number(outcome.answer);
-    return Number.isInteger(answer) && answer > 0 && answer <= candidates.length
-        ? { interrupted: false, choice: answer - 1 }
-        : { interrupted: false };
+    while (true) {
+        const outcome = await askInTerminal('Choose authoritative source (blank to skip): ');
+        if (outcome.interrupted)
+            return { interrupted: true };
+        if (outcome.answer.trim() === '')
+            return { interrupted: false };
+        const answer = Number(outcome.answer);
+        if (Number.isInteger(answer) && answer > 0 && answer <= candidates.length) {
+            return { interrupted: false, choice: answer - 1 };
+        }
+        console.log(`Invalid choice. Enter 1-${candidates.length}, or leave blank to skip.`);
+    }
 }
