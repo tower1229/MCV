@@ -3,7 +3,7 @@
 > 状态：产品决策已冻结，技术方案已定稿；`0.3.0-beta.1` 按本文与 ADR 0011–0014 实现
 > 目标版本：MCV 0.3
 > 设计日期：2026-08-06
-> 当前实现基线：MCV 0.3.0-beta.1
+> 当前实现基线：MCV 0.3.0-beta.1 加 Unreleased Review Artifact / `--verbose` 输出契约
 
 ## 1. 方案结论
 
@@ -41,7 +41,7 @@ global 是初始化时自动存在的内置 Profile。它采用与普通 Profile
 
 ## 3. 当前实现与改造边界
 
-当前 0.2.0-beta.1 已具备成熟的能力：
+0.3 改造前的 0.2.0-beta.1 已具备成熟的能力：
 
 - Canonical、Native、Local/Runtime 三层数据模型。
 - Codex、Claude Code、Gemini 三个 Adapter。
@@ -59,7 +59,7 @@ global 是初始化时自动存在的内置 Profile。它采用与普通 Profile
 | Deploy Plan/Apply 与事务引擎 | 保留，扩展 DeployRequest 和 Plan 元数据 |
 | Capture | 保留，新增资产身份和 Profile 引用校验 |
 | managed Skill layout | 全局 Deploy 继续复用 |
-| 持久化 Ink Shell | 退出默认主路径，逐步移除 |
+| 0.2 持久化 Ink Shell | 从默认主路径彻底移除，只保留专用 Profile TUI |
 | Ink | 仅保留 Profile 管理界面 |
 | Repository schema v3 | 迁移到 v4 |
 | Operation schema v2 | 因 Deploy 语义变化升级到 v3 |
@@ -767,7 +767,7 @@ mcv profile
 
 ### 15.2 移除全局 Shell
 
-当前 src/tui/shell.tsx 和 shell-state.ts 承担 Overview、Capture、Deploy、Restore、Repository 路由及大量键盘状态。0.3 不继续扩展这套 Shell：
+0.2 的 `src/tui/shell.tsx` 和 `shell-state.ts` 曾承担 Overview、Capture、Deploy、Restore、Repository 路由及大量键盘状态。0.3 已删除这套 Shell：
 
 - Capture 和 Deploy 调用现有一次性 Command 层，输出分组 Plan、Diff 摘要和确认。
 - Read-only 命令直接输出 Report。
@@ -896,6 +896,14 @@ Profile、Asset 和 Deploy Request 类型不得定义在 TUI 或 MCP 层。MCP�
 - macOS PTY 与 Windows ConPTY。
 
 Capture、Deploy 和状态不再需要全局 Shell 路由测试。
+
+### 18.5 人类输出与 Review Artifact
+
+- Capture、Deploy 和 Restore Plan 的完整详情写入短期本地 Review Artifact；终端始终保留决策摘要、破坏性标记、Issues 和 next actions。
+- Overview/Status、Discover、Profile list/show、Migration 和失败 Result 只在详情超过 40 行或 8 KiB 时外置。
+- `--verbose` 保留 Artifact 并额外打印完整详情；Artifact 写入失败时回退为完整终端输出。
+- JSON 与 MCP 不创建 Artifact，且继续返回完整结构化内容。
+- 测试覆盖 per-platform 路径、POSIX `0700`/`0600`、原子写入、24 小时 best-effort 过期、10 文件/50 MiB 目标、当前文件保护及 zero-write 边界。
 
 ## 19. 实施顺序
 

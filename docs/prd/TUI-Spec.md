@@ -1,161 +1,103 @@
-**实现状态（2026-07-29）：已实现。** Operation Modules、稳定的一次性 text/JSON 协议、NodeNext/ESM、默认 Ink Shell、方向键优先导航、事务期间输入锁定、响应式与 `NO_COLOR` 语义、macOS PTY / Windows ConPTY 发布门均已落地。本文以下内容保留为已交付功能规格，不增加后续范围。
+**实现状态（2026-08-10）：已实现。** 当前产品界面由 plain-text Overview、一次性 Command/Report、专用 Profile Ink TUI 和本地 stdio MCP 组成。旧的全局 Ink Shell、业务命令 deep-link、默认 alternate-screen 首页和 Init 后自动进入 Capture 的流程已经移除；本文只描述当前契约。
 
 ## Problem Statement
 
-MCV 已经具备 Capture、Deploy、Status、Restore、Repository Binding 和 schema Migration 的基本安全闭环，但当前交互仍是数字菜单和逐行询问。计划生成、终端输出、用户选择和文件副作用混在命令函数中，导致 TUI、文本 CLI、JSON 协议和自动测试无法共用一套可靠的核心流程。
+MCV 的 Capture、Deploy、Restore 和 Repository 生命周期包含高风险文件写入，必须让人类、脚本和 Agent 复用同一套可审阅、可验证的 Operation Modules，同时避免把大量 Diff、路径和可能含明文配置的技术细节长期留在终端滚动历史中。
 
-对用户而言，这意味着他们需要记住命令和参数，无法在一个统一控制台中查看数据仓库、本机变化、待部署变化和安全问题；脚本、CI 和 Agent 则无法信任当前可能混合 JSON、普通文本、询问和副作用的输出。
+Profile 维护需要集中浏览和选择大量 Asset，适合专用全屏界面；其他操作更适合可组合、可退出、能直接用于自动化的一次性命令。
 
 ## Solution
 
-保留 TypeScript/Node.js 和现有命令名，首先把 Repository、Capture、Deploy、Restore、Status 和 Environment 提取为只接收数据、返回结构化 Plan/Report/Result 的 Operation Modules，再在同一操作层之上建立 Ink TUI、英文文本 Renderer 和 JSON Renderer。
-
-TTY 中执行 `mcv` 打开首页；执行任一业务子命令则作为深链接进入同一 TUI Shell 的对应页面。`--dry-run`、`--yes`、`--json`、只读命令的 `--plain` 和非 TTY 环境继续使用一次性协议，不启动 TUI。TUI 使用 alternate screen，但必须在所有退出路径恢复终端，并在需要时将简洁结果留在主屏历史中。
+- 裸 `mcv` 与 `mcv status` 打印同一份只读 Overview 后退出，TTY 与非 TTY 行为一致。
+- Capture、Deploy、Restore、Init、Bind、Unbind 和 Migration 通过一次性 Plan/Apply 命令执行；默认人类输出在需要时确认，`--dry-run`、`--yes` 和 `--json` 提供显式协议。
+- Discover、Status、Repository 和 Profile 查询直接输出 Report。
+- 只有 `mcv profile` 与没有 mutation flag 的 `mcv profile edit <id>` 在 TTY 中打开专用 Ink TUI。
+- `mcv mcp` 是隐藏于日常顶层帮助的本地 stdio 集成入口，复用相同 Profile、Asset 和 Deploy 服务。
+- 人类可读的复杂详情通过短期本地 Review Artifact 提供；JSON 与 MCP 保持完整结构化输出且不创建 Artifact。
 
 ## User Stories
 
-1. As an MCV user, I want `mcv` to open a unified terminal dashboard, so that I can understand the current state without remembering commands.
-2. As an MCV user, I want every business subcommand to deep-link into the same TUI, so that navigation and interaction remain consistent.
-3. As an MCV user, I want the entire product interface to use English, so that help, prompts, errors, and results do not switch languages unexpectedly.
-4. As an MCV user, I want the Repository to be any local directory I control, so that I can choose my own backup and transfer method.
-5. As an MCV user, I want a non-Git Repository to be treated as normal, so that Git remains optional rather than a hidden requirement or warning source.
-6. As an MCV user, I want Git status shown only when Git is detected, so that optional information does not become product policy.
-7. As a first-time user, I want to initialize the current directory from the TUI, so that I can create and bind an MCV Repository without editing `mcv.yaml`.
-8. As a user with an existing Repository, I want to bind the current directory or enter another path, so that I can reuse data transferred by any method.
-9. As a user whose Repository moved, I want to update the binding after Repository ID validation, so that moving a directory does not break MCV permanently.
-10. As an MCV user, I want Unbind to remove only local binding state, so that my Repository and IDE configuration are never deleted accidentally.
-11. As an MCV user, I want old schemas detected and presented as a Migration Plan, so that migration is reviewed and backed up before other writes continue.
-12. As a first-time user, I want a successful Init followed by environment discovery and Capture, so that onboarding reaches a useful Repository quickly.
-13. As a first-time user, I want cancelling the post-Init Capture to preserve a valid empty Repository, so that cancellation does not undo initialization unexpectedly.
-14. As an MCV user, I want Overview to distinguish Pending Deployment Changes from post-deploy local changes, so that Repository updates are not confused with Drift.
-15. As an MCV user, I want Overview to calculate a read-only Deploy Plan asynchronously, so that I can see pending work without triggering Capture or writes.
-16. As an MCV user, I want environment and IDE support shown on Overview, so that missing variables and unavailable surfaces are visible before deployment.
-17. As an MCV user, I want Capture previews to show the faithful, path-parameterized content that will be written, so that plaintext and `${env:*}` choices remain under my control.
-18. As an MCV user, I want Capture selection grouped by IDE and then by file, Skill, or MCP, so that I can accept only the configuration I intend to store.
-19. As an MCV user, I want safe managed-source conflicts resolved deterministically and only ambiguous conflicts to require choosing an authoritative source or skipping the item, so that routine duplicates do not interrupt Capture and unsafe guesses are still prevented.
-20. As an MCV user, I want Repository deletion candidates unselected by default, so that a device-side deletion is not silently propagated.
-21. As an MCV user, I want Deploy selection grouped by IDE and capability, so that I can control Shared Rules, Skills, MCP, and IDE-specific Configuration independently.
-22. As an MCV user, I want a detailed Diff before Apply, so that the content I approve matches the content MCV writes.
-23. As an MCV user, I want whole-file replacement labeled explicitly, so that I can distinguish it from managed-field merge behavior.
-24. As an MCV user, I want Native unmanaged fields and Local fields preserved unconditionally, so that a global overwrite switch cannot bypass ownership boundaries.
-25. As an MCV user, I want deletion cleanup isolated in an advanced, collapsed section, so that destructive actions require deliberate selection.
-26. As an MCV user, I want my last successful Deploy selection stored only on this device, so that I can reuse it without creating a Profile or shared Preset.
-27. As an MCV user, I want Apply to reject a Plan when source or target preconditions changed, so that MCV cannot execute something different from the preview I approved.
-28. As an MCV user, I want Issues classified as notice, warning, decision required, or error, so that I can tell what is informational, reviewable, or blocking.
-29. As an automation user, I want `--yes` to reject warnings and unresolved decisions before any write, so that automation never returns a silent partial success.
-30. As an MCV user, I want Deploy to back up and verify every selected change transactionally, so that failure either completes safely or rolls back.
-31. As an MCV user, I want a successful partial selection to update Baseline Snapshot and managed inventory only for the applied scope, so that unselected files do not become falsely managed or current.
-32. As an MCV user, I want Restore to preview the latest complete deployment backup, so that I know the time and files affected before restoring.
-33. As an MCV user, I want a Restore Conflict to block restoration when files changed after deployment, so that a second confirmation cannot destroy newer work.
-34. As an MCV user, I want Restore to preserve the current state before applying the backup, so that restoration itself remains recoverable.
-35. As an MCV user, I want read-only pages to return to Overview with Escape and exit with `q`, so that inspection naturally leads to another task.
-36. As an MCV user, I want write result pages to return to Overview with Enter or exit with `q`, so that I can choose between continuing and leaving immediately.
-37. As an MCV user, I want Ctrl+C to exit with code 130 before Apply, so that interruption follows normal terminal conventions.
-38. As an MCV user, I want cancellation ignored while a write transaction is committing or rolling back, so that interruption cannot leave half-written configuration.
-39. As an MCV user, I want alternate screen, cursor state, and input mode restored after success, failure, interruption, or an uncaught exception, so that MCV never leaves my terminal damaged.
-40. As a direct-subcommand user, I want a concise result or error summary printed after the TUI closes, so that important outcomes remain in shell history.
-41. As a non-TTY user, I want no-argument `mcv` to print help and succeed, so that piping or probing the executable never hangs on interaction.
-42. As a CLI user, I want existing `--dry-run` and `--yes` calls to remain one-shot English text operations, so that TUI adoption does not break established automation habits.
-43. As a read-only CLI user, I want `status --plain` and `discover --plain`, so that I can force a one-shot text Report from a TTY.
-44. As an automation user, I want `--json` to emit exactly one JSON document on stdout, so that parsers never receive prompts, progress, or human prose.
-45. As an automation user, I want diagnostics and progress on stderr, so that stdout remains a stable payload channel.
-46. As an automation user, I want structured status, readiness, Issues, error codes, and next actions, so that scripts do not parse localized prose.
-47. As an automation user, I want distinct exit codes for success, execution failure, usage error, human decision, and interruption, so that callers can route each outcome correctly.
-48. As an MCV user, I want colors detected automatically and `NO_COLOR` respected, so that output works with my terminal preferences without extra flags.
-49. As an MCV user, I want every state represented by text or symbols as well as color, so that color is never the only source of meaning.
-50. As an MCV user, I want clear English next actions on failure, so that errors lead to a concrete recovery step.
-51. As an MCV user, I want `--help` and `--version` to remain immediate text output, so that basic CLI discovery never launches a full-screen interface.
-52. As a contributor, I want TUI, text, JSON, and tests to reuse the same Operation Modules, so that safety rules cannot drift between interfaces.
-53. As a contributor, I want Plan generation to be read-only and Apply to own all writes, so that safety and race checks have one enforceable boundary.
-54. As a contributor, I want the packaged CLI tested through real process and PTY boundaries, so that routing and terminal recovery are verified as users experience them.
+1. As an MCV user, I want bare `mcv` to print a concise Overview and exit, so that it works identically in terminals, pipes, and probes.
+2. As an MCV user, I want every mutating operation to show a Plan before Apply, so that the approved selection matches the eventual write.
+3. As an automation user, I want JSON stdout to contain exactly one versioned document, so that scripts never parse prompts or human prose.
+4. As an automation user, I want `--yes` to reject warnings, decisions, deletions, and topology migrations, so that unattended execution stays conservative.
+5. As an MCV user, I want complete review details available without flooding terminal history, so that paths, hashes, Diffs, and plaintext configuration remain reviewable.
+6. As an MCV user, I want `--verbose` to print those details inline as well, so that I can deliberately keep a terminal transcript.
+7. As an MCV user, I want Review Artifact failure to fall back to terminal output, so that Apply never proceeds without reviewable details.
+8. As an MCV user, I want Profile maintenance in a dedicated searchable TUI, so that large Asset sets remain practical without turning every command into a full-screen application.
+9. As an MCV user, I want all success, failure, interruption, and exception paths from Profile TUI to restore my terminal.
+10. As an MCV user, I want Git to remain optional and never mutated by MCV.
 
-## Implementation Decisions
+## Interface Contract
 
-- Commander remains the command router. It chooses the Ink TUI, English text renderer, or JSON renderer; renderers do not implement business rules.
-- Operation Modules become the shared application boundary. They accept data and return structured Report, Plan, Result, Issue, and error objects without writing terminal output or asking questions.
-- Repository lifecycle is one deep module covering inspection, Init, Bind, Unbind, and Migration rather than several shallow command wrappers.
-- Environment discovery is exposed through one environment Report; the existing `discover` command remains a route to that Report.
-- Capture, Deploy, Restore, and Repository writes use separate Plan and Apply operations. Plan generation is read-only; Apply is the only write boundary.
-- Plans are in-process immutable snapshots. They are not persisted, replayed, or treated as authorization credentials across invocations.
-- Every Plan carries an opaque operation ID and source/target precondition hashes. Apply validates the operation ID, selection, and hashes and requires regeneration after any mismatch.
-- Selection contains only IDs from the Plan. Interfaces cannot construct target paths or arbitrary write requests.
-- Issues use four severities: `notice`, `warning`, `decisionRequired`, and `error`. Only `notice` is permitted in `--yes` execution.
-- `--yes` performs Plan generation and Apply in one process and rejects warnings, unresolved decisions, deletions, and topology changes before the first write.
-- Deletions are never selected by default and are never applied by `--yes`.
-- Capture Diff shows faithful path-parameterized text, including plaintext keys when present. Human-readable one-shot output keeps a concise decision summary in terminal history and stores the complete Diff in a private short-lived local Review Artifact; `--verbose` additionally prints it inline. Binary content is represented by metadata rather than dumped to the screen.
-- Capture resolves safe source differences before presenting the Plan: Canonical Rules merge by deduplicated Markdown blocks with existing Repository content first, and conflicting Skill packages select the copy with the newest included-file modification time. Ties are deterministic. Ambiguous MCP core conflicts remain `decisionRequired`.
-- Capture groups IDE Skill projections by verified physical package identity. Several managed aliases of one physical package produce one Capture candidate, one faithful preview, and one summary contribution. Device projection links are topology metadata and are not copied into the Repository portable Skill package; symbolic links inside that package remain rejected. Capture selection, Diff, plain text, and JSON identify contributing IDE projections without duplicating the package change. A link or physical-identity change between Plan review and Apply invalidates the Plan.
-- Core emits the unique `CanonicalSkillLinkFact` model consumed by Issues, Overview, and Deploy. Per-package divergent external links require Preserve or Replace; shared-root divergence permits only explicit Preserve; dangling, cycle, unclassified, physical-target conflict, and Canonical Store divergence are errors. Replace backs up and removes only the link node and never writes through the external target.
-- Every warning has a stable unique `confirmationId`; `code` identifies only its category. Capture and Deploy selections carry `confirmedIssueIds`.
-- Pending Deployment counts user actions: ordinary changes individually, Skills by `(IDE, Surface, package)`, default-unselected topology migration as optional, and Advanced Cleanup only as `advancedCleanupExcluded`. Canonical materialization is not double-counted.
-- Deploy never exposes a global overwrite switch. Overlay ownership remains authoritative: managed fields may change, Native undeclared fields are preserved, and Local fields remain excluded.
-- Whole-file replacement is supported only for content fully owned by MCV and is labeled explicitly in the preview.
-- Successful partial Deploy updates Baseline Snapshot and managed inventory only for selected and successfully applied items while preserving valid prior state for unselected items.
-- The latest successful Deploy selection is stored in local device state at IDE/capability granularity. Named asset selection lives in Repository `profiles.yaml` (ADR 0011); the local selection record is not a Profile and is not stored in the Repository.
-- Restore Conflict is distinct from Drift and blocks Restore in the current beta. There is no force-restore action.
-- The Repository is a user-owned local directory. Git is an optional recommended versioning, backup, and transport method; non-Git state produces no Issue and MCV performs no Git mutations.
-- Bare `mcv` prints a plain-text Overview and exits; Capture/Deploy/Restore use one-shot Plan/Apply commands. The only remaining fullscreen Ink surface is the dedicated Profile maintenance TUI (`mcv profile`).
-- The Profile TUI uses alternate screen. All success, failure, interrupt, and exception paths restore the main screen, cursor, and input mode.
-- `--help` and `--version` never launch TUI.
-- Existing write flags remain compact: `--dry-run` means one-shot English text Plan, `--yes` means one-shot English text Result, and combining either with `--json` selects JSON. Write commands do not add a redundant `--plain` flag.
-- `status` and `discover` support `--plain` for one-shot English text and `--json` for a JSON Report. Those flags are mutually exclusive.
-- `--dry-run` and `--yes` are mutually exclusive. Invalid combinations exit with usage code 2. Bare `mcv deploy` without a Profile or `--global` is also usage error 2.
-- JSON stdout contains exactly one document. Progress and diagnostics use stderr.
-- JSON and MCP never create Review Artifacts. Plain Capture, Deploy, and Restore Plans create one whenever review details exist; large plain Reports and Results do so only after a shared 40-line or 8-KiB budget. The presenter prints a `file://` URL and absolute path, falls back to full terminal output if the Artifact cannot be written, and never hides warnings, decisions, errors, destructive counts, or next actions.
-- Review Artifacts are Local/Runtime presentation data, not persisted Plans or operation history. They cannot be replayed or used as Apply authorization, are written atomically with POSIX `0700`/`0600` permissions or the inherited per-user Windows `%LOCALAPPDATA%` ACL, and may faithfully contain plaintext configuration. Each Artifact creation removes files older than 24 hours and converges the directory to at most 10 files and 50 MiB; no background process removes expired files after MCV exits. Creating one does not modify the Repository, deployment target, Managed Receipt, backup, Baseline Snapshot, or device operation state.
-- JSON payloads use operation schema v3 for Deploy (other operations use their own schema versions) and include schema version, operation, status, readiness, Repository path, Issues, and next actions. Consumers must reject unknown `schemaVersion` values. Plans and Results carry their real changes; Status intentionally omits `changes` and exposes only `pendingDeployment`. Structured codes are stable; human messages remain English.
-- Exit codes are 0 for the requested result, 1 for execution/system failure, 2 for usage/input error, 3 for a non-interactive human-decision block, and 130 for user interruption. A successfully generated dry-run Plan exits 0 even when its payload is not ready to apply.
-- Color is automatic and respects `NO_COLOR`; no additional color flag is introduced, and color is never the only indicator.
-- All product UI text is English, including TUI, help, prompts, errors, progress, and result summaries. README remains Chinese. The current beta does not introduce an i18n framework.
-- MCV migrates the entire package from CommonJS to NodeNext/ESM before adding Ink 7. The project keeps a single ESM build and no TUI loading bridge or dual module output.
-- The ESM migration is an independent verified change. Ink, React, and TUI work begin only after existing CLI, typecheck, tests, build, and npm bin behavior pass under ESM.
-- Ink is the only interaction framework. Clack and Inquirer are not introduced alongside it.
-- Delivery remains phased: structured Operations; stable text/JSON protocol; independent ESM migration; Profile TUI with terminal safety; then usability polish.
-- Profile TUI release gates require reducer tests, renderer snapshots, alternate-screen restoration, and real PTY/ConPTY interruption tests.
+### Routing
+
+- `mcv`: plain Overview; never help or alternate screen solely because of TTY state.
+- `mcv status`: compatibility alias for the same Overview Report; supports `--plain`, `--json`, and `--verbose`.
+- `mcv discover`: Environment Report; supports `--plain`, `--json`, and `--verbose`.
+- `mcv capture`, `mcv deploy`, `mcv restore`: one-shot Plan/confirm/Apply; support `--dry-run`, `--yes`, `--json`, and `--verbose`.
+- `mcv init`, `mcv bind`, `mcv unbind`: one-shot Repository Plan/Apply; they never chain into Discover or Capture.
+- `mcv migrate`: one-shot Migration Plan/Apply; supports `--verbose` for oversized human output.
+- `mcv profile`: Profile TUI in a TTY; otherwise prints subcommand help.
+- `mcv profile list/show`: one-shot Report with optional `--json` and `--verbose`.
+- `mcv profile create/edit/delete`: one-shot mutation; flagless `profile edit <id>` opens the Profile TUI only in a TTY.
+
+### Plan and Apply
+
+- Operation Modules return structured Report, Plan, Result, Issue, and error objects without terminal I/O.
+- Plan generation is read-only. Apply is the only Repository, target, backup, Managed Receipt, Baseline Snapshot, or device-state write boundary.
+- Plans are immutable in-process snapshots, not persisted or replayable authorization.
+- Apply revalidates operation ID, selected IDs, Repository source hashes, target precondition hashes, and topology identity.
+- Deletions are unselected by default. `--yes` rejects warnings, unresolved decisions, deletions, topology changes, and project/global prune candidates before the first write.
+- Modified paths are backed up and verified before first write; failure rolls back only the attempted transaction scope and reports incomplete recovery material explicitly.
+
+### Human output and Review Artifacts
+
+- Plain Capture, Deploy, and Restore Plans always keep decision-critical summaries, destructive markers, Issues, and next actions in the terminal. When review details exist, the complete Diff, paths, hashes, and technical details go to a Review Artifact.
+- Overview/Status, Discover, Profile list/show, Migration, and failed Results stay inline unless details exceed 40 lines or 8 KiB; overflowing details use the same Artifact path.
+- `--verbose` preserves the Artifact and additionally prints complete details inline. If Artifact creation fails, complete details are printed inline regardless of `--verbose`.
+- The presenter prints both a standard `file://` URL and the absolute path.
+- macOS stores Artifacts under `~/Library/Application Support/mcv/reviews/`; Windows uses `%LOCALAPPDATA%\mcv\reviews\`; Linux uses `${XDG_STATE_HOME:-~/.local/state}/mcv/reviews/`.
+- Writes are atomic. POSIX directory/file permissions are `0700`/`0600`; Windows inherits the per-user `%LOCALAPPDATA%` ACL.
+- Each Artifact creation best-effort removes `.txt` files older than 24 hours and prunes older files toward 10 files and 50 MiB while always retaining the newly created Artifact. A single oversized current file or failed deletion may temporarily exceed those targets. There is no background cleanup after MCV exits.
+- Artifacts may contain plaintext configuration. They are Local/Runtime presentation data, cannot be replayed, and do not modify Repository, deployment target, Managed Receipt, backup, Baseline Snapshot, or device operation state.
+- JSON and MCP never create Review Artifacts and retain the complete structured contract.
+
+### Output protocol
+
+- `--dry-run` and `--yes` are mutually exclusive. JSON for write commands requires one of them.
+- `status --plain --json` and `discover --plain --json` are usage errors.
+- Bare `mcv deploy` without a Profile or `--global` is a usage error and writes nothing.
+- JSON stdout contains exactly one document; progress and diagnostics use stderr.
+- Consumers must inspect `schemaVersion` and reject unknown versions. Deploy uses operation schema v3; other operations use their own schema versions.
+- Exit codes: `0` requested result produced, `1` execution/system failure, `2` usage/input error, `3` non-interactive human-decision block, `130` interruption.
+- UI, help, prompts, errors, progress, and summaries are English. README remains Chinese. Color is automatic, respects `NO_COLOR`, and is never the only state indicator.
+
+### Profile TUI
+
+- Ink is used only for Profile maintenance; Clack and Inquirer are not added alongside it.
+- The TUI supports Profile selection, search, Asset-type and compatibility filters, add/remove selection, save/cancel, Revision conflict handling, and initial focus on `profile edit <id>`.
+- Alternate screen, cursor state, and terminal input mode are restored after success, failure, Escape/`q`, Ctrl+C, and uncaught exceptions.
+- Profile, Asset, Revision, and Deploy Request types live below the TUI layer. The TUI calls `ProfileService` and never writes YAML directly.
 
 ## Testing Decisions
 
-- The primary acceptance seam is the packaged `mcv` process. Tests invoke it as users do and assert routing, stdout, stderr, exit codes, visible text, keyboard navigation, filesystem effects, and terminal restoration rather than internal component structure.
-- Real PTY tests cover Profile TUI alternate-screen entry and exit, keyboard navigation, search, Enter/Escape/`q`, Ctrl+C, uncaught failures, and cursor/input-mode restoration on Windows ConPTY and macOS PTY.
-- Non-PTY process tests cover `--dry-run`, `--yes`, `--plain`, `--json`, non-TTY help, mutually exclusive flags, bare deploy usage errors, stdout/stderr separation, and exit codes.
-- Operation Modules are the focused safety seam for cases that are expensive or nondeterministic through a PTY: Plan precondition races, source/target hash changes, transaction rollback, backup failure, restore conflict, selection validation, Baseline Snapshot updates, and managed inventory updates.
-- Existing command-level tests that invoke the Commander program are prior art for protocol assertions. Existing Capture, Deploy, Restore, Status, Init, migration, path-parameterization, Overlay, and adapter tests remain the prior art for filesystem and transaction behavior.
-- Tests assert external structured values and resulting files, not private helper calls, React component trees, hook implementation, or directory layout.
-- TUI reducer tests cover state transitions independently of rendering: loading, ready, selection, warning confirmation, decision resolution, applying, success, failure, cancellation, and stale-plan regeneration.
-- Renderer snapshots cover common Windows Terminal and macOS widths, narrow single-column layouts, long paths, Unicode paths, missing color, large change counts, and faithful plaintext previews.
-- JSON contract tests assert exactly one parseable stdout document, schema version, stable codes, readiness, Issues, next actions, and no ANSI sequences.
-- Data-fidelity tests verify that supported plaintext configuration survives Capture, Repository, Deploy, Diff, plain text, and JSON unchanged; malformed-input diagnostics still avoid echoing unparsed source content.
-- Selection tests verify IDE/capability/file hierarchy, default-safe choices, unselected deletions, conflict resolution, partial Apply, and last-successful Deploy selection reuse.
-- Status tests separately verify Pending Deployment Changes against the current Repository and post-deploy local changes against Baseline Snapshot.
-- Restore tests verify selection of the latest complete backup, ignoring failed backups, Restore Conflict blocking, current-state backup, deletion restoration, and transactional rollback.
-- Repository tests verify Init in Git and non-Git directories without warnings, current-directory Bind, explicit-path Bind, Repository ID mismatch, moved Repository, Unbind scope, and migration gating.
-- ESM migration tests run before Ink is installed and must preserve executable bin behavior, package contents, CLI help/version, typecheck, the full existing test suite, and build output.
-- Good tests describe user-visible behavior, use deterministic temporary directories and injected device context, and fail for a broken contract rather than for harmless refactoring.
+- The primary public seam is the packaged `dist/index.js` process. Tests assert routing, stdout/stderr, exit codes, filesystem effects, and no accidental writes.
+- Process tests cover bare `mcv` in TTY and non-TTY conditions, help/version, output-mode conflicts, JSON single-document behavior, bare Deploy usage errors, and Review Artifact creation/fallback.
+- Review Artifact tests cover exact detail preservation, `--verbose`, 40-line/8-KiB overflow, POSIX permissions, atomic creation, best-effort expiry, count/byte targets, and protection of the current file.
+- Real macOS PTY and Windows ConPTY tests are required only for Profile TUI keyboard behavior and terminal restoration.
+- Operation tests cover stale Plans, source/target races, topology changes, transactional backup/rollback, Restore Conflict, partial selection, Baseline Snapshot, managed inventory, and Managed Receipt updates.
+- Tests assert user-visible contracts and resulting files rather than private helper calls or React component structure.
+- No fixed test count is part of the product contract; the full current suite, typecheck, build, packaged help, and npm pack gate must pass for release work.
 
 ## Out of Scope
 
-- Rewriting MCV in Go or another language.
-- GUI, web UI, or background daemon behavior.
-- Profile or named deployment Preset management.
-- Cursor or additional IDE Adapters.
-- Long-term operation history beyond the most recent operation state and existing backups.
-- A Settings center or general-purpose `mcv.yaml` editor.
-- Field-level selection or editing in Capture and Deploy.
-- Standalone `diff` or `rollback` commands; Diff remains a Plan view and the user-facing restore action is Restore Latest Deployment.
+- A global multi-route TUI Shell or business-command deep links.
+- GUI, web UI, background daemon, or background Artifact cleanup.
+- Persisted, signed, replayable, or cross-process Plans and Review Artifacts.
 - Force Restore when a Restore Conflict exists.
-- Persisted, signed, replayable, or cross-process Plans.
-- Command palette, mouse-first navigation, or automatic Git init/commit/push/pull.
-- Git hosting integration or any required backup/transport provider.
-- Credential management or environment-variable value entry. MCV may transfer credential-like bytes as ordinary supported configuration but provides no secrecy guarantees.
-- Automatic IDE installation.
-- Full internationalization or bilingual interface text in the current beta.
-- CommonJS/ESM dual builds or a separate ESM-only TUI package.
-- Adding multiple prompt frameworks alongside Ink.
-
-## Further Notes
-
-- The current verified baseline is 14 test files and 49 passing tests with TypeScript typecheck passing; implementation must preserve or strengthen this baseline at every phase.
-- Domain language must distinguish Repository, Baseline Snapshot, Drift, Pending Deployment Change, and Restore Conflict. Internal terms such as Canonical, Adapter, Overlay, and Drift should be rendered as user-facing English such as Shared Configuration, IDE Support, Merge Behavior, and Local Managed Change.
-- A non-Git Repository is a first-class valid state. Documentation may recommend Git, but product UI must not warn, prompt for `git init`, or imply degraded correctness.
-- The ESM decision is recorded separately as an accepted architecture decision because it is a package-wide, difficult-to-reverse trade-off.
-- Terminal recovery and basic PTY interruption coverage are release gates for the first default TUI, not optional polish.
+- Automatic Git init/commit/pull/push or required hosting provider.
+- Credential management, masking, secret scanning, or environment-variable value entry.
+- Automatic IDE installation, full dotfiles management, Cursor, or additional IDE Adapters.
+- Profile inheritance, tags, conditional expressions, or project binding.
+- CommonJS/ESM dual builds or multiple terminal interaction frameworks.

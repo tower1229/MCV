@@ -6,6 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Human-readable Capture, Deploy, and Restore Plans now store complete review details in a private short-lived local Review Artifact while retaining decision-critical summaries, destructive markers, Issues, and next actions in terminal history.
+- `--verbose` for Capture, Deploy, Restore, Migration, Status, Discover, and Profile list/show prints complete human-readable details inline while preserving the Review Artifact where one is required.
+
+### Changed
+
+- Large human-readable Reports and failed Results move details to the same Review Artifact after a shared 40-line or 8-KiB budget. JSON and MCP output remain complete and never create Review Artifacts.
+- Review Artifacts are created atomically under the per-user state directory, use POSIX `0700`/`0600` permissions where applicable, and may contain plaintext configuration. Creation best-effort removes `.txt` files older than 24 hours and prunes older files toward 10 files and 50 MiB while always retaining the newly created Artifact; a single oversized current file or failed cleanup may temporarily exceed those targets. Artifact creation failure falls back to complete terminal output.
+- Bare `mcv` now prints the same read-only Overview in both TTY and non-TTY environments.
+
 ## [0.3.0-beta.1] - 2026-08-08
 
 This prerelease adds Profiles, project-default Deploy, Managed Receipts, and local MCP Profile tools on top of the 0.2 transaction and Overlay contracts. Treat Repository files, backups, terminal previews, and JSON output as data that may contain plaintext credentials.
@@ -27,7 +38,7 @@ This prerelease adds Profiles, project-default Deploy, Managed Receipts, and loc
 
 ### Changed
 
-- Bare `mcv` prints a concise plain-text Overview in a TTY (help in a non-TTY) and exits immediately; the persistent fullscreen Ink Shell, alternate-screen routing, and deep-link semantics are removed from the default path.
+- Bare `mcv` prints a concise plain-text Overview and exits immediately; the persistent fullscreen Ink Shell, alternate-screen routing, and deep-link semantics are removed from the default path.
 - Capture, Deploy, Restore, and Repository lifecycle commands always use the one-shot Plan/Report command layer with terminal confirmations where applicable.
 - Daily entry points are `mcv`, `mcv capture`, `mcv deploy`, and `mcv profile`; `status` remains a compatibility alias for the Overview report.
 - `mcv profile` in a TTY opens the Profile editor; flag-based `mcv profile edit` remains the non-interactive mutation path.

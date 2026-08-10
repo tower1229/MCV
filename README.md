@@ -4,9 +4,9 @@
 
 MCV（Mobile Configuration Vehicle）是一个本地运行的 CLI，用来把 Codex、Claude Code 和 Gemini 的个人配置忠实收集到用户自己掌控的本地数据仓库，并在另一台 macOS 或 Windows 设备上事务化部署。Git 是可选且推荐的版本管理、备份和传输方式，但不是使用 MCV 的前置条件。
 
-MCV `0.3.0-beta.1` 在忠实 Capture / 事务化 Deploy 之上加入 Profile 选择、**项目为默认 Deploy scope**、项目 Managed Receipt，以及本地 MCP 上的 Profile 读写。MCV 不判断配置内容是否敏感；Adapter 支持范围内发现的明文密钥、`.env`、credential、PEM/key 等文件会原样进入 Repository、预览、终端、JSON 和备份。用户自行决定使用明文还是 `${env:*}`，并自行负责访问控制、加密、传输和泄漏风险。MCV 不会安装 IDE，也不会在后台自动修改配置。
+MCV `0.3.0-beta.1` 在忠实 Capture / 事务化 Deploy 之上加入 Profile 选择、**项目为默认 Deploy scope**、项目 Managed Receipt，以及本地 MCP 上的 Profile 读写。当前未发布实现进一步将复杂的人类可读详情写入短期本地 Review Artifact，并提供 `--verbose` 显式打印完整终端输出。MCV 不判断配置内容是否敏感；Adapter 支持范围内发现的明文密钥、`.env`、credential、PEM/key 等文件会原样进入 Repository、Review Artifact、`--verbose` 终端输出、JSON 和备份。用户自行决定使用明文还是 `${env:*}`，并自行负责访问控制、加密、传输和泄漏风险。MCV 不会安装 IDE，也不会在后台自动修改配置。
 
-> `0.3.0-beta.1` 是预发布版本。请把 Repository、备份和终端输出视为可能含明文密钥的数据，并按自己的安全要求管理。升级已有 Repository 前先运行 `mcv migrate --dry-run`。
+> `0.3.0-beta.1` 是预发布版本。请把 Repository、Review Artifact、备份、`--verbose` 终端输出和 JSON 视为可能含明文密钥的数据，并按自己的安全要求管理。升级已有 Repository 前先运行 `mcv migrate --dry-run`。
 >
 > **Breaking：** 裸 `mcv deploy`（以及无 Profile 的 `mcv deploy --yes`）现在以退出码 2 报用法错误且不写任何文件。旧版“全量部署到设备全局”请改用 `mcv deploy --global`。消费 JSON 的脚本必须读取 `schemaVersion`，并拒绝未知的 operation schema 版本（Deploy 现为 v3）。
 
@@ -77,7 +77,7 @@ mcv discover --json
 mcv capture
 ```
 
-Capture 打印按 IDE 与 File、Skill、MCP 分组的完整预览（可能包含明文密钥），在终端确认后写入仓库。可用 `--dry-run` 只审阅、`--yes` 在审阅后非交互应用默认非冲突变更，并可组合 `--json`。删除候选默认不选；warning 与 decision required 在交互路径中处理，`--yes` 不会执行有风险的决策。处理包括：
+Capture 在终端打印按 IDE 与 File、Skill、MCP 分组的决策摘要，并把完整预览写入短期本地 Review Artifact（可能包含明文密钥）；交互模式在用户确认后写入仓库。可用 `--dry-run` 只审阅、`--verbose` 同时把完整预览打印到终端、`--yes` 在审阅后非交互应用默认非冲突变更，并可组合 `--json`。删除候选默认不选；warning 与 decision required 在交互路径中处理，`--yes` 不会执行有风险的决策。处理包括：
 
 - 对 Adapter/Skill 已发现的支持内容保留原值和文件，不按文件名或字段名判断敏感性；
 - 用户已选择的 `${env:VARIABLE_NAME}` 引用保持引用，明文值保持明文；
@@ -145,18 +145,18 @@ mcv capture    一次性 Capture Plan/确认/Apply；--dry-run/--yes/--json/--ve
 mcv deploy     一次性 Deploy Plan/确认/Apply；默认项目 scope；需 Profile 或 --global；支持 --verbose；裸调用 exit 2
 mcv profile    Profile 维护 TUI（TTY）或 list/show/create/edit/delete 子命令
 
-mcv status     Overview 兼容别名；--json 输出结构化 Report
+mcv status     Overview 兼容别名；--plain/--json/--verbose
 mcv init       打印 Init Plan；--yes/--dry-run/--json 控制写入
 mcv repo       打印 Repository Report；--json 输出结构化 Report
 mcv bind [PATH] 打印 Bind Plan；--yes/--dry-run/--json 控制写入
 mcv unbind     打印 Unbind Plan；--yes/--dry-run/--json 控制写入
-mcv migrate    打印 Migration Plan；--yes/--dry-run/--json 控制写入
-mcv discover   打印 Environment Report；--json 输出结构化 Report
+mcv migrate    打印 Migration Plan；--yes/--dry-run/--json/--verbose
+mcv discover   打印 Environment Report；--plain/--json/--verbose
 mcv restore    一次性 Restore Plan/确认/Apply；--dry-run/--yes/--json/--verbose
 mcv mcp        本地 stdio MCP Server（集成入口；含 inspect_inventory / read_assets / update_profiles / deploy_profiles）
 ```
 
-人类可读的 Capture、Deploy 和 Restore Plan 默认只在终端保留变更数量、选择状态、删除/拓扑迁移等破坏性标记、Issues 和 Next Action；完整 Diff、路径、hash 与技术详情写入用户本地的短期 Review Artifact，并同时打印标准 `file://` URL 与绝对路径。macOS 使用 `~/Library/Application Support/mcv/reviews/`，Windows 使用 `%LOCALAPPDATA%\mcv\reviews\`，Linux 使用 `${XDG_STATE_HOME:-~/.local/state}/mcv/reviews/`。Artifact 原子写入；POSIX 目录/文件权限为 `0700`/`0600`，Windows 继承每用户 `%LOCALAPPDATA%` 的 ACL。每次创建 Artifact 时会清理超过 24 小时的旧文件，并把现有集合收敛到最多 10 个文件和 50 MiB；如果之后不再运行 MCV，过期文件不会由后台进程主动删除。Artifact 可能包含与原预览相同的明文配置值，不应分享。写入失败时 MCV 会把完整详情回退到终端，绝不会在不可审阅时继续隐藏内容。`--verbose` 在保留 Artifact 的同时把完整详情输出到终端。
+人类可读的 Capture、Deploy 和 Restore Plan 默认只在终端保留变更数量、选择状态、删除/拓扑迁移等破坏性标记、Issues 和 Next Action；完整 Diff、路径、hash 与技术详情写入用户本地的短期 Review Artifact，并同时打印标准 `file://` URL 与绝对路径。macOS 使用 `~/Library/Application Support/mcv/reviews/`，Windows 使用 `%LOCALAPPDATA%\mcv\reviews\`，Linux 使用 `${XDG_STATE_HOME:-~/.local/state}/mcv/reviews/`。Artifact 原子写入；POSIX 目录/文件权限为 `0700`/`0600`，Windows 继承每用户 `%LOCALAPPDATA%` 的 ACL。每次创建 Artifact 时会 best-effort 清理超过 24 小时的旧 `.txt` 文件，并在始终保留本次新文件的前提下将目录收敛到 10 个文件、50 MiB 的目标上限；如果本次文件自身超限或旧文件删除失败，目录可能暂时超过目标。如果之后不再运行 MCV，过期文件不会由后台进程主动删除。Artifact 可能包含与原预览相同的明文配置值，不应分享。写入失败时 MCV 会把完整详情回退到终端，绝不会在不可审阅时继续隐藏内容。`--verbose` 在保留 Artifact 的同时把完整详情输出到终端。
 
 Overview/status、discover、Profile list/show、Migration 和失败 Result 仅在详情超过 40 行或 8 KiB 时采用相同策略；短输出保持直接显示。Review Artifact 属于 Local/Runtime 展示副作用，不修改 Repository、部署目标、Managed Receipt、backup、Baseline Snapshot 或 device operation state，也不能重放或充当 Apply 授权。`--json` 和 MCP 始终保留原有完整结构化契约且不创建 Review Artifact。
 

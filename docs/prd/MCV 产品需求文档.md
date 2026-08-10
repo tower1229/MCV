@@ -7,7 +7,7 @@
 **项目属性：** 数字主权生态基础设施
 **目标平台：** macOS、Windows
 **首期目标 IDE：** Codex、Claude Code、Gemini (涵盖 Gemini CLI 和 Antigravity)
-**实现状态（2026-08-08）：** Repository schema v4、Profiles schema v1、operation schema v3、device state v3、Managed Receipt v1；项目为默认 Deploy scope；内置 global Profile；专用 Profile TUI 与本地 MCP Profile 工具；配置数据中立；事务部署与 Overlay 保留。0.3 详细设计见 `docs/prd/MCV-v0.3-Profile-Deploy-Technical-Design.md` 与 ADR 0011–0014。
+**实现状态（2026-08-10）：** Repository schema v4、Profiles schema v1、operation schema v3、device state v3、Managed Receipt v1；项目为默认 Deploy scope；内置 global Profile；专用 Profile TUI 与本地 MCP Profile 工具；配置数据中立；事务部署与 Overlay 保留；复杂人类可读详情使用短期本地 Review Artifact，并由 `--verbose` 显式输出完整终端详情。0.3 详细设计见 `docs/prd/MCV-v0.3-Profile-Deploy-Technical-Design.md` 与 ADR 0011–0014；当前界面契约见 `docs/prd/TUI-Spec.md`。
 
 ---
 
@@ -86,7 +86,7 @@ MCV 在数字主权生态中的定位是：
 9. 部署前展示变更摘要并自动备份。
 10. 检测仓库配置与当前设备之间的差异。
 11. 支持恢复最近一次部署前的配置。
-12. 所有普通操作均通过交互式 CLI 引导完成。
+12. 所有普通操作均通过一次性 CLI Report/Plan/Result 完成；需要人工决策时在 TTY 中确认，Profile 可视化维护使用专用 TUI。
 
 ### 3.2 成功标准
 
@@ -131,7 +131,7 @@ MCV 在数字主权生态中的定位是：
 - 自动执行 Git commit 或 push；
 - 项目级仓库中的局部 IDE 配置管理。
 
-后续版本可以逐步扩展软件安装、Shell、Git、终端和开发工具链，但第一阶段聚焦 AI IDE 的全局个人配置。
+后续版本可以逐步扩展软件安装、Shell、Git、终端和开发工具链，但当前阶段聚焦 AI IDE 的个人配置、Profile，以及项目/设备全局双范围部署。
 
 ---
 
@@ -233,9 +233,9 @@ MCV 不强制理解每个 IDE 的全部配置字段。
 
 对于暂时无法统一的 IDE 独有配置，应优先以原生格式保存，避免因为 MCV 尚未适配而丢失数据。
 
-### 6.4 默认交互，底层可自动化
+### 6.4 默认可审阅，底层可自动化
 
-用户默认通过交互式 CLI 操作。
+用户默认通过一次性 CLI 审阅 Report、Plan 和 Result；需要写入时在 TTY 中确认，或显式使用 `--dry-run`、`--yes`、`--json`。只有 Profile 维护使用专用全屏 TUI。
 
 底层核心逻辑必须与交互层分离，以便：
 
@@ -267,7 +267,7 @@ MCV 由两个独立部分组成。
 
 公共开源程序，负责：
 
-- 交互式终端界面；
+- 一次性 CLI Report/Plan/Result 与专用 Profile TUI；
 - IDE 和配置发现；
 - 配置收集；
 - 配置所有权过滤、路径参数化和格式转换；
@@ -842,48 +842,41 @@ mcv unbind
 mcv
 ```
 
-进入交互式主菜单：
+打印与 `mcv status` 相同的只读 plain-text Overview 后立即退出。TTY 与非 TTY 行为一致，不进入 alternate screen，也不把裸命令改成 help。
 
 ```text
-MCV
-
-> Overview
-  Capture
-  Deploy
-  Restore Latest Deployment
-  Repository
-  Help
+Repository: ...
+Pending deployment: ...
+Local managed change: ...
+Environment: ...
 ```
 
 ### 16.2 一级命令
 
-首期主要命令为：
+日常主要命令为：
 
 ```bash
-mcv init
-mcv bind
-mcv migrate
+mcv
 mcv capture
 mcv deploy
-mcv status
-mcv restore
+mcv profile
 ```
 
-仓库管理命令：
+完整命令面包括：
 
 ```bash
+mcv status
+mcv discover
+mcv init
 mcv repo
+mcv bind
 mcv unbind
+mcv migrate
+mcv restore
+mcv mcp
 ```
 
-普通用户主要使用：
-
-- `init`
-- `capture`
-- `deploy`
-- `status`
-
-其他命令可以通过菜单进入。
+Capture、Deploy、Restore 以及 Repository 生命周期命令都使用一次性 Command/Report，不再通过全局菜单或 deep-link 路由。只有 `mcv profile` 和 TTY 中无 mutation flag 的 `mcv profile edit <id>` 使用专用全屏 Ink TUI；`mcv mcp` 是本地 stdio 集成入口，不在日常顶层帮助中展示。
 
 ---
 
@@ -898,33 +891,22 @@ mcv unbind
 
 ### 17.2 初始化方式
 
-Init Plan 只创建并绑定一个有效的空 Repository。TTY 中 Apply 成功后继续进入 Environment discovery 与 Capture workflow；用户可以取消 Capture，已经创建的空 Repository 与绑定仍然保留。`--dry-run`、`--yes` 或 `--json` 使用一次性协议，不隐式执行 Capture。
+Init Plan 只创建并绑定一个有效的空 Repository。无论是否为 TTY，Init 都在输出 Plan 或 Result 后退出，不自动进入 Environment discovery 或 Capture。用户需要显式运行 `mcv discover` 和 `mcv capture`。`--dry-run`、`--yes` 或 `--json` 使用相同的一次性协议。
 
-### 17.3 扫描结果
+### 17.3 Init Plan
 
 应展示：
 
-- 当前操作系统；
-- 已发现 IDE；
-- IDE 配置文件数量；
-- 规则文件数量；
-- Skills 数量；
-- MCP 数量；
-- 支持配置文件数量；
-- 已参数化路径数量。
+- Repository 绝对路径；
+- 将创建的 `mcv.yaml` 与 `profiles.yaml`；
+- Repository schema v4 与 Profiles schema v1；
+- 当前设备绑定变化；
+- 会阻止 Apply 的路径、权限、现有 Repository 或绑定问题；
+- 成功后显式运行 `mcv discover` 与 `mcv capture` 的 next actions。
 
-### 17.4 分类确认
+### 17.4 Apply 边界
 
-用户可逐类选择是否纳入：
-
-```text
-Shared Rules
-Skills
-MCP
-Codex Native Configuration
-Claude Code Native Configuration
-Gemini Native Configuration (Gemini CLI and Antigravity surfaces)
-```
+Init 不扫描或选择 IDE 配置，也不隐式 Capture。Apply 只能执行当前 Init Plan 中的 Repository 文件与设备绑定变化；`--yes` 遇到非 notice Issue 时在首次写入前阻断。
 
 ### 17.5 初始化结果
 
@@ -933,7 +915,7 @@ Gemini Native Configuration (Gemini CLI and Antigravity surfaces)
 - 创建仓库标识 (`mcv.yaml`)；
 - 绑定当前设备；
 - 生成空 Baseline Snapshot（基线快照）；
-- TTY 流程继续 Environment discovery 与 Capture，只有 Capture Apply 后才写入用户确认的配置；
+- 输出下一步建议，由用户显式运行 Environment discovery 与 Capture；
 - 显示未处理警告；
 - 不自动提交 Git。
 
@@ -975,7 +957,7 @@ Capture 呈现给用户确认的是将要写入的最终形态：已知绝对路
 - Local/Runtime 内容因所有权边界被排除；
 - 路径被参数化。
 
-完整预览按数据中立契约展示，可能包含明文密钥；不能用“已脱敏”或“安全”标签替代用户审阅。
+完整预览按数据中立契约展示，可能包含明文密钥；不能用“已脱敏”或“安全”标签替代用户审阅。默认人类输出在终端保留决策摘要、破坏性标记、Issues 和 next actions，完整 Diff、路径、hash 与技术详情写入短期本地 Review Artifact；`--verbose` 在保留 Artifact 的同时把完整详情打印到终端。JSON 保持完整结构化内容且不创建 Artifact。
 
 ### 18.3 人工确认粒度
 
@@ -1015,9 +997,9 @@ This configuration was deleted from the device. Remove it from the MCV repositor
 
 ### 18.6 审计简化
 
-第一版不需要长期 Capture 状态机或复杂报告目录。
+第一版不需要长期 Capture 状态机、持久化 Plan 或可重放审计日志。Plan 只在当前进程内存中存在；Review Artifact 仅用于本地展示，不能重放或充当 Apply 授权。
 
-候选变化可以保存在临时目录或内存中；用户确认后直接写入仓库。
+Review Artifact 写入用户本地 state 目录，而不是 Repository。每次创建时 best-effort 清理超过 24 小时的旧 `.txt` 文件，并在始终保留本次新文件的前提下向 10 个文件、50 MiB 的目标上限收敛；本次文件自身超限或旧文件删除失败时允许暂时超过目标。没有后台清理进程。Artifact 写入失败时必须回退为完整终端输出，不能在详情不可审阅时继续隐藏内容。
 
 需要保留的只有：
 
@@ -1062,7 +1044,7 @@ This configuration was deleted from the device. Remove it from the MCV repositor
 
 ### 19.3 部署预览
 
-写入前必须显示：
+写入前必须在终端显示决策摘要，并通过 Review Artifact 或 `--verbose` 提供完整详情，例如：
 
 ```text
 Planned deployment:
@@ -1179,15 +1161,15 @@ Claude Code   1 local managed change
 
 ---
 
-## 22. 交互式体验要求
+## 22. 命令与交互体验要求
 
 ### 22.0 界面语言
 
 当前 beta 的所有产品界面文案统一使用英文，包括 TUI、CLI help、提示、错误、确认、进度和结果摘要。命令名、参数名、JSON 字段名和 `error.code` 同样使用英文。README 保持中文。当前阶段不建设 i18n 框架，不在界面中做中英双语混排。
 
-### 22.1 默认全程交互
+### 22.1 一次性命令与专用 TUI
 
-除高级参数外，用户不需要编辑配置文件即可完成：
+用户不需要进入全局全屏 Shell 即可完成：
 
 - 初始化；
 - 收集；
@@ -1195,6 +1177,8 @@ Claude Code   1 local managed change
 - 状态检查；
 - 恢复；
 - 仓库重新绑定。
+
+裸 `mcv` 和所有业务命令默认在完成当前 Report、Plan 或 Result 后退出。只有 Profile 可视化维护使用专用 TUI。写操作在 TTY 中可确认；非交互使用 `--dry-run` 审阅、`--yes` 应用安全默认项或 `--json` 消费结构化契约。
 
 ### 22.2 明确使用用户语言
 
@@ -1213,19 +1197,28 @@ Claude Code   1 local managed change
 
 - 删除默认不选中；
 - 覆盖已有配置需要确认；
-- 支持内容完整预览且可能包含明文；
+- 支持内容完整预览且可能包含明文；默认完整详情进入 Review Artifact，`--verbose` 才额外打印到终端；
 - 未知文件默认不收集；
 - 本机路径默认参数化；
 - 失败时不保留半写入状态。
 
-### 22.4 允许返回和取消
+### 22.4 允许取消与只读审阅
 
-每个关键步骤都应支持：
+每个关键操作都应支持：
 
-- 返回上一步；
 - 查看详细信息；
-- 取消操作；
+- Apply 前取消操作；
 - 仅查看不修改。
+
+Profile TUI 额外支持返回、搜索、筛选、保存和取消。一次性命令不提供虚构的“上一步”页面；重新运行命令会生成新的 Plan。
+
+### 22.5 Review Artifact
+
+- Capture、Deploy 和 Restore 的人类可读 Plan 存在详情时总是创建 Artifact；Overview/Status、Discover、Profile list/show、Migration 和失败 Result 仅在超过 40 行或 8 KiB 时创建。
+- macOS 使用 `~/Library/Application Support/mcv/reviews/`，Windows 使用 `%LOCALAPPDATA%\mcv\reviews\`，Linux 使用 `${XDG_STATE_HOME:-~/.local/state}/mcv/reviews/`。
+- Artifact 原子写入；POSIX 目录/文件权限为 `0700`/`0600`，Windows 继承用户级 `%LOCALAPPDATA%` ACL。
+- Artifact 属于 Local/Runtime 展示数据，不修改 Repository、目标、Managed Receipt、backup、Baseline Snapshot 或 device operation state。
+- JSON 与 MCP 永不创建 Artifact；`--verbose` 不取消 Artifact，而是额外打印完整详情。
 
 ---
 
@@ -1359,8 +1352,9 @@ src/
 ├─ commands/     # 一次性命令执行与写入边界
 ├─ operations/   # Report、Plan、Apply 与稳定 JSON contracts
 ├─ core/         # Canonical MCP/Skill 语义与设备布局
-├─ renderers/    # plain/JSON 输出
-├─ tui/          # 统一 Ink Shell 与终端生命周期
+├─ renderers/    # plain/JSON 与人类审阅文档
+├─ cli/          # prompt、Review Artifact 与输出编排
+├─ tui/profile/  # 专用 Profile Ink TUI 与终端生命周期
 └─ utils/        # Repository、state、变量、结构化配置与文件事务
 
 schemas/
@@ -1550,7 +1544,7 @@ Choose an action:
 
 ### 31.3 数据忠实度与所有权边界测试
 
-1. 支持结构化配置中的明文 Key/Token 在 Capture、Repository、Deploy、Diff、plain 和 JSON 中保持不变。
+1. 支持结构化配置中的明文 Key/Token 在 Capture、Repository、Deploy、Diff、Review Artifact、`--verbose` plain 输出和 JSON 中保持不变；默认终端摘要不必重复完整详情。
 2. `${env:*}` 引用保持引用，未解析时不会被替换为空值。
 3. Adapter 未声明的缓存、日志、会话和任意 HOME 文件不得被收集。
 4. 格式错误诊断不得回显尚未解析的完整源文件内容。
@@ -1560,10 +1554,11 @@ Choose an action:
 ### 31.4 交互测试
 
 1. 所有关键操作可以取消。
-2. 用户可返回上一步。
+2. 一次性命令取消后不写入，重新运行会生成新 Plan；Profile TUI 支持返回、保存和取消。
 3. 非交互终端中给出明确错误或要求参数。
-4. 输出在常见终端宽度下可读。
+4. 输出在常见终端宽度下可读；超出 40 行或 8 KiB 的适用详情进入 Review Artifact。
 5. 失败信息提供可执行的处理方式。
+6. Review Artifact 写入失败时回退为完整终端输出，JSON 与 MCP 不创建 Artifact。
 
 ---
 
@@ -1606,7 +1601,7 @@ MCV 默认遵循：
 - 仓库当前目录初始化；
 - 仓库 ID 与本机绑定；
 - 绑定、重新绑定和解除绑定；
-- 交互式主菜单；
+- 裸 `mcv` plain Overview 与一次性命令协议；
 - IDE 检测；
 - Codex、Claude Code、Gemini (涵盖 Gemini CLI 和 Antigravity) 的配置清单；
 - 通用规则管理；
@@ -1615,7 +1610,7 @@ MCV 默认遵循：
 - IDE 原生配置白名单收集；
 - Capture 人工确认；
 - 路径参数化；
-- 配置数据中立责任边界与完整预览；
+- 配置数据中立责任边界、完整预览与短期本地 Review Artifact；
 - 部署预览；
 - 自动备份；
 - 原子写入；

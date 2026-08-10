@@ -17,7 +17,7 @@ MCV（Mobile Configuration Vehicle）是一个 TypeScript/Node.js CLI，面向�
 - 已支持 Adapter：Codex、Claude Code、Gemini；不要把 Cursor 或规划中的命令描述为已实现。
 - Canonical 数据位于 `common/`；Native 数据位于 `ide/<ide>/native/`；Local/Runtime 数据不得进入仓库。
 - Overlay 使用 managed whitelist：仅显式 managed paths 由 Canonical 覆盖，未知字段默认保留为 Native。
-- Capture 对支持范围内的配置保持数据中立，只做路径参数化并完整预览；明文和 `${env:*}` 引用都按用户审阅的形式保留。Deploy 必须先预览，修改已有文件前必须备份。
+- Capture 对支持范围内的配置保持数据中立，只做路径参数化并完整预览；明文和 `${env:*}` 引用都按用户审阅的形式保留。复杂人类输出默认把完整详情写入短期本地 Review Artifact，`--verbose` 才额外打印到终端；JSON 与 MCP 不创建 Artifact。Deploy 必须先预览，修改已有文件前必须备份。
 - `dist/` 是提交和 npm 发布所需的编译产物。修改 `src/` 后运行 `npm run build` 并提交对应产物。
 
 ## 验证

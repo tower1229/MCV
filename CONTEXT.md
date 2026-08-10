@@ -110,8 +110,12 @@ The single root-level file that identifies a directory as an MCV Repository and 
 _Avoid_: "config file", "settings file"
 
 **Configuration Data Neutrality（配置数据中立）**:
-MCV does not recognize, replace, exclude, mask, or block plaintext keys in supported configuration. Users may choose plaintext or `${env:*}` references. Repository files, backups, terminal previews, and JSON can therefore contain plaintext keys; access control, encryption, transport, and disclosure risk belong to the user. This does not widen discovery beyond Adapter/Skill-declared content.
+MCV does not recognize, replace, exclude, mask, or block plaintext keys in supported configuration. Users may choose plaintext or `${env:*}` references. Repository files, Review Artifacts, backups, `--verbose` terminal output, and JSON can therefore contain plaintext keys; access control, encryption, transport, and disclosure risk belong to the user. Default human output may keep only a decision summary in terminal history while preserving complete details in a private short-lived Review Artifact. This does not widen discovery beyond Adapter/Skill-declared content.
 _Avoid_: "secret scanner", "credential vault", "safe Repository"
+
+**Review Artifact（审阅文件）**:
+A private short-lived Local/Runtime text file containing complete human-readable review details that would otherwise flood terminal history. It is presentation data, not a persisted Plan, operation log, backup, or Apply authorization. JSON and MCP never create one; `--verbose` prints the same complete details inline without suppressing the Artifact. Artifact creation must not mutate the Repository, target, Managed Receipt, Baseline Snapshot, or device operation state.
+_Avoid_: "saved plan", "audit log", "replay file"
 
 ## Example dialogue
 

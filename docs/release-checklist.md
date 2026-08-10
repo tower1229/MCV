@@ -1,12 +1,13 @@
 # Release checklist
 
-Use this checklist for `0.3.0-beta.1`. Publishing and tagging are maintainer-confirmed actions; repository changes alone do not publish a package.
+Use this checklist for the current `0.3.0-beta.1` line and its Unreleased changes. Publishing and tagging are maintainer-confirmed actions; repository changes alone do not publish a package.
 
 ## Release candidate
 
 - [ ] `package.json` and `package-lock.json` use `0.3.0-beta.1`.
-- [ ] `CHANGELOG.md` describes user-visible changes, the breaking Deploy CLI change, every schema bump, security updates, and migration requirements.
-- [ ] README, CONTEXT, PRD, ADRs 0011–0014, and maintainer instructions agree on the current product contract (project is the default Deploy scope; bare `mcv deploy` exits 2).
+- [ ] `CHANGELOG.md` describes user-visible changes, the breaking Deploy CLI change, every schema bump, Review Artifact behavior, security updates, and migration requirements.
+- [ ] README, CONTEXT, PRD, TUI spec, ADRs 0011–0014, and maintainer instructions agree on the current product contract: bare `mcv` always prints Overview; project is the default Deploy scope; bare `mcv deploy` exits 2; only Profile uses a full-screen TUI.
+- [ ] Human output tests cover Review Artifact path, permissions, atomic fallback, 40-line/8-KiB overflow, 24-hour best-effort expiry, 10-file/50-MiB targets with current-file protection, `--verbose`, and JSON/MCP zero-Artifact behavior.
 - [ ] `npm audit` reports zero known vulnerabilities.
 - [ ] `npm ci` completes with Node.js `>=22.12.0`.
 - [ ] `npm run typecheck` passes.
