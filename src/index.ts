@@ -74,7 +74,7 @@ export function createProgram(
     .option('--dry-run', 'Show the capture plan without writing')
     .option('--json', 'Print a machine-readable plan')
     .option('--yes', 'Apply default non-conflicting changes without prompting')
-    .option('--verbose', 'Show processed file content in the preview')
+    .option('--verbose', 'Also print complete review details in the terminal')
     .action(async (options) => {
       validateWriteOutputOptions(captureCommand, options);
       await captureConfigurations(context, captureDependencies, options);
@@ -89,6 +89,7 @@ export function createProgram(
     .option('--dry-run', 'Show the deployment plan without writing')
     .option('--json', 'Print a machine-readable plan')
     .option('--yes', 'Deploy without prompting after a reviewed dry-run')
+    .option('--verbose', 'Also print complete review details in the terminal')
     .option('--prune-managed', 'Delete stale MCV-owned files (project Managed Receipt or global inventory) and exact duplicate Skills from the legacy Codex directory')
     .action(async (profiles: string[], options) => {
       validateWriteOutputOptions(deployCommand, options);
@@ -103,6 +104,7 @@ export function createProgram(
     .description('Detect supported AI IDEs and report their configuration paths')
     .addOption(new Option('--plain', 'Print a one-shot English text report'))
     .addOption(new Option('--json', 'Print one machine-readable report'))
+    .option('--verbose', 'Also print complete report details in the terminal')
     .action(async (options) => {
       if (options.plain && options.json) {
         discoverCommand.error(
@@ -118,6 +120,7 @@ export function createProgram(
     .description('Compare local configuration with the last deployment')
     .addOption(new Option('--plain', 'Print a one-shot English text report'))
     .addOption(new Option('--json', 'Print one machine-readable report'))
+    .option('--verbose', 'Also print complete report details in the terminal')
     .action(async (options) => {
       if (options.plain && options.json) {
         statusCommand.error(
@@ -136,6 +139,7 @@ export function createProgram(
     .option('--dry-run', 'Show the Restore Plan without writing')
     .option('--yes', 'Restore without prompting after reviewing a dry-run')
     .option('--json', 'Print one machine-readable Restore Plan or Result')
+    .option('--verbose', 'Also print complete review details in the terminal')
     .action(async (options) => {
       validateWriteOutputOptions(restoreCommand, options);
       if (options.global && options.target) {
@@ -183,6 +187,7 @@ export function createProgram(
     .option('--dry-run', 'Preview migration without writing')
     .option('--yes', 'Migrate without prompting after reviewing a dry-run')
     .option('--json', 'Print one machine-readable Plan or Result')
+    .option('--verbose', 'Also print complete review details in the terminal')
     .action((repositoryPath = process.cwd(), options) => {
       validateWriteOutputOptions(migrateCommand, options);
       migrate(context, repositoryPath, options);
@@ -203,6 +208,7 @@ export function createProgram(
     .command('list')
     .description('List Profiles with asset counts and Unassigned')
     .option('--json', 'Print one machine-readable Profile list report')
+    .option('--verbose', 'Also print complete report details in the terminal')
     .action((options) => {
       listProfiles(context, options);
     });
@@ -212,6 +218,7 @@ export function createProgram(
     .description('Show one Profile and its Assets')
     .argument('<id>', 'Profile ID')
     .option('--json', 'Print one machine-readable Profile report')
+    .option('--verbose', 'Also print complete report details in the terminal')
     .action((id, options) => {
       showProfile(context, id, options);
     });

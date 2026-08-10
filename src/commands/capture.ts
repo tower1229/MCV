@@ -2,8 +2,9 @@ import type { DeviceContext } from '../adapters/types.js';
 import { askInTerminal, withInterruptsIgnored } from '../cli/prompt.js';
 import { recordCaptureSuccess } from '../utils/state.js';
 import { applyCapturePlan, createCapturePlan } from '../operations/capture.js';
-import { renderCapturePlanPlain, renderCaptureResultPlain } from '../renderers/capture.js';
+import { renderCapturePlanDocument, renderCaptureResultDocument } from '../renderers/capture.js';
 import { renderJson } from '../renderers/json.js';
+import { presentHumanDocument } from '../cli/human-output.js';
 
 export interface CaptureOptions {
   dryRun?: boolean;
@@ -25,19 +26,25 @@ export async function captureConfigurations(
   const capturePlan = await createCapturePlan(context);
   if (options.dryRun) {
     if (options.json) console.log(renderJson(capturePlan));
-    else for (const line of renderCapturePlanPlain(capturePlan)) console.log(line);
+    else presentHumanDocument(context, renderCapturePlanDocument(capturePlan), {
+      verbose: options.verbose,
+    });
     if (capturePlan.status === 'failed') process.exitCode = 1;
     return;
   }
   if (capturePlan.status === 'failed') {
     const result = await applyCapturePlan(context, capturePlan, { changeIds: [] });
     if (options.json) console.log(renderJson(result));
-    else for (const line of renderCaptureResultPlain(result)) console.log(line);
+    else presentHumanDocument(context, renderCaptureResultDocument(result), {
+      verbose: options.verbose,
+    });
     process.exitCode = 1;
     return;
   }
   if (!options.json && !options.yes) {
-    for (const line of renderCapturePlanPlain(capturePlan)) console.log(line);
+    presentHumanDocument(context, renderCapturePlanDocument(capturePlan), {
+      verbose: options.verbose,
+    });
   }
   const changeIds = capturePlan.changes
     .filter((change) => change.defaultSelected)
@@ -110,7 +117,9 @@ export async function captureConfigurations(
     process.exitCode = result.status === 'blocked' ? 3 : 1;
   }
   if (options.json) console.log(renderJson(result));
-  else for (const line of renderCaptureResultPlain(result)) console.log(line);
+  else presentHumanDocument(context, renderCaptureResultDocument(result), {
+    verbose: options.verbose,
+  });
 }
 
 async function confirmInTerminal(): Promise<boolean | undefined> {

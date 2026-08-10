@@ -5,7 +5,8 @@ import {
   createRestorePlan,
 } from '../operations/restore.js';
 import { renderJson } from '../renderers/json.js';
-import { renderRestorePlanPlain, renderRestoreResultPlain } from '../renderers/restore.js';
+import { renderRestorePlanDocument, renderRestoreResultDocument } from '../renderers/restore.js';
+import { presentHumanDocument } from '../cli/human-output.js';
 
 export interface RestoreDependencies {
   confirmRestore?: () => Promise<boolean>;
@@ -17,6 +18,7 @@ export interface RestoreOptions {
   yes?: boolean;
   global?: boolean;
   target?: string;
+  verbose?: boolean;
 }
 
 export async function restoreLatestBackup(
@@ -34,7 +36,9 @@ export async function restoreLatestBackup(
     : { scope: 'project', targetRoot: options.target ?? process.cwd() });
   if (options.dryRun) {
     if (options.json) console.log(renderJson(reviewPlan));
-    else for (const line of renderRestorePlanPlain(reviewPlan)) console.log(line);
+    else presentHumanDocument(context, renderRestorePlanDocument(reviewPlan), {
+      verbose: options.verbose,
+    });
     if (reviewPlan.status === 'failed') process.exitCode = 1;
     return;
   }
@@ -43,7 +47,9 @@ export async function restoreLatestBackup(
     const result = applyRestorePlan(context, reviewPlan, { changeIds: [] });
     process.exitCode = 1;
     if (options.json) console.log(renderJson(result));
-    else for (const line of renderRestoreResultPlain(result)) console.log(line);
+    else presentHumanDocument(context, renderRestoreResultDocument(result), {
+      verbose: options.verbose,
+    });
     return;
   }
 
@@ -52,7 +58,9 @@ export async function restoreLatestBackup(
   process.on('SIGINT', handleInterrupt);
   try {
     if (!options.json && !options.yes) {
-      for (const line of renderRestorePlanPlain(reviewPlan)) console.log(line);
+      presentHumanDocument(context, renderRestorePlanDocument(reviewPlan), {
+        verbose: options.verbose,
+      });
     }
     if (!options.yes) {
       if (!process.stdin.isTTY && !dependencies.confirmRestore) {
@@ -71,7 +79,9 @@ export async function restoreLatestBackup(
           changeIds: reviewPlan.changes.map((change) => change.id),
         }, { signal: cancellation.signal });
         process.exitCode = 130;
-        for (const line of renderRestoreResultPlain(result)) console.log(line);
+        presentHumanDocument(context, renderRestoreResultDocument(result), {
+          verbose: options.verbose,
+        });
         return;
       }
       if (!confirmed) {
@@ -90,7 +100,9 @@ export async function restoreLatestBackup(
     if (result.issues.some((issue) => issue.code === 'restore.cancelled')) process.exitCode = 130;
     else if (result.status !== 'succeeded') process.exitCode = result.status === 'blocked' ? 3 : 1;
     if (options.json) console.log(renderJson(result));
-    else for (const line of renderRestoreResultPlain(result)) console.log(line);
+    else presentHumanDocument(context, renderRestoreResultDocument(result), {
+      verbose: options.verbose,
+    });
     await new Promise<void>((resolve) => setImmediate(resolve));
   } finally {
     process.off('SIGINT', handleInterrupt);

@@ -1,4 +1,24 @@
 import { renderIssuePlain, styleText } from './color.js';
+import { withoutNextActions } from './human-document.js';
+export function renderMigrationDocument(contract) {
+    const full = renderMigrationPlain(contract);
+    const overflowSummary = contract.status === 'planned'
+        ? [
+            `Migration Plan: ${contract.repositoryPath}`,
+            `Changes: ${contract.changes.length}`,
+            `Issues: ${contract.issues.length}`,
+        ]
+        : full.slice(0, 3);
+    return {
+        operation: 'migrate',
+        title: contract.status === 'planned' ? 'Migration Plan' : 'Migration Result',
+        summary: [],
+        overflowSummary,
+        details: withoutNextActions(full),
+        nextActions: contract.nextActions,
+        detailPolicy: 'overflow',
+    };
+}
 export function renderRepositoryPlain(report) {
     const lines = [
         `Repository: ${report.repositoryPath ?? 'not bound'}`,

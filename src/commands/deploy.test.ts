@@ -64,7 +64,7 @@ describe('mcv deploy', () => {
   const deviceContext = (platform: NodeJS.Platform = 'darwin') => ({
     homeDir,
     platform,
-    env: { APPDATA: stateRoot },
+    env: { APPDATA: stateRoot, LOCALAPPDATA: stateRoot },
   });
 
   const windowsHomeDir = () => homeDir.replace(/\//g, '\\');
@@ -103,15 +103,21 @@ describe('mcv deploy', () => {
     expect(fs.existsSync(path.join(homeDir, '.claude', 'settings.json'))).toBe(false);
   });
 
-  it('prints the same grouped read-only Deploy Plan as English text or one JSON document', async () => {
+  it('prints a concise Deploy review with a local artifact or one complete JSON document', async () => {
     fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Rules\n');
 
     await deployWithGlobalProfile(['--dry-run'], deviceContext('win32'));
     const plain = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
     expect(plain).toContain('Deploy Plan:');
-    expect(plain).toContain('Claude Code / Shared Rules');
-    expect(plain).toContain('[replace entire file]');
+    expect(plain).toContain('Changes:');
+    expect(plain).toContain('Full review:');
+    expect(plain).not.toContain('# Rules');
+    const reviewDirectory = path.join(stateRoot, 'mcv', 'reviews');
+    const reviewFiles = fs.readdirSync(reviewDirectory);
+    expect(reviewFiles).toHaveLength(1);
+    expect(fs.readFileSync(path.join(reviewDirectory, reviewFiles[0]), 'utf8'))
+      .toContain('# Rules');
 
     vi.mocked(console.log).mockClear();
     await deployWithGlobalProfile(['--dry-run', '--json'], deviceContext('win32'));
@@ -132,6 +138,7 @@ describe('mcv deploy', () => {
         ]),
       }),
     );
+    expect(fs.readdirSync(reviewDirectory)).toHaveLength(1);
     expect(fs.existsSync(path.join(homeDir, '.claude', 'CLAUDE.md'))).toBe(false);
   });
 
@@ -154,9 +161,7 @@ describe('mcv deploy', () => {
     await deployWithGlobalProfile(['--dry-run', '--json'], deviceContext('win32'));
     const json = JSON.parse(String(vi.mocked(console.log).mock.calls[0][0]));
     expect(json).toMatchObject({ status: 'planned' });
-    expect(plain).toContain(
-      'Satisfied via link · external · Claude Code · 1 Skill package · 1 affected file',
-    );
+    expect(plain).toContain('Linked Skill outcomes: 1 satisfied, 0 blocked.');
     expect(json.linkOutcomes).toEqual([expect.objectContaining({
       status: 'satisfied-via-link',
       ownership: 'external',
@@ -182,7 +187,7 @@ describe('mcv deploy', () => {
     fs.mkdirSync(path.dirname(sourceSkill), { recursive: true });
     fs.writeFileSync(sourceSkill, '# Review\n');
 
-    await deployWithGlobalProfile(['--dry-run'], deviceContext());
+    await deployWithGlobalProfile(['--dry-run', '--verbose'], deviceContext());
     const planText = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
     expect(planText).toContain('Physical materialization');
     expect(planText).toContain('Managed-link projection');
@@ -213,7 +218,7 @@ describe('mcv deploy', () => {
     await deployWithGlobalProfile(['--dry-run'], deviceContext());
     const planText = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
     expect(planText).toContain('Topology migration');
-    expect(planText).toContain('[not selected]');
+    expect(planText).toContain('1 not selected');
     expect(planText).toContain('[destructive]');
     expect(planText).toContain('Topology migration available');
 
@@ -302,7 +307,7 @@ describe('mcv deploy', () => {
     fs.mkdirSync(divergentLegacySkill, { recursive: true });
     fs.writeFileSync(path.join(divergentLegacySkill, 'SKILL.md'), '# Legacy TDD\n');
 
-    await deployWithGlobalProfile(['--dry-run'], deviceContext('win32'));
+    await deployWithGlobalProfile(['--dry-run', '--verbose'], deviceContext('win32'));
     expect(fs.existsSync(path.join(duplicateLegacySkill, 'SKILL.md'))).toBe(true);
     expect(vi.mocked(console.log)).toHaveBeenCalledWith(
       expect.stringContaining('[duplicate:codex-legacy] grill-me'),

@@ -1,5 +1,34 @@
 import { renderIssuePlain } from './color.js';
 import { restoreLayoutLabel } from './restore-layout.js';
+import { renderCriticalIssues, summarizeIssues, withoutNextActions } from './human-document.js';
+export function renderRestorePlanDocument(plan) {
+    const restoreCount = plan.changes.filter((change) => change.action === 'restore').length;
+    const deleteCount = plan.changes.length - restoreCount;
+    const summary = [
+        'Restore Plan: latest complete deployment backup',
+        ...(plan.backup ? [`Backup time: ${plan.backup.createdAt}`] : []),
+        `Changes: ${restoreCount} restore, ${deleteCount} delete.`,
+        ...(deleteCount > 0 ? [`[destructive] Deletes selected by Restore: ${deleteCount}.`] : []),
+        summarizeIssues(plan.issues),
+        ...renderCriticalIssues(plan.issues),
+    ];
+    if (plan.status === 'failed')
+        summary.push(`Error: ${plan.error.message}`);
+    const hasReviewDetails = plan.changes.length > 0
+        || plan.issues.some((issue) => issue.details)
+        || (plan.status === 'failed' && Boolean(plan.error.technicalDetails));
+    return {
+        operation: 'restore',
+        title: 'Restore Plan',
+        summary,
+        details: hasReviewDetails ? renderRestorePlanPlain(plan) : [],
+        nextActions: [
+            ...(plan.changes.length > 0 ? ['Review every affected path before confirming Restore.'] : []),
+            ...plan.nextActions,
+        ],
+        detailPolicy: 'review',
+    };
+}
 export function renderRestorePlanPlain(plan) {
     const lines = ['Restore Plan: latest complete deployment backup'];
     if (plan.backup)
@@ -44,9 +73,31 @@ export function renderRestoreResultPlain(result) {
                 lines.push(`  ${detail}`);
         }
     }
-    if (result.status === 'failed')
+    if (result.status === 'failed') {
         lines.push(`Error: ${result.error.message}`);
+        if (result.error.technicalDetails)
+            lines.push(`Details: ${result.error.technicalDetails}`);
+    }
     for (const action of result.nextActions)
         lines.push(`Next: ${action}`);
     return lines;
+}
+export function renderRestoreResultDocument(result) {
+    const full = renderRestoreResultPlain(result);
+    const overflowSummary = result.status === 'succeeded'
+        ? [`Restored ${result.data?.appliedChangeIds.length ?? 0} change(s) from the latest backup.`]
+        : [
+            `Restore ${result.status}.`,
+            `Issues: ${result.issues.length}`,
+            ...(result.status === 'failed' ? [`Error: ${result.error.message}`] : []),
+        ];
+    return {
+        operation: 'restore',
+        title: 'Restore Result',
+        summary: [],
+        overflowSummary,
+        details: withoutNextActions(full),
+        nextActions: result.nextActions,
+        detailPolicy: 'overflow',
+    };
 }

@@ -1,6 +1,7 @@
 import { applyMigrationPlan, applyBindPlan, applyUnbindPlan, createBindPlan, createMigrationPlan, createUnbindPlan, inspectRepository, } from '../operations/repository.js';
-import { renderBindPlain, renderMigrationPlain, renderRepositoryPlain, renderUnbindPlain, } from '../renderers/repository.js';
+import { renderBindPlain, renderMigrationDocument, renderRepositoryPlain, renderUnbindPlain, } from '../renderers/repository.js';
 import { renderJson } from '../renderers/json.js';
+import { presentHumanDocument } from '../cli/human-output.js';
 export function showRepository(context, options = {}) {
     const report = inspectRepository(context);
     render(report, options, renderRepositoryPlain);
@@ -34,8 +35,9 @@ export function migrate(context, repositoryPath, options = {}) {
     if (options.json)
         console.log(renderJson(contract));
     else
-        for (const line of renderMigrationPlain(contract))
-            console.log(line);
+        presentHumanDocument(context, renderMigrationDocument(contract), {
+            verbose: options.verbose,
+        });
     if (contract.status === 'failed')
         process.exitCode = 1;
     return contract;

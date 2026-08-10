@@ -2,16 +2,17 @@ import { OPERATION_SCHEMA_VERSION, } from '../operations/contracts.js';
 import { createProfileService, } from '../profiles/service.js';
 import { resolveBoundRepository } from '../utils/repository.js';
 import { renderJson } from '../renderers/json.js';
-import { renderProfileListPlain, renderProfileMutationPlain, renderProfileShowPlain, } from '../renderers/profile.js';
+import { renderProfileListDocument, renderProfileMutationDocument, renderProfileShowDocument, } from '../renderers/profile.js';
+import { presentHumanDocument } from '../cli/human-output.js';
 export function listProfiles(context, options = {}) {
     try {
         const report = buildListReport(context);
-        renderList(report, options);
+        renderList(context, report, options);
         return report;
     }
     catch (error) {
         const failed = failedReport('list', context, error);
-        renderFailed(failed, options);
+        renderFailed(context, failed, options);
         process.exitCode = 1;
         return failed;
     }
@@ -19,12 +20,12 @@ export function listProfiles(context, options = {}) {
 export function showProfile(context, profileId, options = {}) {
     try {
         const report = buildShowReport(context, profileId);
-        renderShow(report, options);
+        renderShow(context, report, options);
         return report;
     }
     catch (error) {
         const failed = failedReport('show', context, error);
-        renderFailed(failed, options);
+        renderFailed(context, failed, options);
         process.exitCode = 1;
         return failed;
     }
@@ -37,7 +38,7 @@ export function createProfile(context, profileId, options = {}) {
         assets: options.add,
         ...expectedRevisions(inventory, options.expectedRevision),
     }));
-    renderMutation(report, options);
+    renderMutation(context, report, options);
     if (report.status !== 'succeeded')
         process.exitCode = 1;
     return report;
@@ -51,7 +52,7 @@ export function editProfile(context, profileId, options = {}) {
         removeAssets: options.remove,
         ...expectedRevisions(inventory, options.expectedRevision),
     }));
-    renderMutation(report, options);
+    renderMutation(context, report, options);
     if (report.status !== 'succeeded')
         process.exitCode = 1;
     return report;
@@ -61,7 +62,7 @@ export function deleteProfile(context, profileId, options = {}) {
         id: profileId,
         ...expectedRevisions(inventory, options.expectedRevision),
     }));
-    renderMutation(report, options);
+    renderMutation(context, report, options);
     if (report.status !== 'succeeded')
         process.exitCode = 1;
     return report;
@@ -266,35 +267,31 @@ function immutableIdGuidance(command) {
     }
     return [];
 }
-function renderList(report, options) {
+function renderList(context, report, options) {
     if (options.json) {
         console.log(renderJson(report));
         return;
     }
-    for (const line of renderProfileListPlain(report))
-        console.log(line);
+    presentHumanDocument(context, renderProfileListDocument(report), { verbose: options.verbose });
 }
-function renderShow(report, options) {
+function renderShow(context, report, options) {
     if (options.json) {
         console.log(renderJson(report));
         return;
     }
-    for (const line of renderProfileShowPlain(report))
-        console.log(line);
+    presentHumanDocument(context, renderProfileShowDocument(report), { verbose: options.verbose });
 }
-function renderMutation(report, options) {
+function renderMutation(context, report, options) {
     if (options.json) {
         console.log(renderJson(report));
         return;
     }
-    for (const line of renderProfileMutationPlain(report))
-        console.log(line);
+    presentHumanDocument(context, renderProfileMutationDocument(report), { verbose: options.verbose });
 }
-function renderFailed(report, options) {
+function renderFailed(context, report, options) {
     if (options.json) {
         console.log(renderJson(report));
         return;
     }
-    for (const line of renderProfileMutationPlain(report))
-        console.log(line);
+    presentHumanDocument(context, renderProfileMutationDocument(report), { verbose: options.verbose });
 }

@@ -105,21 +105,26 @@ describe('mcv restore', () => {
     expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain('Restore failed.');
   });
 
-  it('prints an English Restore Plan without changing target files', async () => {
+  it('prints a concise Restore summary with a full local review without changing target files', async () => {
     const targetPath = path.join(testRoot, 'home', 'settings.json');
     createCompleteBackup(targetPath, 'deployed content', 'original content');
 
-    await createProgram({ homeDir: stateRoot, platform: 'win32', env: { APPDATA: stateRoot } })
+    await createProgram({
+      homeDir: stateRoot,
+      platform: 'win32',
+      env: { APPDATA: stateRoot, LOCALAPPDATA: stateRoot },
+    })
       .parseAsync(['node', 'mcv', 'restore', '--global', '--dry-run']);
 
-    expect(vi.mocked(console.log).mock.calls.map(([line]) => line)).toEqual(expect.arrayContaining([
-      'Backup time: 2026-07-19T00:00:00.000Z',
-      `  [restore] ${targetPath} [Ordinary file]`,
-      'Summary: 1 change(s) to restore, 0 change(s) to delete.',
-      'Managed-link projections: 0',
-      'Physical packages: 0',
-      expect.stringContaining('Next:'),
-    ]));
+    const output = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(output).toContain('Restore Plan: latest complete deployment backup');
+    expect(output).toContain('Changes: 1 restore, 0 delete.');
+    expect(output).toContain('Full review:');
+    expect(output).not.toContain(targetPath);
+    const reviewDirectory = path.join(stateRoot, 'mcv', 'reviews');
+    const reviewFiles = fs.readdirSync(reviewDirectory);
+    expect(fs.readFileSync(path.join(reviewDirectory, reviewFiles[0]), 'utf8'))
+      .toContain(`  [restore] ${targetPath} [Ordinary file]`);
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('deployed content');
     expect(fs.existsSync(path.join(stateRoot, 'mcv', 'restore-backups'))).toBe(false);
   });

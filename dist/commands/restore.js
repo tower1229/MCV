@@ -1,7 +1,8 @@
 import { createInterface } from 'readline/promises';
 import { applyRestorePlan, createRestorePlan, } from '../operations/restore.js';
 import { renderJson } from '../renderers/json.js';
-import { renderRestorePlanPlain, renderRestoreResultPlain } from '../renderers/restore.js';
+import { renderRestorePlanDocument, renderRestoreResultDocument } from '../renderers/restore.js';
+import { presentHumanDocument } from '../cli/human-output.js';
 export async function restoreLatestBackup(context, dependencies = {}, options = {}) {
     if (options.global === true && typeof options.target === 'string' && options.target.length > 0) {
         console.error('options --target and --global cannot be used together');
@@ -15,8 +16,9 @@ export async function restoreLatestBackup(context, dependencies = {}, options = 
         if (options.json)
             console.log(renderJson(reviewPlan));
         else
-            for (const line of renderRestorePlanPlain(reviewPlan))
-                console.log(line);
+            presentHumanDocument(context, renderRestorePlanDocument(reviewPlan), {
+                verbose: options.verbose,
+            });
         if (reviewPlan.status === 'failed')
             process.exitCode = 1;
         return;
@@ -27,8 +29,9 @@ export async function restoreLatestBackup(context, dependencies = {}, options = 
         if (options.json)
             console.log(renderJson(result));
         else
-            for (const line of renderRestoreResultPlain(result))
-                console.log(line);
+            presentHumanDocument(context, renderRestoreResultDocument(result), {
+                verbose: options.verbose,
+            });
         return;
     }
     const cancellation = new AbortController();
@@ -36,8 +39,9 @@ export async function restoreLatestBackup(context, dependencies = {}, options = 
     process.on('SIGINT', handleInterrupt);
     try {
         if (!options.json && !options.yes) {
-            for (const line of renderRestorePlanPlain(reviewPlan))
-                console.log(line);
+            presentHumanDocument(context, renderRestorePlanDocument(reviewPlan), {
+                verbose: options.verbose,
+            });
         }
         if (!options.yes) {
             if (!process.stdin.isTTY && !dependencies.confirmRestore) {
@@ -58,8 +62,9 @@ export async function restoreLatestBackup(context, dependencies = {}, options = 
                     changeIds: reviewPlan.changes.map((change) => change.id),
                 }, { signal: cancellation.signal });
                 process.exitCode = 130;
-                for (const line of renderRestoreResultPlain(result))
-                    console.log(line);
+                presentHumanDocument(context, renderRestoreResultDocument(result), {
+                    verbose: options.verbose,
+                });
                 return;
             }
             if (!confirmed) {
@@ -76,8 +81,9 @@ export async function restoreLatestBackup(context, dependencies = {}, options = 
         if (options.json)
             console.log(renderJson(result));
         else
-            for (const line of renderRestoreResultPlain(result))
-                console.log(line);
+            presentHumanDocument(context, renderRestoreResultDocument(result), {
+                verbose: options.verbose,
+            });
         await new Promise((resolve) => setImmediate(resolve));
     }
     finally {

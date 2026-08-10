@@ -4,11 +4,13 @@ import {
   type StatusReport,
 } from '../operations/status.js';
 import { renderJson } from '../renderers/json.js';
-import { renderStatusPlain } from '../renderers/status.js';
+import { renderStatusDocument } from '../renderers/status.js';
+import { presentHumanDocument } from '../cli/human-output.js';
 
 export interface StatusOptions {
   json?: boolean;
   plain?: boolean;
+  verbose?: boolean;
 }
 
 export async function showStatus(
@@ -17,6 +19,6 @@ export async function showStatus(
 ): Promise<StatusReport> {
   const report = await inspectStatus(context);
   if (options.json) console.log(renderJson(report));
-  else for (const line of renderStatusPlain(report)) console.log(line);
+  else presentHumanDocument(context, renderStatusDocument(report), { verbose: options.verbose });
   return report;
 }

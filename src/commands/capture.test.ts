@@ -46,7 +46,7 @@ describe('mcv capture', () => {
   const deviceContext = (platform: NodeJS.Platform = 'darwin') => ({
     homeDir,
     platform,
-    env: { APPDATA: stateRoot },
+    env: { APPDATA: stateRoot, LOCALAPPDATA: stateRoot },
   });
 
   it('prints one safe Capture Plan JSON document without writing', async () => {
@@ -75,10 +75,11 @@ describe('mcv capture', () => {
     });
     expect(JSON.stringify(plan)).toContain('must-not-leak');
     expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
+    expect(fs.existsSync(path.join(stateRoot, 'mcv', 'reviews'))).toBe(false);
     expect(readFileIfPresent(path.join(stateRoot, 'mcv', 'config.json'))).toBeUndefined();
   });
 
-  it('prints an English grouped Capture Plan without writing', async () => {
+  it('prints a concise Capture summary and writes the full review outside the Repository', async () => {
     await createProgram(deviceContext('win32')).parseAsync([
       'node',
       'mcv',
@@ -88,10 +89,29 @@ describe('mcv capture', () => {
 
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(output).toContain(`Capture Plan: ${repositoryPath}`);
-    expect(output).toContain('Claude Code / File');
-    expect(output).toContain('[add] settings.json');
-    expect(output).toContain('must-not-leak');
+    expect(output).toContain('Changes: 1');
+    expect(output).toContain('Full review:');
+    expect(output).not.toContain('must-not-leak');
+    const reviewDirectory = path.join(stateRoot, 'mcv', 'reviews');
+    const reviewFiles = fs.readdirSync(reviewDirectory);
+    expect(reviewFiles).toHaveLength(1);
+    expect(fs.readFileSync(path.join(reviewDirectory, reviewFiles[0]), 'utf8'))
+      .toContain('must-not-leak');
     expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
+  });
+
+  it('prints the complete Capture review inline with --verbose', async () => {
+    await createProgram(deviceContext('win32')).parseAsync([
+      'node',
+      'mcv',
+      'capture',
+      '--dry-run',
+      '--verbose',
+    ]);
+
+    const output = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(output).toContain('Full review:');
+    expect(output).toContain('must-not-leak');
   });
 
   it('prints one structured Result JSON document for --yes', async () => {
@@ -158,7 +178,7 @@ describe('mcv capture', () => {
     expect(fs.readFileSync(repositoryRules, 'utf8')).toBe('# Keep until reviewed\n');
   });
 
-  it('previews faithful content and does not write when the user declines', async () => {
+  it('provides a faithful review file and does not write when the user declines', async () => {
     const confirmCapture = vi.fn().mockResolvedValue(false);
 
     await createProgram(
@@ -167,7 +187,11 @@ describe('mcv capture', () => {
     ).parseAsync(['node', 'mcv', 'capture']);
 
     const preview = vi.mocked(console.log).mock.calls.flat().join('\n');
-    expect(preview).toContain('must-not-leak');
+    expect(preview).not.toContain('must-not-leak');
+    const reviewDirectory = path.join(stateRoot, 'mcv', 'reviews');
+    const reviewFiles = fs.readdirSync(reviewDirectory);
+    expect(fs.readFileSync(path.join(reviewDirectory, reviewFiles[0]), 'utf8'))
+      .toContain('must-not-leak');
     expect(confirmCapture).toHaveBeenCalledOnce();
     expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
   });

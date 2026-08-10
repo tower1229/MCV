@@ -116,6 +116,30 @@ describe('mcv profile', () => {
     ]));
   });
 
+  it('externalizes a large Profile list while keeping counts in the terminal', async () => {
+    writeProfilesDocument(repositoryPath, {
+      schemaVersion: 1,
+      profiles: Object.fromEntries([
+        ['global', { assets: ['rule:canonical'] }],
+        ...Array.from({ length: 41 }, (_, index) => [
+          `profile-${String(index).padStart(2, '0')}`,
+          { assets: [] },
+        ] as const),
+      ]),
+    });
+
+    await program().parseAsync(['node', 'mcv', 'profile', 'list']);
+
+    const output = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(output).toContain('Profiles: 42');
+    expect(output).toContain('Full review:');
+    expect(output).not.toContain('profile-40');
+    const reviewDirectory = path.join(stateRoot, 'mcv', 'reviews');
+    const reviewFiles = fs.readdirSync(reviewDirectory);
+    expect(fs.readFileSync(path.join(reviewDirectory, reviewFiles[0]), 'utf8'))
+      .toContain('profile-40');
+  });
+
   it('creates and inspects a dev Profile through CLI JSON alone', async () => {
     await program().parseAsync([
       'node', 'mcv', 'profile', 'create', 'dev',
@@ -309,7 +333,7 @@ describe('mcv profile', () => {
     return createProgram({
       homeDir: stateRoot,
       platform: 'win32',
-      env: { APPDATA: stateRoot },
+      env: { APPDATA: stateRoot, LOCALAPPDATA: stateRoot },
       pathEnv: '',
     });
   }

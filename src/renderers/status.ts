@@ -1,6 +1,30 @@
 import type { StatusReport } from '../operations/status.js';
+import type { HumanDocument } from '../cli/human-output.js';
 import { displaySkillSurface } from '../core/skill-surfaces.js';
 import { styleText } from './color.js';
+
+export function renderStatusDocument(report: StatusReport): HumanDocument {
+  const full = renderStatusPlain(report);
+  const overflowSummary = full.filter((line) =>
+    line.startsWith('Repository:')
+    || line.startsWith('Git:')
+    || line.startsWith('Pending deployment:')
+    || line.startsWith('Post-deploy local state:')
+    || line.startsWith('Environment:')
+    || line.startsWith('Last operation'));
+  overflowSummary.push(
+    `Details: ${report.linkFacts.length} linked Skill facts, ${report.postDeployLocalState.contentDrifts.length + report.postDeployLocalState.topologyDrifts.length} Skill Drift entries, ${report.environment.ideSupport.length} IDEs.`,
+  );
+  return {
+    operation: 'status',
+    title: 'Overview Report',
+    summary: [],
+    overflowSummary,
+    details: full,
+    nextActions: [],
+    detailPolicy: 'overflow',
+  };
+}
 
 export function renderStatusPlain(report: StatusReport): string[] {
   const lines = [

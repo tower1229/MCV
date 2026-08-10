@@ -8,11 +8,12 @@ import {
   type DeploySelection,
 } from '../operations/deploy.js';
 import { validateProjectTargetRoot } from '../core/project-target.js';
-import { renderDeployPlanPlain, renderDeployResultPlain } from '../renderers/deploy.js';
+import { renderDeployPlanDocument, renderDeployResultDocument } from '../renderers/deploy.js';
 import { renderJson } from '../renderers/json.js';
 import { createAdapterDefinitions } from '../adapters/index.js';
 import { askInTerminal, withInterruptsIgnored } from '../cli/prompt.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
+import { presentHumanDocument } from '../cli/human-output.js';
 
 export interface DeployDependencies {
   confirmDeploy?: () => Promise<boolean | undefined>;
@@ -26,6 +27,7 @@ export interface DeployOptions {
   global?: boolean;
   target?: string;
   profiles?: string[];
+  verbose?: boolean;
 }
 
 export async function deployConfigurations(
@@ -120,7 +122,9 @@ export async function deployConfigurations(
   const reviewPlan = await createDeployPlan(context, built.request);
   if (options.dryRun) {
     if (options.json) console.log(renderJson(reviewPlan));
-    else for (const line of renderDeployPlanPlain(reviewPlan)) console.log(line);
+    else presentHumanDocument(context, renderDeployPlanDocument(reviewPlan), {
+      verbose: options.verbose,
+    });
     if (reviewPlan.status === 'failed') process.exitCode = 1;
     return;
   }
@@ -149,7 +153,9 @@ export async function deployConfigurations(
     return;
   }
   if (!options.json && !options.yes) {
-    for (const line of renderDeployPlanPlain(reviewPlan)) console.log(line);
+    presentHumanDocument(context, renderDeployPlanDocument(reviewPlan), {
+      verbose: options.verbose,
+    });
   }
   if (!options.yes) {
     if (!process.stdin.isTTY && !dependencies.confirmDeploy) {
@@ -186,7 +192,9 @@ export async function deployConfigurations(
     applyDeployPlan(context, reviewPlan, selection, applyOptions));
   if (result.status !== 'succeeded') process.exitCode = result.status === 'blocked' ? 3 : 1;
   if (options.json) console.log(renderJson(result));
-  else for (const line of renderDeployResultPlain(result)) console.log(line);
+  else presentHumanDocument(context, renderDeployResultDocument(result), {
+    verbose: options.verbose,
+  });
 }
 
 async function confirmInTerminal(): Promise<boolean | undefined> {

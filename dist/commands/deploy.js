@@ -1,11 +1,12 @@
 import { GLOBAL_PROFILE_ID } from '../profiles/contracts.js';
 import { buildDeployRequest, createDeployPlan, applyDeployPlan, } from '../operations/deploy.js';
 import { validateProjectTargetRoot } from '../core/project-target.js';
-import { renderDeployPlanPlain, renderDeployResultPlain } from '../renderers/deploy.js';
+import { renderDeployPlanDocument, renderDeployResultDocument } from '../renderers/deploy.js';
 import { renderJson } from '../renderers/json.js';
 import { createAdapterDefinitions } from '../adapters/index.js';
 import { askInTerminal, withInterruptsIgnored } from '../cli/prompt.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
+import { presentHumanDocument } from '../cli/human-output.js';
 export async function deployConfigurations(context, dependencies = {}, options = {}) {
     const profileArgs = options.profiles ?? [];
     const wantsGlobal = options.global === true;
@@ -92,8 +93,9 @@ export async function deployConfigurations(context, dependencies = {}, options =
         if (options.json)
             console.log(renderJson(reviewPlan));
         else
-            for (const line of renderDeployPlanPlain(reviewPlan))
-                console.log(line);
+            presentHumanDocument(context, renderDeployPlanDocument(reviewPlan), {
+                verbose: options.verbose,
+            });
         if (reviewPlan.status === 'failed')
             process.exitCode = 1;
         return;
@@ -117,8 +119,9 @@ export async function deployConfigurations(context, dependencies = {}, options =
         return;
     }
     if (!options.json && !options.yes) {
-        for (const line of renderDeployPlanPlain(reviewPlan))
-            console.log(line);
+        presentHumanDocument(context, renderDeployPlanDocument(reviewPlan), {
+            verbose: options.verbose,
+        });
     }
     if (!options.yes) {
         if (!process.stdin.isTTY && !dependencies.confirmDeploy) {
@@ -157,8 +160,9 @@ export async function deployConfigurations(context, dependencies = {}, options =
     if (options.json)
         console.log(renderJson(result));
     else
-        for (const line of renderDeployResultPlain(result))
-            console.log(line);
+        presentHumanDocument(context, renderDeployResultDocument(result), {
+            verbose: options.verbose,
+        });
 }
 async function confirmInTerminal() {
     const outcome = await askInTerminal('Write these changes to this device? [y/N] ');

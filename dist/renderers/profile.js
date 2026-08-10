@@ -1,3 +1,36 @@
+import { withoutNextActions } from './human-document.js';
+export function renderProfileListDocument(report) {
+    return {
+        operation: 'profile',
+        title: 'Profile List',
+        summary: [],
+        overflowSummary: [
+            `Repository: ${report.repositoryPath}`,
+            `Profiles: ${report.profiles.length}`,
+            `Unassigned: ${report.unassignedCount} assets`,
+        ],
+        details: withoutNextActions(renderProfileListPlain(report)),
+        nextActions: report.nextActions,
+        detailPolicy: 'overflow',
+    };
+}
+export function renderProfileShowDocument(report) {
+    const title = report.profile.title ? ` · ${truncate(report.profile.title)}` : '';
+    return {
+        operation: 'profile',
+        title: 'Profile Details',
+        summary: [],
+        overflowSummary: [
+            `Repository: ${report.repositoryPath}`,
+            `Profile: ${report.profile.id}${title}`,
+            `Assets: ${report.profile.assetCount}`,
+            `Unassigned: ${report.unassignedCount} assets`,
+        ],
+        details: withoutNextActions(renderProfileShowPlain(report)),
+        nextActions: report.nextActions,
+        detailPolicy: 'overflow',
+    };
+}
 export function renderProfileListPlain(report) {
     const lines = [
         `Repository: ${report.repositoryPath}`,
@@ -39,6 +72,8 @@ export function renderProfileMutationPlain(report) {
         ];
         if (report.error.code)
             lines.push(`Error: ${report.error.code}`);
+        if (report.error.technicalDetails)
+            lines.push(`Details: ${report.error.technicalDetails}`);
         for (const action of report.nextActions)
             lines.push(`Next: ${action}`);
         return lines;
@@ -61,4 +96,25 @@ export function renderProfileMutationPlain(report) {
     for (const action of report.nextActions)
         lines.push(`Next: ${action}`);
     return lines;
+}
+export function renderProfileMutationDocument(report) {
+    const full = renderProfileMutationPlain(report);
+    const overflowSummary = report.status === 'failed'
+        ? [
+            `Profile ${report.command} failed: ${report.error.message}`,
+            `Error: ${report.error.code}`,
+        ]
+        : [`Profile ${report.command} succeeded.`];
+    return {
+        operation: 'profile',
+        title: 'Profile Result',
+        summary: [],
+        overflowSummary,
+        details: withoutNextActions(full),
+        nextActions: report.nextActions,
+        detailPolicy: 'overflow',
+    };
+}
+function truncate(value) {
+    return value.length <= 120 ? value : `${value.slice(0, 117)}...`;
 }

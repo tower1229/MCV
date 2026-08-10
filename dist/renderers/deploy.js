@@ -1,5 +1,50 @@
 import { displaySkillSurface } from '../core/skill-surfaces.js';
 import { renderIssuePlain } from './color.js';
+import { renderCriticalIssues, summarizeIssues, withoutNextActions } from './human-document.js';
+export function renderDeployPlanDocument(plan) {
+    const selectedCount = plan.changes.filter((change) => change.defaultSelected).length;
+    const destructive = plan.changes.filter((change) => change.change === 'delete' || change.deploymentKind === 'topology-migration');
+    const topologyMigrations = destructive.filter((change) => change.deploymentKind === 'topology-migration');
+    const summary = [
+        `Deploy Plan: ${plan.repositoryPath ?? 'not bound'}`,
+        `Scope: ${plan.scope} · Target: ${plan.targetRoot}`,
+        `Changes: ${plan.changes.length} (${countDeployChanges(plan, 'add')} add, ${countDeployChanges(plan, 'modify')} modify, ${countDeployChanges(plan, 'delete')} delete).`,
+        `Selection: ${selectedCount} selected, ${plan.changes.length - selectedCount} not selected, ${destructive.length} destructive.`,
+        summarizeIssues(plan.issues),
+        ...(plan.linkOutcomes.length > 0 ? [summarizeLinkOutcomes(plan)] : []),
+        ...(countDeployChanges(plan, 'delete') > 0
+            ? [`[destructive] Deletes: ${countDeployChanges(plan, 'delete')} (not selected by default).`]
+            : []),
+        ...(topologyMigrations.length > 0
+            ? [`[destructive] Topology migration: ${topologyMigrations.length} (${topologyMigrations.filter((change) => change.defaultSelected).length} selected, ${topologyMigrations.filter((change) => !change.defaultSelected).length} not selected).`]
+            : []),
+        ...renderCriticalIssues(plan.issues),
+    ];
+    if (plan.status === 'failed')
+        summary.push(`Error: ${plan.error.message}`);
+    const hasReviewDetails = plan.changes.length > 0
+        || plan.linkOutcomes.length > 0
+        || plan.issues.some((issue) => issue.details)
+        || (plan.status === 'failed' && Boolean(plan.error.technicalDetails));
+    return {
+        operation: 'deploy',
+        title: 'Deploy Plan',
+        summary,
+        details: hasReviewDetails ? renderDeployPlanPlain(plan) : [],
+        nextActions: [
+            ...(plan.changes.length > 0 ? ['Review the complete diff before confirming Deploy.'] : []),
+            ...plan.nextActions,
+        ],
+        detailPolicy: 'review',
+    };
+}
+function countDeployChanges(plan, kind) {
+    return plan.changes.filter((change) => change.change === kind).length;
+}
+function summarizeLinkOutcomes(plan) {
+    const satisfied = plan.linkOutcomes.filter((outcome) => outcome.status === 'satisfied-via-link').length;
+    return `Linked Skill outcomes: ${satisfied} satisfied, ${plan.linkOutcomes.length - satisfied} blocked.`;
+}
 export function renderDeployPlanPlain(plan) {
     const lines = [`Deploy Plan: ${plan.repositoryPath ?? 'not bound'}`];
     for (const outcome of plan.linkOutcomes) {
@@ -28,6 +73,15 @@ export function renderDeployPlanPlain(plan) {
     lines.push(`Summary: ${plan.changes.length} item(s).`);
     for (const issue of plan.issues) {
         lines.push(renderIssuePlain(issue));
+        if (issue.details) {
+            for (const detail of issue.details.split('\n'))
+                lines.push(`  ${detail}`);
+        }
+    }
+    if (plan.status === 'failed') {
+        lines.push(`Error: ${plan.error.message}`);
+        if (plan.error.technicalDetails)
+            lines.push(`Details: ${plan.error.technicalDetails}`);
     }
     for (const action of plan.nextActions)
         lines.push(`Next: ${action}`);
@@ -81,6 +135,25 @@ export function renderDeployResultPlain(result) {
     for (const action of result.nextActions)
         lines.push(`Next: ${action}`);
     return lines;
+}
+export function renderDeployResultDocument(result) {
+    const full = renderDeployResultPlain(result);
+    const overflowSummary = result.status === 'succeeded'
+        ? [`Deployed ${result.data?.appliedChangeIds.length ?? 0} selected item(s) from ${result.repositoryPath}.`]
+        : [
+            `Deploy ${result.status}.`,
+            `Issues: ${result.issues.length}`,
+            ...(result.status === 'failed' ? [`Error: ${result.error.message}`] : []),
+        ];
+    return {
+        operation: 'deploy',
+        title: 'Deploy Result',
+        summary: [],
+        overflowSummary,
+        details: withoutNextActions(full),
+        nextActions: result.nextActions,
+        detailPolicy: 'overflow',
+    };
 }
 function renderChange(change) {
     const strategy = change.strategy === 'replace-entire-file'

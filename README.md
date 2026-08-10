@@ -141,8 +141,8 @@ mcv restore
 
 ```text
 mcv            打印简洁 Overview 后退出；TTY 与非 TTY 行为一致
-mcv capture    一次性 Capture Plan/确认/Apply；--dry-run/--yes/--json
-mcv deploy     一次性 Deploy Plan/确认/Apply；默认项目 scope；需 Profile 或 --global；裸调用 exit 2
+mcv capture    一次性 Capture Plan/确认/Apply；--dry-run/--yes/--json/--verbose
+mcv deploy     一次性 Deploy Plan/确认/Apply；默认项目 scope；需 Profile 或 --global；支持 --verbose；裸调用 exit 2
 mcv profile    Profile 维护 TUI（TTY）或 list/show/create/edit/delete 子命令
 
 mcv status     Overview 兼容别名；--json 输出结构化 Report
@@ -152,9 +152,13 @@ mcv bind [PATH] 打印 Bind Plan；--yes/--dry-run/--json 控制写入
 mcv unbind     打印 Unbind Plan；--yes/--dry-run/--json 控制写入
 mcv migrate    打印 Migration Plan；--yes/--dry-run/--json 控制写入
 mcv discover   打印 Environment Report；--json 输出结构化 Report
-mcv restore    一次性 Restore Plan/确认/Apply；--dry-run/--yes/--json
+mcv restore    一次性 Restore Plan/确认/Apply；--dry-run/--yes/--json/--verbose
 mcv mcp        本地 stdio MCP Server（集成入口；含 inspect_inventory / read_assets / update_profiles / deploy_profiles）
 ```
+
+人类可读的 Capture、Deploy 和 Restore Plan 默认只在终端保留变更数量、选择状态、删除/拓扑迁移等破坏性标记、Issues 和 Next Action；完整 Diff、路径、hash 与技术详情写入用户本地的短期 Review Artifact，并同时打印标准 `file://` URL 与绝对路径。macOS 使用 `~/Library/Application Support/mcv/reviews/`，Windows 使用 `%LOCALAPPDATA%\mcv\reviews\`，Linux 使用 `${XDG_STATE_HOME:-~/.local/state}/mcv/reviews/`。Artifact 原子写入；POSIX 目录/文件权限为 `0700`/`0600`，Windows 继承每用户 `%LOCALAPPDATA%` 的 ACL。每次创建 Artifact 时会清理超过 24 小时的旧文件，并把现有集合收敛到最多 10 个文件和 50 MiB；如果之后不再运行 MCV，过期文件不会由后台进程主动删除。Artifact 可能包含与原预览相同的明文配置值，不应分享。写入失败时 MCV 会把完整详情回退到终端，绝不会在不可审阅时继续隐藏内容。`--verbose` 在保留 Artifact 的同时把完整详情输出到终端。
+
+Overview/status、discover、Profile list/show、Migration 和失败 Result 仅在详情超过 40 行或 8 KiB 时采用相同策略；短输出保持直接显示。Review Artifact 属于 Local/Runtime 展示副作用，不修改 Repository、部署目标、Managed Receipt、backup、Baseline Snapshot 或 device operation state，也不能重放或充当 Apply 授权。`--json` 和 MCP 始终保留原有完整结构化契约且不创建 Review Artifact。
 
 删除默认不执行。只有 `mcv deploy --prune-managed` 经交互确认后，才会清理不再需要且仍由 MCV 拥有的内容：全局 scope 删除本机 state 中已记录为 managed、但仓库已不再生成的文件，以及与本次 Canonical 部署逐文件完全一致的旧 `$CODEX_HOME/skills` Skill 副本；项目 scope 仅删除出现在 `<target>/.mcv/managed.json`、哈希未漂移、且当前 selection 已不再需要的资产（Rules 只去掉未修改的 Managed Block）。`--yes` 永远拒绝删除、topology migration 与项目 prune 候选。普通 deploy 检测到 legacy Codex Skill 重复时会提示，不会自动删除；内容不同或包含链接的 legacy Skill 会保留。缺少 `managed.json` 时项目 Deploy 退回保守模式，不执行清理。
 
