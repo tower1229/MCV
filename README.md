@@ -44,7 +44,7 @@ MCV 仓库中的配置分为：
 
 ## 快速开始
 
-在完整 TTY 中直接运行 `mcv` 会打印简洁的 plain-text Overview（与 `mcv status` 同一份只读报告）后立即退出；不会进入 alternate screen。非 TTY 的无参数调用仍立即输出 help。日常入口是 `mcv`、`mcv capture`、`mcv deploy` 和 `mcv profile`；`status` 保留为兼容别名，但不作为新的日常概念宣传。低频命令（`init`、`bind`、`unbind`、`migrate`、`restore`、`repo`、`discover`）仍可用。
+直接运行 `mcv` 会打印简洁的 plain-text Overview（与 `mcv status` 同一份只读报告）后立即退出；无论 stdout 是否为 TTY 都不会进入 alternate screen，也不会把无参数调用改成 help。日常入口是 `mcv`、`mcv capture`、`mcv deploy` 和 `mcv profile`；`status` 保留为兼容别名，但不作为新的日常概念宣传。低频命令（`init`、`bind`、`unbind`、`migrate`、`restore`、`repo`、`discover`）仍可用。
 
 Capture、Deploy、Restore 以及 Repository 生命周期命令一律走一次性 Command 层：TTY 中展示分组 Plan / Diff 摘要并确认，非交互场景使用 `--dry-run`、`--yes` 或 `--json`。只读命令直接打印 Report。全屏 TUI 已从默认路径移除；仅 `mcv profile`（以及无 mutation flag 的 `mcv profile edit <id>`）保留专用 Profile 维护界面。
 
@@ -140,7 +140,7 @@ mcv restore
 ## 命令
 
 ```text
-mcv            TTY 中打印简洁 Overview 后退出；非 TTY 打印 help
+mcv            打印简洁 Overview 后退出；TTY 与非 TTY 行为一致
 mcv capture    一次性 Capture Plan/确认/Apply；--dry-run/--yes/--json
 mcv deploy     一次性 Deploy Plan/确认/Apply；默认项目 scope；需 Profile 或 --global；裸调用 exit 2
 mcv profile    Profile 维护 TUI（TTY）或 list/show/create/edit/delete 子命令
