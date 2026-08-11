@@ -6,7 +6,7 @@ import type {
 } from '../commands/profile.js';
 import type { PresentationDocument } from '../presentation/contracts.js';
 import { textLines } from '../presentation/builders.js';
-import { withoutNextActions } from './human-document.js';
+import { withoutNextActions } from './plain-details.js';
 
 export function renderProfileListDocument(report: ProfileListReport): PresentationDocument {
   return {

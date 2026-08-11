@@ -1,7 +1,7 @@
 import { jsx as _jsx } from "react/jsx-runtime";
 import { render, useApp, useInput, useWindowSize, } from 'ink';
 import { useEffect, useReducer, useRef, useState } from 'react';
-import { writeHumanReviewArtifact } from '../../cli/human-output.js';
+import { writeReviewArtifact } from '../../presentation/output.js';
 import { applyCapturePlan, createCapturePlan, } from '../../operations/capture.js';
 import { captureReviewSelection } from '../../review/capture.js';
 import { renderCapturePlanDocument } from '../../renderers/capture.js';
@@ -132,7 +132,7 @@ function CaptureReviewApp({ context, initialPlan, dependencies, }) {
     }
     return (_jsx(CaptureTuiView, { state: state, columns: windowSize.columns, rows: windowSize.rows, reviewPath: reviewPath }));
 }
-function writeReview(context, plan, write = writeHumanReviewArtifact) {
+function writeReview(context, plan, write = writeReviewArtifact) {
     const document = renderCapturePlanDocument(plan);
     if (document.details.length === 0)
         return undefined;

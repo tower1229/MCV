@@ -1,6 +1,7 @@
 import { Box, Text } from 'ink';
 import type { CaptureChange, CapturePreview } from '../../operations/capture.js';
 import { truncateDisplay } from '../profile/display-width.js';
+import { inkEmphasisProps, inkRoleProps } from '../../presentation/ink-theme.js';
 import {
   captureTuiCanApply,
   captureTuiSummary,
@@ -19,13 +20,13 @@ export interface CaptureTuiViewProps {
 export function CaptureTuiView({ state, columns, rows, reviewPath }: CaptureTuiViewProps) {
   return (
     <Box flexDirection="column" width={columns} height={rows}>
-      <Text bold>{truncateDisplay('MCV Capture Review', columns)}</Text>
+      <Text {...inkEmphasisProps()}>{truncateDisplay('MCV Capture Review', columns)}</Text>
       <Text>{truncateDisplay(statusLine(state), columns)}</Text>
-      {state.notice ? <Text color="yellow">! {truncateDisplay(state.notice, columns - 2)}</Text> : null}
+      {state.notice ? <Text {...inkRoleProps('attention')}>! {truncateDisplay(state.notice, columns - 2)}</Text> : null}
       <Box flexDirection="column" flexGrow={1}>
         <CaptureBody state={state} columns={columns} rows={rows} />
       </Box>
-      {reviewPath ? <Text dimColor>{truncateDisplay(`Review: ${reviewPath}`, columns)}</Text> : null}
+      {reviewPath ? <Text {...inkRoleProps('muted')}>{truncateDisplay(`Review: ${reviewPath}`, columns)}</Text> : null}
       <Text>{truncateDisplay(helpLine(state), columns)}</Text>
     </Box>
   );
@@ -58,12 +59,12 @@ function Changes({ state, columns, height }: { state: CaptureTuiState; columns: 
   const visible = visibleWindow(changes, state.changeCursor, height - 2);
   return (
     <Box flexDirection="column">
-      <Text bold>Changes · {state.draft.selectedChangeIds.length} selection IDs</Text>
+      <Text {...inkEmphasisProps()}>Changes · {state.draft.selectedChangeIds.length} selection IDs</Text>
       {visible.map(({ item, index }) => {
         const selected = state.draft.selectedChangeIds.includes(item.id);
         const destructive = item.change === 'delete' ? ' × Destructive ·' : '';
         return (
-          <Text key={item.id} color={item.change === 'delete' ? 'red' : selected ? 'green' : undefined}>
+          <Text key={item.id} {...inkRoleProps(item.change === 'delete' ? 'danger' : selected ? 'information' : 'muted')}>
             {truncateDisplay(
               `${index === state.changeCursor ? '›' : ' '} [${selected ? 'x' : ' '}]${destructive} ${groupLabel(item)} · ${item.change} · ${item.name}`,
               columns,
@@ -82,13 +83,13 @@ function Decisions({ state, columns, height }: { state: CaptureTuiState; columns
   const visible = visibleWindow(choices, state.decisionCursor, height - 3);
   return (
     <Box flexDirection="column">
-      <Text bold>Decision {state.decisionGroupIndex + 1}/{state.model.decisionGroups.length}</Text>
+      <Text {...inkRoleProps('decision', { emphasis: true })}>Decision {state.decisionGroupIndex + 1}/{state.model.decisionGroups.length}</Text>
       <Text>{truncateDisplay(group?.issue?.message ?? 'Choose exactly one authoritative source.', columns)}</Text>
-      <Text dimColor>{truncateDisplay(`Target: ${choices[0]?.repositoryPaths.join(', ') ?? 'unknown'}`, columns)}</Text>
+      <Text {...inkRoleProps('muted')}>{truncateDisplay(`Target: ${choices[0]?.repositoryPaths.join(', ') ?? 'unknown'}`, columns)}</Text>
       {visible.map(({ item, index }) => {
         const selected = state.draft.selectedChangeIds.includes(item.id);
         return (
-          <Text key={item.id} color={selected ? 'green' : undefined}>
+          <Text key={item.id} {...inkRoleProps(selected ? 'information' : 'muted')}>
             {truncateDisplay(
               `${index === state.decisionCursor ? '›' : ' '} [${selected ? 'x' : ' '}] ${item.sourceLabel ?? item.name}`,
               columns,
@@ -104,19 +105,19 @@ function Warnings({ state, columns, height }: { state: CaptureTuiState; columns:
   const visible = visibleWindow(state.model.warnings, state.warningCursor, height);
   return (
     <Box flexDirection="column">
-      <Text bold>Warnings · explicit confirmation required</Text>
+      <Text {...inkRoleProps('attention', { emphasis: true })}>Warnings · explicit confirmation required</Text>
       {visible.map(({ item, index }) => {
         const confirmed = state.draft.confirmedIssueIds.includes(item.confirmationId);
         return (
           <Box key={item.confirmationId} flexDirection="column">
-            <Text color={confirmed ? 'green' : 'yellow'}>
+            <Text {...inkRoleProps('attention')}>
               {truncateDisplay(
                 `${index === state.warningCursor ? '›' : ' '} [${confirmed ? 'x' : ' '}] ${item.message}`,
                 columns,
               )}
             </Text>
             {index === state.warningCursor && item.details
-              ? <Text dimColor>{truncateDisplay(`  ${item.details}`, columns)}</Text>
+              ? <Text {...inkRoleProps('muted')}>{truncateDisplay(`  ${item.details}`, columns)}</Text>
               : null}
           </Box>
         );
@@ -131,8 +132,8 @@ function Diff({ state, columns, height }: { state: CaptureTuiState; columns: num
   const lines = change.previews.flatMap(previewLines).slice(0, height - 2);
   return (
     <Box flexDirection="column">
-      <Text bold>{truncateDisplay(`Diff · ${change.sourceLabel ?? change.name}`, columns)}</Text>
-      <Text dimColor>{truncateDisplay(change.repositoryPaths.join(', '), columns)}</Text>
+      <Text {...inkEmphasisProps()}>{truncateDisplay(`Diff · ${change.sourceLabel ?? change.name}`, columns)}</Text>
+      <Text {...inkRoleProps('muted')}>{truncateDisplay(change.repositoryPaths.join(', '), columns)}</Text>
       {lines.map((line, index) => <Text key={index}>{truncateDisplay(line, columns)}</Text>)}
     </Box>
   );
@@ -142,12 +143,12 @@ function Final({ state }: { state: CaptureTuiState }) {
   const summary = captureTuiSummary(state);
   return (
     <Box flexDirection="column">
-      <Text bold>Final confirmation</Text>
+      <Text {...inkRoleProps('decision', { emphasis: true })}>Final confirmation</Text>
       <Text>Selected repository changes: {summary.selectedRepositoryChanges}</Text>
       <Text>Excluded repository changes: {summary.unselectedRepositoryChanges}</Text>
       <Text>Resolved decisions: {summary.resolvedDecisions} ({summary.skippedDecisions} skipped)</Text>
       <Text>Confirmed warnings: {summary.confirmedWarnings}/{state.model.warnings.length}</Text>
-      <Text color={captureTuiCanApply(state) ? 'green' : 'yellow'}>
+      <Text {...inkRoleProps(captureTuiCanApply(state) ? 'success' : 'decision')}>
         {captureTuiCanApply(state) ? 'Ready: Enter applies this selection.' : 'Blocked: finish every required review item.'}
       </Text>
     </Box>
@@ -159,11 +160,11 @@ function Result({ state }: { state: CaptureTuiState }) {
   if (!result) return <Text>Capture finished without a Result.</Text>;
   if (result.status === 'succeeded') {
     const applied = result.changes.filter((change) => change.decision !== 'skip').length;
-    return <Text color="green">✓ Succeeded: captured {applied} repository change(s).</Text>;
+    return <Text {...inkRoleProps('success')}>✓ Succeeded: captured {applied} repository change(s).</Text>;
   }
   return (
     <Box flexDirection="column">
-      <Text color={result.status === 'failed' ? 'red' : 'yellow'}>
+      <Text {...inkRoleProps(result.status === 'failed' ? 'danger' : 'attention')}>
         {result.status === 'failed' ? '× Failed' : '! Blocked'}: Capture did not change the Repository.
       </Text>
       {result.issues.map((issue) => <Text key={`${issue.code}-${issue.message}`}>{issue.message}</Text>)}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { StatusReport } from '../operations/status.js';
 import { renderStatusDocument, renderStatusPlain } from './status.js';
+import { renderPresentationDocument } from '../presentation/render.js';
 
 type LinkFact = StatusReport['linkFacts'][number];
 
@@ -9,8 +10,10 @@ describe('Status renderer', () => {
     const document = renderStatusDocument(statusReport([]));
 
     expect(document.detailPolicy).toBe('progressive');
-    expect(document.summary).toContain('Skills      No linked packages');
-    expect(document.details).toContain('Linked Skills: none');
+    expect(renderPresentationDocument(document, 'summary', { color: false }))
+      .toContain('Skills      No linked packages');
+    expect(renderPresentationDocument(document, 'details', { color: false }))
+      .toContain('Linked Skills: none');
   });
 
   it('uses semantic ANSI colors in a TTY and preserves complete NO_COLOR text', () => {
@@ -26,14 +29,14 @@ describe('Status renderer', () => {
       report.pendingDeployment.modify = 2;
       report.pendingDeployment.total = 2;
       report.pendingDeployment.recommended = 2;
-      const colored = renderStatusDocument(report).summary.join('\n');
+      const colored = renderPresentationDocument(renderStatusDocument(report), 'summary', { color: true });
       expect(colored).toContain('\u001b[36mMCV configuration overview');
       expect(colored).toContain('\u001b[33m! 2 pending deployment changes');
-      expect(colored).toContain('\u001b[32m✓ No missing variables');
-      expect(colored).toContain('\u001b[2m/repository');
+      expect(colored).toContain('\u001b[32mEnvironment ✓ No missing variables');
+      expect(colored).toContain('\u001b[2mRepository  /repository');
 
       process.env.NO_COLOR = '';
-      const plain = renderStatusDocument(report).summary.join('\n');
+      const plain = renderPresentationDocument(renderStatusDocument(report), 'summary', { color: false });
       expect(plain).not.toContain('\u001b[');
       expect(plain).toContain('! 2 pending deployment changes');
       expect(plain).toContain('No deletions or Advanced Cleanup');
@@ -82,7 +85,7 @@ describe('Status renderer', () => {
     ];
 
     const document = renderStatusDocument(statusReport(facts));
-    const summary = document.summary.join('\n');
+    const summary = renderPresentationDocument(document, 'summary', { color: false });
 
     expect(summary).toContain(
       'Skills      ✓ 3 linked packages healthy',
@@ -130,7 +133,9 @@ describe('Status renderer', () => {
       linkFact({ id: 'healthy', packageNames: ['healthy'] }),
     ];
 
-    const summary = renderStatusDocument(statusReport(facts)).summary.join('\n');
+    const summary = renderPresentationDocument(
+      renderStatusDocument(statusReport(facts)), 'summary', { color: false },
+    );
 
     expect(summary).toContain('Skills      5 packages · 1 healthy · 3 need review · 1 blocked');
     expect(summary).toContain('× duplicate · Codex · Blocked: link target is missing');
@@ -163,7 +168,9 @@ describe('Status renderer', () => {
       }),
     ];
 
-    const summary = renderStatusDocument(statusReport(facts)).summary.join('\n');
+    const summary = renderPresentationDocument(
+      renderStatusDocument(statusReport(facts)), 'summary', { color: false },
+    );
 
     expect(summary).toContain(
       'Coverage  Gemini CLI 1 · Antigravity 1 · Canonical Device Skill Store 1 · 1 shared',

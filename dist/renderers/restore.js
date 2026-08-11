@@ -1,6 +1,6 @@
-import { renderIssuePlain } from './color.js';
+import { textLines } from '../presentation/builders.js';
 import { restoreLayoutLabel } from './restore-layout.js';
-import { renderCriticalIssues, summarizeIssues, withoutNextActions } from './human-document.js';
+import { renderCriticalIssues, renderIssuePlain, summarizeIssues, withoutNextActions } from './plain-details.js';
 export function renderRestorePlanDocument(plan) {
     const restoreCount = plan.changes.filter((change) => change.action === 'restore').length;
     const deleteCount = plan.changes.length - restoreCount;
@@ -20,8 +20,8 @@ export function renderRestorePlanDocument(plan) {
     return {
         operation: 'restore',
         title: 'Restore Plan',
-        summary,
-        details: hasReviewDetails ? renderRestorePlanPlain(plan) : [],
+        summary: textLines(summary),
+        details: textLines(hasReviewDetails ? renderRestorePlanPlain(plan) : []),
         nextActions: [
             ...(plan.changes.length > 0 ? ['Review every affected path before confirming Restore.'] : []),
             ...plan.nextActions,
@@ -95,8 +95,8 @@ export function renderRestoreResultDocument(result) {
         operation: 'restore',
         title: 'Restore Result',
         summary: [],
-        overflowSummary,
-        details: withoutNextActions(full),
+        overflowSummary: textLines(overflowSummary),
+        details: textLines(withoutNextActions(full)),
         nextActions: result.nextActions,
         detailPolicy: 'overflow',
     };

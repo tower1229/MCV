@@ -2,8 +2,7 @@ import type { CapturePlan, CaptureResult } from '../operations/capture.js';
 import type { SkillProjection } from '../core/skills.js';
 import type { PresentationDocument } from '../presentation/contracts.js';
 import { textLines } from '../presentation/builders.js';
-import { renderIssuePlain } from './color.js';
-import { renderCriticalIssues, summarizeIssues, withoutNextActions } from './human-document.js';
+import { renderCriticalIssues, renderIssuePlain, summarizeIssues, withoutNextActions } from './plain-details.js';
 
 export function renderCapturePlanDocument(plan: CapturePlan): PresentationDocument {
   const changeCounts = {

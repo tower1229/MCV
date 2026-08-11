@@ -1,15 +1,16 @@
-import { withoutNextActions } from './human-document.js';
+import { textLines } from '../presentation/builders.js';
+import { withoutNextActions } from './plain-details.js';
 export function renderProfileListDocument(report) {
     return {
         operation: 'profile',
         title: 'Profile List',
         summary: [],
-        overflowSummary: [
+        overflowSummary: textLines([
             `Repository: ${report.repositoryPath}`,
             `Profiles: ${report.profiles.length}`,
             `Unassigned: ${report.unassignedCount} assets`,
-        ],
-        details: withoutNextActions(renderProfileListPlain(report)),
+        ]),
+        details: textLines(withoutNextActions(renderProfileListPlain(report))),
         nextActions: report.nextActions,
         detailPolicy: 'overflow',
     };
@@ -20,13 +21,13 @@ export function renderProfileShowDocument(report) {
         operation: 'profile',
         title: 'Profile Details',
         summary: [],
-        overflowSummary: [
+        overflowSummary: textLines([
             `Repository: ${report.repositoryPath}`,
             `Profile: ${report.profile.id}${title}`,
             `Assets: ${report.profile.assetCount}`,
             `Unassigned: ${report.unassignedCount} assets`,
-        ],
-        details: withoutNextActions(renderProfileShowPlain(report)),
+        ]),
+        details: textLines(withoutNextActions(renderProfileShowPlain(report))),
         nextActions: report.nextActions,
         detailPolicy: 'overflow',
     };
@@ -109,8 +110,8 @@ export function renderProfileMutationDocument(report) {
         operation: 'profile',
         title: 'Profile Result',
         summary: [],
-        overflowSummary,
-        details: withoutNextActions(full),
+        overflowSummary: textLines(overflowSummary),
+        details: textLines(withoutNextActions(full)),
         nextActions: report.nextActions,
         detailPolicy: 'overflow',
     };

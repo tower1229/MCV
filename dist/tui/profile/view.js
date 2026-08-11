@@ -2,6 +2,7 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { Box, Text } from 'ink';
 import { FILTER_OPTIONS, filteredCatalogAssets, selectedAssetIds, } from './reducer.js';
 import { padDisplay, truncateDisplay } from './display-width.js';
+import { inkColor, inkEmphasisProps, inkRoleProps } from '../../presentation/ink-theme.js';
 export function ProfileEditorView({ state, columns, rows }) {
     const leftWidth = Math.max(18, Math.floor(columns * 0.22));
     const rightWidth = Math.max(22, Math.floor(columns * 0.28));
@@ -40,7 +41,7 @@ export function ProfileEditorView({ state, columns, rows }) {
         ? 'Enter Save · Esc Cancel'
         : 'Esc Close';
     const help = 'Tab focus · ↑↓ move · Space toggle · / search · ←→ panes · Ctrl+C quit';
-    return (_jsxs(Box, { flexDirection: "column", width: columns, height: rows, children: [_jsx(Text, { bold: true, children: truncateDisplay('MCV Profile Editor', columns) }), _jsx(Text, { children: truncateDisplay(statusLine, columns) }), _jsx(Text, { children: truncateDisplay(`Search: ${state.searchQuery}${state.focus === 'search' ? '█' : ''}`, columns) }), _jsx(Text, { children: truncateDisplay(filterLine, columns) }), _jsxs(Box, { flexGrow: 1, children: [_jsxs(Box, { flexDirection: "column", width: leftWidth, borderStyle: "single", borderColor: paneColor(state, 'profiles'), children: [_jsx(Text, { bold: true, children: "Profiles" }), visibleWindow(profiles, state.profileCursor, listHeight).map((line, index) => (_jsx(Text, { children: padDisplay(line, leftWidth - 2) }, `profile-${index}`)))] }), _jsxs(Box, { flexDirection: "column", width: centerWidth, borderStyle: "single", borderColor: paneColor(state, 'assets'), children: [_jsx(Text, { bold: true, children: "Assets" }), visibleWindow(assetLines, state.assetCursor, listHeight).map((line, index) => (_jsx(Text, { children: padDisplay(line, centerWidth - 2) }, `asset-${index}`)))] }), _jsxs(Box, { flexDirection: "column", width: rightWidth, borderStyle: "single", borderColor: paneColor(state, 'selected'), children: [_jsx(Text, { bold: true, children: `Selected (${selected.length})` }), visibleWindow(selectedLines, state.selectedCursor, listHeight).map((line, index) => (_jsx(Text, { children: padDisplay(line, rightWidth - 2) }, `selected-${index}`)))] })] }), _jsx(Text, { children: truncateDisplay(`Changes: ${summary} · ${actions}`, columns) }), _jsx(Text, { children: truncateDisplay(help, columns) }), state.conflictMessage ? (_jsx(Text, { color: "yellow", children: truncateDisplay(`Conflict: ${state.conflictMessage}`, columns) })) : null, state.errorMessage ? (_jsx(Text, { color: "red", children: truncateDisplay(`Error: ${state.errorMessage}`, columns) })) : null] }));
+    return (_jsxs(Box, { flexDirection: "column", width: columns, height: rows, children: [_jsx(Text, { ...inkEmphasisProps(), children: truncateDisplay('MCV Profile Editor', columns) }), _jsx(Text, { children: truncateDisplay(statusLine, columns) }), _jsx(Text, { children: truncateDisplay(`Search: ${state.searchQuery}${state.focus === 'search' ? '█' : ''}`, columns) }), _jsx(Text, { children: truncateDisplay(filterLine, columns) }), _jsxs(Box, { flexGrow: 1, children: [_jsxs(Box, { flexDirection: "column", width: leftWidth, borderStyle: "single", borderColor: paneColor(state, 'profiles'), children: [_jsx(Text, { ...inkEmphasisProps(), children: "Profiles" }), visibleWindow(profiles, state.profileCursor, listHeight).map((line, index) => (_jsx(Text, { children: padDisplay(line, leftWidth - 2) }, `profile-${index}`)))] }), _jsxs(Box, { flexDirection: "column", width: centerWidth, borderStyle: "single", borderColor: paneColor(state, 'assets'), children: [_jsx(Text, { ...inkEmphasisProps(), children: "Assets" }), visibleWindow(assetLines, state.assetCursor, listHeight).map((line, index) => (_jsx(Text, { children: padDisplay(line, centerWidth - 2) }, `asset-${index}`)))] }), _jsxs(Box, { flexDirection: "column", width: rightWidth, borderStyle: "single", borderColor: paneColor(state, 'selected'), children: [_jsx(Text, { ...inkEmphasisProps(), children: `Selected (${selected.length})` }), visibleWindow(selectedLines, state.selectedCursor, listHeight).map((line, index) => (_jsx(Text, { children: padDisplay(line, rightWidth - 2) }, `selected-${index}`)))] })] }), _jsx(Text, { children: truncateDisplay(`Changes: ${summary} · ${actions}`, columns) }), _jsx(Text, { children: truncateDisplay(help, columns) }), state.conflictMessage ? (_jsx(Text, { ...inkRoleProps('decision'), children: truncateDisplay(`Conflict: ${state.conflictMessage}`, columns) })) : null, state.errorMessage ? (_jsx(Text, { ...inkRoleProps('danger'), children: truncateDisplay(`Error: ${state.errorMessage}`, columns) })) : null] }));
 }
 function statusLabel(state) {
     switch (state.status) {
@@ -59,7 +60,7 @@ function statusLabel(state) {
     }
 }
 function paneColor(state, pane) {
-    return state.focus === pane ? 'cyan' : undefined;
+    return state.focus === pane ? inkColor('information') : undefined;
 }
 function visibleWindow(lines, cursor, height) {
     if (lines.length <= height)

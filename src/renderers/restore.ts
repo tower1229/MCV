@@ -1,9 +1,8 @@
 import type { RestorePlan, RestoreResult } from '../operations/restore.js';
 import type { PresentationDocument } from '../presentation/contracts.js';
 import { textLines } from '../presentation/builders.js';
-import { renderIssuePlain } from './color.js';
 import { restoreLayoutLabel } from './restore-layout.js';
-import { renderCriticalIssues, summarizeIssues, withoutNextActions } from './human-document.js';
+import { renderCriticalIssues, renderIssuePlain, summarizeIssues, withoutNextActions } from './plain-details.js';
 
 export function renderRestorePlanDocument(plan: RestorePlan): PresentationDocument {
   const restoreCount = plan.changes.filter((change) => change.action === 'restore').length;

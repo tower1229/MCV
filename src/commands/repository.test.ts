@@ -57,12 +57,11 @@ describe('mcv Repository routes', () => {
 
     vi.mocked(console.log).mockClear();
     await createProgram(context()).parseAsync(['node', 'mcv', 'repo', '--plain']);
-    expect(vi.mocked(console.log).mock.calls.map(([line]) => line)).toEqual([
-      `Repository: ${report.repositoryPath}`,
-      `Repository ID: ${report.repositoryId}`,
-      `Schema version: ${report.repositorySchemaVersion}`,
-      'Validity: valid',
-    ]);
+    const plain = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(plain).toContain(`Repository  ${report.repositoryPath}`);
+    expect(plain).toContain(`Identity  ${report.repositoryId}`);
+    expect(plain).toContain(`Schema  ${report.repositorySchemaVersion}`);
+    expect(plain).toContain('✓ Repository is valid.');
   });
 
   it('previews and applies Bind and Unbind through structured Plans and Results', async () => {
@@ -172,7 +171,7 @@ describe('mcv Repository routes', () => {
 
     await createProgram(context()).parseAsync(['node', 'mcv', 'migrate', oldRepository]);
 
-    expect(vi.mocked(console.log).mock.calls[0]?.[0]).toBe(`Migration Plan: ${oldRepository}`);
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain(`Repository  ${oldRepository}`);
     expect(yaml.parse(fs.readFileSync(path.join(oldRepository, 'mcv.yaml'), 'utf8')).schemaVersion).toBe(1);
   });
 });

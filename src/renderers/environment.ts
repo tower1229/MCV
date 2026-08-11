@@ -1,7 +1,6 @@
 import type { EnvironmentReport } from '../operations/environment.js';
 import type { PresentationDocument } from '../presentation/contracts.js';
-import { textLines } from '../presentation/builders.js';
-import { styleText } from './color.js';
+import { fact, status } from '../presentation/builders.js';
 
 export function renderEnvironmentDocument(report: EnvironmentReport): PresentationDocument {
   const foundPathCount = report.environments.reduce((total, environment) =>
@@ -13,11 +12,15 @@ export function renderEnvironmentDocument(report: EnvironmentReport): Presentati
     operation: 'discover',
     title: 'Environment Report',
     summary: [],
-    overflowSummary: textLines([
-      `Environment: ${report.environments.filter((environment) => environment.detected).length}/${report.environments.length} IDEs detected.`,
-      `Configuration paths: ${foundPathCount} found, ${totalPathCount - foundPathCount} missing.`,
+    overflowSummary: [
+      status('information', `${report.environments.filter((environment) => environment.detected).length}/${report.environments.length} IDEs detected.`),
+      status(foundPathCount > 0 ? 'success' : 'muted', `${foundPathCount} configuration paths found; ${totalPathCount - foundPathCount} optional paths absent.`),
+    ],
+    details: report.environments.flatMap((environment) => [
+      status(environment.detected ? 'success' : 'muted', `${environment.name}: ${environment.detected ? 'detected' : 'not detected'}`),
+      ...[...environment.configDirectories, ...environment.configFiles].map((configPath) =>
+        fact(configPath.exists ? 'Found' : 'Optional', configPath.path, configPath.exists ? 'success' : 'muted')),
     ]),
-    details: textLines(renderEnvironmentPlain(report)),
     nextActions: report.nextActions,
     detailPolicy: 'overflow',
   };
@@ -25,13 +28,9 @@ export function renderEnvironmentDocument(report: EnvironmentReport): Presentati
 
 export function renderEnvironmentPlain(report: EnvironmentReport): string[] {
   return report.environments.flatMap((environment) => [
-    `${environment.name}: ${environment.detected
-      ? styleText('detected', 'green')
-      : styleText('not detected', 'dim')}`,
+    `${environment.name}: ${environment.detected ? 'detected' : 'not detected'}`,
     ...[...environment.configDirectories, ...environment.configFiles].map(
-      (configPath) => `[${configPath.exists
-        ? styleText('found', 'green')
-        : styleText('missing', 'dim')}] ${configPath.path}`,
+      (configPath) => `[${configPath.exists ? 'found' : 'missing'}] ${configPath.path}`,
     ),
   ]);
 }

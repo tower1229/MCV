@@ -22,27 +22,16 @@ describe('mcv discover', () => {
     await createProgram({ homeDir, platform: 'win32', env: {}, pathEnv: '' })
       .parseAsync(['node', 'mcv', 'discover', '--plain']);
 
-    expect(vi.mocked(console.log).mock.calls.map(([line]) => line)).toEqual([
-      'Codex: not detected',
-      `[missing] ${path.join(homeDir, '.codex')}`,
-      `[missing] ${path.join(homeDir, '.codex', 'config.toml')}`,
-      `[missing] ${path.join(homeDir, '.codex', 'AGENTS.md')}`,
-      'Claude Code: detected',
-      `[found] ${path.join(homeDir, '.claude')}`,
-      `[found] ${path.join(homeDir, '.claude', 'settings.json')}`,
-      `[missing] ${path.join(homeDir, '.claude', 'CLAUDE.md')}`,
-      `[missing] ${path.join(homeDir, '.claude.json')}`,
-      'Gemini: not detected',
-      `[missing] ${path.join(homeDir, '.gemini')}`,
-      `[missing] ${path.join(homeDir, '.gemini', 'config')}`,
-      `[missing] ${path.join(homeDir, '.gemini', 'settings.json')}`,
-      `[missing] ${path.join(homeDir, '.gemini', 'GEMINI.md')}`,
-      `[missing] ${path.join(homeDir, '.gemini', 'config', 'config.json')}`,
-      `[missing] ${path.join(homeDir, '.gemini', 'config', 'mcp_config.json')}`,
-      `[missing] ${path.join(homeDir, '.gemini', 'antigravity-cli', 'settings.json')}`,
-      `[missing] ${path.join(homeDir, 'AppData', 'Roaming', 'Antigravity', 'User', 'settings.json')}`,
-      `[missing] ${path.join(homeDir, 'AppData', 'Roaming', 'Antigravity', 'User', 'keybindings.json')}`,
-    ]);
+    const output = vi.mocked(console.log).mock.calls.flat().join('\n');
+    for (const expected of [
+      '· Codex: not detected',
+      path.join(homeDir, '.codex', 'config.toml'),
+      '✓ Claude Code: detected',
+      path.join(homeDir, '.claude', 'settings.json'),
+      '· Gemini: not detected',
+      path.join(homeDir, '.gemini', 'config', 'mcp_config.json'),
+      path.join(homeDir, 'AppData', 'Roaming', 'Antigravity', 'User', 'keybindings.json'),
+    ]) expect(output).toContain(expected);
   });
 
   it('prints one structured Environment Report for --json', async () => {

@@ -164,11 +164,11 @@ describe('mcv default path without fullscreen Shell', () => {
         process.chdir(emptyRepo);
         writeState(context(), { schemaVersion: 2 });
       },
-      marker: 'Init Plan:',
+      marker: 'Init Plan',
     },
-    { argv: ['repo'], marker: 'Repository:' },
-    { argv: ['bind'], marker: 'Bind Plan:' },
-    { argv: ['unbind'], marker: 'Unbind Plan:' },
+    { argv: ['repo'], marker: 'Repository Report' },
+    { argv: ['bind'], marker: 'Bind Plan' },
+    { argv: ['unbind'], marker: 'Unbind Plan' },
     {
       argv: ['migrate'],
       prepare: () => {
@@ -181,7 +181,7 @@ describe('mcv default path without fullscreen Shell', () => {
         }));
         process.chdir(oldRepository);
       },
-      marker: 'Migration Plan:',
+      marker: 'Migration Plan',
     },
     { argv: ['discover'], marker: 'Codex:' },
   ])('runs `mcv $argv` as a one-shot report without a Shell', async ({ argv, prepare, marker }) => {

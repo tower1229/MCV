@@ -1,5 +1,5 @@
-import { renderIssuePlain } from './color.js';
-import { renderCriticalIssues, summarizeIssues, withoutNextActions } from './human-document.js';
+import { textLines } from '../presentation/builders.js';
+import { renderCriticalIssues, renderIssuePlain, summarizeIssues, withoutNextActions } from './plain-details.js';
 export function renderCapturePlanDocument(plan) {
     const changeCounts = {
         add: plan.changes.filter((change) => change.change === 'add').length,
@@ -26,8 +26,8 @@ export function renderCapturePlanDocument(plan) {
     return {
         operation: 'capture',
         title: 'Capture Plan',
-        summary,
-        details: hasReviewDetails ? renderCapturePlanPlain(plan) : [],
+        summary: textLines(summary),
+        details: textLines(hasReviewDetails ? renderCapturePlanPlain(plan) : []),
         nextActions: [
             ...(plan.changes.length > 0 ? ['Review the complete diff before confirming Capture.'] : []),
             ...plan.nextActions,
@@ -126,8 +126,8 @@ export function renderCaptureResultDocument(result) {
         operation: 'capture',
         title: 'Capture Result',
         summary: [],
-        overflowSummary,
-        details: withoutNextActions(full),
+        overflowSummary: textLines(overflowSummary),
+        details: textLines(withoutNextActions(full)),
         nextActions: result.nextActions,
         detailPolicy: 'overflow',
     };

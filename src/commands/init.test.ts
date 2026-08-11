@@ -125,7 +125,7 @@ describe('mcv init', () => {
       pathEnv: '',
     }).parseAsync(['node', 'mcv', 'init']);
 
-    expect(vi.mocked(console.log).mock.calls[0]?.[0]).toBe(`Init Plan: ${repositoryPath}`);
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n')).toContain(`Repository  ${repositoryPath}`);
     expect(fs.existsSync(path.join(repositoryPath, 'mcv.yaml'))).toBe(false);
     expect(fs.existsSync(path.join(stateRoot, 'mcv', 'config.json'))).toBe(false);
   });

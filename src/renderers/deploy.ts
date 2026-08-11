@@ -1,10 +1,9 @@
 import type { DeployPlan, DeployResult } from '../operations/deploy.js';
 import type { CanonicalSkillTarget } from '../core/canonical-skill-device-layout.js';
-import type { PresentationDocument } from '../presentation/contracts.js';
+import type { PresentationBlock, PresentationDocument, PresentationRole } from '../presentation/contracts.js';
 import { textLines } from '../presentation/builders.js';
 import { displaySkillSurface } from '../core/skill-surfaces.js';
-import { renderIssuePlain, styleText } from './color.js';
-import { renderCriticalIssues, withoutNextActions } from './human-document.js';
+import { renderCriticalIssues, renderIssuePlain, detailText, withoutNextActions } from './plain-details.js';
 
 export function renderDeployPlanDocument(plan: DeployPlan): PresentationDocument {
   const selectedCount = plan.changes.filter((change) => change.defaultSelected).length;
@@ -27,27 +26,27 @@ export function renderDeployPlanDocument(plan: DeployPlan): PresentationDocument
     ...formatNonZeroChangeCounts(addCount, modifyCount, deleteCount),
   ].join(' · ');
   const status = plan.status === 'failed'
-    ? styleText('× Deploy plan failed', 'red')
+    ? detailText('× Deploy plan failed', 'danger')
     : plan.readyToApply && !requiresReview
-      ? styleText('✓ Ready to deploy', 'green')
-      : styleText('! Review required before deploy', 'yellow');
+      ? detailText('✓ Ready to deploy', 'success')
+      : detailText('! Review required before deploy', 'attention');
   const summary = [
-    styleText(`Deploy ${plan.scope} configuration`, 'cyan'),
+    detailText(`Deploy ${plan.scope} configuration`, 'information'),
     '',
-    `${styleText('Repository', 'cyan')}  ${styleText(plan.repositoryPath ?? 'not bound', 'dim')}`,
-    `${styleText('Target', 'cyan')}      ${styleText(plan.targetRoot, 'dim')}`,
+    `${detailText('Repository', 'information')}  ${detailText(plan.repositoryPath ?? 'not bound', 'muted')}`,
+    `${detailText('Target', 'information')}      ${detailText(plan.targetRoot, 'muted')}`,
     '',
     status,
-    `  ${styleText(changeSummary, plan.readyToApply && !requiresReview ? 'cyan' : 'yellow')}`,
+    `  ${detailText(changeSummary, plan.readyToApply && !requiresReview ? 'information' : 'attention')}`,
     ...(destructive.length === 0
-      ? [`  ${styleText('No deletions or topology migrations', 'green')}`]
-      : [`  ${styleText(`${formatDestructiveCounts(deleteCount, topologyMigrationCount)} · ${selectedDestructive} selected`, selectedDestructive > 0 ? 'red' : 'yellow')}`]),
+      ? [`  ${detailText('No deletions or topology migrations', 'success')}`]
+      : [`  ${detailText(`${formatDestructiveCounts(deleteCount, topologyMigrationCount)} · ${selectedDestructive} selected`, selectedDestructive > 0 ? 'danger' : 'attention')}`]),
     ...(issueCounts.errors === 0 && issueCounts.warnings === 0 && issueCounts.decisions === 0
-      ? [`  ${styleText('No errors, warnings, or decisions required', 'green')}`]
-      : [`  ${styleText(formatActionableIssueCounts(issueCounts), issueCounts.errors > 0 ? 'red' : 'yellow')}`]),
+      ? [`  ${detailText('No errors, warnings, or decisions required', 'success')}`]
+      : [`  ${detailText(formatActionableIssueCounts(issueCounts), issueCounts.errors > 0 ? 'danger' : 'attention')}`]),
     ...(plan.linkOutcomes.length > 0 ? [formatLinkOutcomes(plan)] : []),
     ...(issueCounts.notices > 0
-      ? [`${styleText('Info', 'cyan')}        ${styleText(`${issueCounts.notices} ${issueCounts.notices === 1 ? 'notice' : 'notices'} · details included in review`, 'dim')}`]
+      ? [`${detailText('Info', 'information')}        ${detailText(`${issueCounts.notices} ${issueCounts.notices === 1 ? 'notice' : 'notices'} · details included in review`, 'muted')}`]
       : []),
     ...renderCriticalIssues(plan.issues),
     '',
@@ -60,11 +59,28 @@ export function renderDeployPlanDocument(plan: DeployPlan): PresentationDocument
   return {
     operation: 'deploy',
     title: 'Deploy Plan',
-    summary: textLines(summary),
+    summary: deployBlocks(summary),
     details: textLines(hasReviewDetails ? renderDeployPlanPlain(plan) : []),
     nextActions: plan.nextActions,
     detailPolicy: 'review',
   };
+}
+
+function deployBlocks(lines: string[]): PresentationBlock[] {
+  return lines.map((line) => line.length === 0
+    ? { kind: 'spacer' }
+    : { kind: 'paragraph', content: [{ text: line }], role: deployLineRole(line) });
+}
+
+function deployLineRole(line: string): PresentationRole | undefined {
+  const trimmed = line.trimStart();
+  if (line.startsWith('Deploy ')) return 'information';
+  if (trimmed.startsWith('✓') || /No errors|No deletions|already satisfied/u.test(trimmed)) return 'success';
+  if (trimmed.startsWith('×') || /failed|deletion|topology migration|blocked/u.test(trimmed)) return 'danger';
+  if (trimmed.startsWith('!') || /warning|decision|required|not selected/u.test(trimmed)) return 'attention';
+  if (/^(Repository|Target)/u.test(line)) return 'muted';
+  if (/^(Skills|Info)/u.test(line)) return 'information';
+  return undefined;
 }
 
 function countDeployChanges(plan: DeployPlan, kind: DeployPlan['changes'][number]['change']): number {
@@ -78,7 +94,7 @@ function formatLinkOutcomes(plan: DeployPlan): string {
   const summary = blocked === 0
     ? `${satisfied} ${satisfied === 1 ? 'projection' : 'projections'} already satisfied`
     : `${satisfied} satisfied · ${blocked} blocked`;
-  return `${styleText('Skills', 'cyan')}      ${styleText(summary, blocked > 0 ? 'red' : 'green')}`;
+  return `${detailText('Skills', 'information')}      ${detailText(summary, blocked > 0 ? 'danger' : 'success')}`;
 }
 
 function formatNonZeroChangeCounts(add: number, modify: number, remove: number): string[] {

@@ -2,23 +2,23 @@ import { GLOBAL_PROFILE_ID } from '../profiles/contracts.js';
 import { buildDeployRequest, createDeployPlan, applyDeployPlan, } from '../operations/deploy.js';
 import { validateProjectTargetRoot } from '../core/project-target.js';
 import { renderDeployPlanDocument, renderDeployResultDocument } from '../renderers/deploy.js';
-import { styleText } from '../renderers/color.js';
-import { renderJson } from '../renderers/json.js';
+import { presentJson } from '../renderers/json.js';
 import { createAdapterDefinitions } from '../adapters/index.js';
 import { askInTerminal, withInterruptsIgnored } from '../cli/prompt.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
-import { presentHumanDocument } from '../cli/human-output.js';
+import { presentBlocks, presentDiagnostic, presentDocument, presentOutcome, } from '../presentation/output.js';
+import { issueBlocks } from '../presentation/builders.js';
 export async function deployConfigurations(context, dependencies = {}, options = {}) {
     const profileArgs = options.profiles ?? [];
     const wantsGlobal = options.global === true;
     const hasTarget = typeof options.target === 'string' && options.target.length > 0;
     if (wantsGlobal && hasTarget) {
-        console.error('options --target and --global cannot be used together');
+        presentDiagnostic('options --target and --global cannot be used together');
         process.exitCode = 2;
         return;
     }
     if (profileArgs.length === 0 && !wantsGlobal) {
-        console.error('Specify one or more Profile IDs, or use --global to deploy the built-in global Profile to device-global locations.\n'
+        presentDiagnostic('Specify one or more Profile IDs, or use --global to deploy the built-in global Profile to device-global locations.\n'
             + 'Examples: mcv deploy dev\n'
             + '          mcv deploy --global\n'
             + '          mcv deploy global --global');
@@ -39,7 +39,7 @@ export async function deployConfigurations(context, dependencies = {}, options =
         });
         if (!validated.ok) {
             if (options.json) {
-                console.log(renderJson({
+                presentJson({
                     schemaVersion: 3,
                     operation: 'deploy',
                     status: 'failed',
@@ -52,10 +52,10 @@ export async function deployConfigurations(context, dependencies = {}, options =
                         }],
                     nextActions: validated.error.nextActions,
                     error: validated.error,
-                }));
+                });
             }
             else {
-                console.error(validated.error.message);
+                presentDiagnostic(validated.error.message);
             }
             process.exitCode = 2;
             return;
@@ -65,7 +65,7 @@ export async function deployConfigurations(context, dependencies = {}, options =
     const built = buildDeployRequest(repositoryPath, { profileIds, scope, targetRoot });
     if ('error' in built) {
         if (options.json) {
-            console.log(renderJson({
+            presentJson({
                 schemaVersion: 3,
                 operation: 'deploy',
                 status: 'failed',
@@ -78,10 +78,10 @@ export async function deployConfigurations(context, dependencies = {}, options =
                     }],
                 nextActions: built.error.nextActions,
                 error: built.error,
-            }));
+            });
         }
         else {
-            console.error(built.error.message);
+            presentDiagnostic(built.error.message);
         }
         process.exitCode = built.error.code === 'deploy.profileNotFound' ? 2 : 1;
         return;
@@ -92,9 +92,9 @@ export async function deployConfigurations(context, dependencies = {}, options =
     const reviewPlan = await createDeployPlan(context, built.request);
     if (options.dryRun) {
         if (options.json)
-            console.log(renderJson(reviewPlan));
+            presentJson(reviewPlan);
         else
-            presentHumanDocument(context, renderDeployPlanDocument(reviewPlan), {
+            presentDocument(context, renderDeployPlanDocument(reviewPlan), {
                 verbose: options.verbose,
             });
         if (reviewPlan.status === 'failed')
@@ -104,7 +104,7 @@ export async function deployConfigurations(context, dependencies = {}, options =
     if (reviewPlan.status !== 'failed' && reviewPlan.changes.length === 0) {
         if (options.json) {
             const result = await withInterruptsIgnored(() => applyDeployPlan(context, reviewPlan, { changeIds: [] }, { nonInteractive: options.yes }));
-            console.log(renderJson(result));
+            presentJson(result);
             if (result.status !== 'succeeded')
                 process.exitCode = result.status === 'blocked' ? 3 : 1;
         }
@@ -112,15 +112,13 @@ export async function deployConfigurations(context, dependencies = {}, options =
             const manifest = reviewPlan.repositoryPath ? readManifest(reviewPlan.repositoryPath) : undefined;
             const enabled = createAdapterDefinitions().filter(({ targetId }) => manifest?.targets?.[targetId]?.enabled === true);
             const subject = enabled.length === 1 ? `${enabled[0].name} configuration is` : 'Configurations are';
-            console.log(`${subject} already in sync.`);
-            for (const issue of reviewPlan.issues.filter((item) => item.severity === 'notice')) {
-                console.log(issue.message);
-            }
+            presentOutcome('Deploy Result', `${subject} already in sync.`, 'success');
+            presentBlocks(issueBlocks(reviewPlan.issues.filter((item) => item.severity === 'notice')));
         }
         return;
     }
     if (!options.json && !options.yes) {
-        presentHumanDocument(context, renderDeployPlanDocument(reviewPlan), {
+        presentDocument(context, renderDeployPlanDocument(reviewPlan), {
             verbose: options.verbose,
         });
     }
@@ -139,11 +137,11 @@ export async function deployConfigurations(context, dependencies = {}, options =
             ?? (() => confirmInTerminal(selectedIds.length)))();
         if (confirmed === undefined) {
             process.exitCode = 130;
-            console.log('Deploy interrupted; local configuration was not changed.');
+            presentOutcome('Deploy Result', 'Deploy interrupted; local configuration was not changed.', 'attention');
             return;
         }
         if (!confirmed) {
-            console.log('Deploy cancelled; local configuration was not changed.');
+            presentOutcome('Deploy Result', 'Deploy cancelled; local configuration was not changed.', 'attention');
             return;
         }
     }
@@ -160,15 +158,14 @@ export async function deployConfigurations(context, dependencies = {}, options =
     if (result.status !== 'succeeded')
         process.exitCode = result.status === 'blocked' ? 3 : 1;
     if (options.json)
-        console.log(renderJson(result));
+        presentJson(result);
     else
-        presentHumanDocument(context, renderDeployResultDocument(result), {
+        presentDocument(context, renderDeployResultDocument(result), {
             verbose: options.verbose,
         });
 }
 async function confirmInTerminal(selectedCount) {
     const noun = selectedCount === 1 ? 'change' : 'changes';
-    const prompt = styleText(`Apply ${selectedCount} selected ${noun} to this device?`, 'cyan');
-    const outcome = await askInTerminal(`${prompt} [y/N] `);
+    const outcome = await askInTerminal(`Deploy · ${selectedCount} selected ${noun} · target: this device · Apply? [y/N] `);
     return outcome.interrupted ? undefined : /^(y|yes)$/i.test(outcome.answer.trim());
 }

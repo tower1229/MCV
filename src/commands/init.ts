@@ -5,8 +5,9 @@ import {
   type InitPlan,
   type InitResult,
 } from '../operations/repository.js';
-import { renderJson } from '../renderers/json.js';
-import { renderInitPlain } from '../renderers/repository.js';
+import { presentJson } from '../renderers/json.js';
+import { renderInitDocument } from '../renderers/repository.js';
+import { presentDocument } from '../presentation/output.js';
 
 export interface InitOptions {
   dryRun?: boolean;
@@ -21,14 +22,14 @@ export function initRepository(
 ): InitPlan | InitResult {
   const plan = createInitPlan(context, targetDir);
   if (options.dryRun || !options.yes) {
-    render(plan, options);
+    render(context, plan, options);
     return plan;
   }
 
   const result = plan.issues.some((issue) => issue.severity !== 'notice')
     ? blockedInitResult(plan)
     : applyInitPlan(context, plan);
-  render(result, options);
+  render(context, result, options);
   if (result.status === 'failed') process.exitCode = 1;
   if (result.status === 'blocked') process.exitCode = 3;
   return result;
@@ -46,10 +47,10 @@ function blockedInitResult(plan: InitPlan): InitResult {
   };
 }
 
-function render(contract: InitPlan | InitResult, options: InitOptions): void {
+function render(context: DeviceContext, contract: InitPlan | InitResult, options: InitOptions): void {
   if (options.json) {
-    console.log(renderJson(contract));
+    presentJson(contract);
     return;
   }
-  for (const line of renderInitPlain(contract)) console.log(line);
+  presentDocument(context, renderInitDocument(contract));
 }

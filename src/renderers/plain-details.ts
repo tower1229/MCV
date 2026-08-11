@@ -1,5 +1,14 @@
 import type { Issue } from '../operations/contracts.js';
-import { renderIssuePlain } from './color.js';
+import type { PresentationRole } from '../presentation/contracts.js';
+
+/** Classifies renderer-owned detail text while the destination adapter owns styling. */
+export function detailText(text: string, _role: PresentationRole): string {
+  return text;
+}
+
+export function renderIssuePlain(issue: Issue): string {
+  return `[${issue.severity}] ${issue.code}: ${issue.message}`;
+}
 
 export function summarizeIssues(issues: readonly Issue[]): string {
   const count = (severity: Issue['severity']): number =>

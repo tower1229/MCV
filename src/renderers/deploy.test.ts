@@ -5,6 +5,7 @@ import {
   renderDeployPlanPlain,
   renderDeployResultPlain,
 } from './deploy.js';
+import { renderPresentationDocument } from '../presentation/render.js';
 
 describe('plain Deploy renderer', () => {
   it('uses semantic ANSI colors in a TTY and preserves complete NO_COLOR text', () => {
@@ -16,13 +17,21 @@ describe('plain Deploy renderer', () => {
     delete process.env.NO_COLOR;
 
     try {
-      const colored = renderDeployPlanDocument(deployPlan()).summary.join('\n');
+      const colored = renderPresentationDocument(
+        renderDeployPlanDocument(deployPlan()),
+        'summary',
+        { color: true },
+      );
       expect(colored).toContain('\u001b[36mDeploy global configuration');
       expect(colored).toContain('\u001b[32m✓ Ready to deploy');
-      expect(colored).toContain('\u001b[2m/repository');
+      expect(colored).toContain('\u001b[2mRepository  /repository');
 
       process.env.NO_COLOR = '';
-      const plain = renderDeployPlanDocument(deployPlan()).summary.join('\n');
+      const plain = renderPresentationDocument(
+        renderDeployPlanDocument(deployPlan()),
+        'summary',
+        { color: false },
+      );
       expect(plain).not.toContain('\u001b[');
       expect(plain).toContain('✓ Ready to deploy');
       expect(plain).toContain('No deletions or topology migrations');

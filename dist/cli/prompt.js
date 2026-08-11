@@ -1,4 +1,5 @@
 import { createInterface } from 'readline/promises';
+import { presentPrompt } from '../presentation/output.js';
 export async function askInTerminal(question) {
     const prompt = createInterface({ input: process.stdin, output: process.stdout });
     const cancellation = new AbortController();
@@ -6,7 +7,8 @@ export async function askInTerminal(question) {
     process.once('SIGINT', handleInterrupt);
     prompt.once('SIGINT', handleInterrupt);
     try {
-        const answer = await prompt.question(question, { signal: cancellation.signal });
+        presentPrompt(question.trimEnd());
+        const answer = await prompt.question('', { signal: cancellation.signal });
         return { interrupted: false, answer };
     }
     catch (error) {

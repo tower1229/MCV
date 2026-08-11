@@ -4,9 +4,9 @@ import {
   applyRestorePlan,
   createRestorePlan,
 } from '../operations/restore.js';
-import { renderJson } from '../renderers/json.js';
+import { presentJson } from '../renderers/json.js';
 import { renderRestorePlanDocument, renderRestoreResultDocument } from '../renderers/restore.js';
-import { presentHumanDocument } from '../cli/human-output.js';
+import { presentDiagnostic, presentDocument, presentOutcome } from '../presentation/output.js';
 
 export interface RestoreDependencies {
   confirmRestore?: () => Promise<boolean>;
@@ -27,7 +27,7 @@ export async function restoreLatestBackup(
   options: RestoreOptions = {},
 ): Promise<void> {
   if (options.global === true && typeof options.target === 'string' && options.target.length > 0) {
-    console.error('options --target and --global cannot be used together');
+    presentDiagnostic('options --target and --global cannot be used together');
     process.exitCode = 2;
     return;
   }
@@ -35,8 +35,8 @@ export async function restoreLatestBackup(
     ? { scope: 'global' }
     : { scope: 'project', targetRoot: options.target ?? process.cwd() });
   if (options.dryRun) {
-    if (options.json) console.log(renderJson(reviewPlan));
-    else presentHumanDocument(context, renderRestorePlanDocument(reviewPlan), {
+    if (options.json) presentJson(reviewPlan);
+    else presentDocument(context, renderRestorePlanDocument(reviewPlan), {
       verbose: options.verbose,
     });
     if (reviewPlan.status === 'failed') process.exitCode = 1;
@@ -46,8 +46,8 @@ export async function restoreLatestBackup(
   if (reviewPlan.status === 'failed') {
     const result = applyRestorePlan(context, reviewPlan, { changeIds: [] });
     process.exitCode = 1;
-    if (options.json) console.log(renderJson(result));
-    else presentHumanDocument(context, renderRestoreResultDocument(result), {
+    if (options.json) presentJson(result);
+    else presentDocument(context, renderRestoreResultDocument(result), {
       verbose: options.verbose,
     });
     return;
@@ -58,7 +58,7 @@ export async function restoreLatestBackup(
   process.on('SIGINT', handleInterrupt);
   try {
     if (!options.json && !options.yes) {
-      presentHumanDocument(context, renderRestorePlanDocument(reviewPlan), {
+      presentDocument(context, renderRestorePlanDocument(reviewPlan), {
         verbose: options.verbose,
       });
     }
@@ -79,13 +79,13 @@ export async function restoreLatestBackup(
           changeIds: reviewPlan.changes.map((change) => change.id),
         }, { signal: cancellation.signal });
         process.exitCode = 130;
-        presentHumanDocument(context, renderRestoreResultDocument(result), {
+        presentDocument(context, renderRestoreResultDocument(result), {
           verbose: options.verbose,
         });
         return;
       }
       if (!confirmed) {
-        console.log('Restore cancelled; local configuration was not changed.');
+        presentOutcome('Restore Result', 'Restore cancelled; local configuration was not changed.', 'attention');
         return;
       }
     }
@@ -99,8 +99,8 @@ export async function restoreLatestBackup(
     );
     if (result.issues.some((issue) => issue.code === 'restore.cancelled')) process.exitCode = 130;
     else if (result.status !== 'succeeded') process.exitCode = result.status === 'blocked' ? 3 : 1;
-    if (options.json) console.log(renderJson(result));
-    else presentHumanDocument(context, renderRestoreResultDocument(result), {
+    if (options.json) presentJson(result);
+    else presentDocument(context, renderRestoreResultDocument(result), {
       verbose: options.verbose,
     });
     await new Promise<void>((resolve) => setImmediate(resolve));

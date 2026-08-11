@@ -97,9 +97,8 @@ describe('mcv deploy', () => {
     await deployWithGlobalProfile([], deviceContext('win32'), { confirmDeploy: async () => undefined });
 
     expect(process.exitCode).toBe(130);
-    expect(console.log).toHaveBeenCalledWith(
-      'Deploy interrupted; local configuration was not changed.',
-    );
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n'))
+      .toContain('! Deploy interrupted; local configuration was not changed.');
     expect(fs.existsSync(path.join(homeDir, '.claude', 'settings.json'))).toBe(false);
   });
 
@@ -111,7 +110,7 @@ describe('mcv deploy', () => {
     const plain = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
     expect(plain).toContain('Deploy global configuration');
     expect(plain).toContain('selected change');
-    expect(plain).toContain('Review      ');
+    expect(plain).toContain('Review  ');
     expect(plain).not.toContain('# Rules');
     const reviewDirectory = path.join(stateRoot, 'mcv', 'reviews');
     const reviewFiles = fs.readdirSync(reviewDirectory);
@@ -434,9 +433,8 @@ describe('mcv deploy', () => {
     await runDeploy();
 
     expect(fs.readdirSync(backupRoot)).toEqual(backupDirectories);
-    expect(vi.mocked(console.log)).toHaveBeenCalledWith(
-      'Claude Code configuration is already in sync.',
-    );
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n'))
+      .toContain('✓ Claude Code configuration is already in sync.');
   });
 
   it('records deployed file hashes as the status baseline', async () => {
@@ -457,16 +455,14 @@ describe('mcv deploy', () => {
 
     vi.mocked(console.log).mockClear();
     await run('status');
-    expect(vi.mocked(console.log)).toHaveBeenCalledWith(
-      'Device      ✓ 1 unchanged',
-    );
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n'))
+      .toContain('Device      ✓ 1 unchanged');
 
     fs.appendFileSync(settingsPath, '\n');
     vi.mocked(console.log).mockClear();
     await run('status');
-    expect(vi.mocked(console.log)).toHaveBeenCalledWith(
-      'Device      ! 1 drifted · 0 unchanged',
-    );
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n'))
+      .toContain('Device      ! 1 drifted · 0 unchanged');
   });
 
   it('deletes only prior managed inventory when prune is explicitly confirmed', async () => {

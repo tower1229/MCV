@@ -90,7 +90,7 @@ describe('mcv capture', () => {
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(output).toContain(`Capture Plan: ${repositoryPath}`);
     expect(output).toContain('Changes: 1');
-    expect(output).toContain('Review      ');
+    expect(output).toContain('Review  ');
     expect(output).not.toContain('must-not-leak');
     const reviewDirectory = path.join(stateRoot, 'mcv', 'reviews');
     const reviewFiles = fs.readdirSync(reviewDirectory);
@@ -110,7 +110,7 @@ describe('mcv capture', () => {
     ]);
 
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
-    expect(output).toContain('Review      ');
+    expect(output).toContain('Review  ');
     expect(output).toContain('must-not-leak');
   });
 
@@ -203,9 +203,8 @@ describe('mcv capture', () => {
     ).parseAsync(['node', 'mcv', 'capture']);
 
     expect(process.exitCode).toBe(130);
-    expect(console.log).toHaveBeenCalledWith(
-      'Capture interrupted; repository was not changed.',
-    );
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n'))
+      .toContain('! Capture interrupted; repository was not changed.');
     expect(fs.existsSync(path.join(repositoryPath, 'ide'))).toBe(false);
   });
 

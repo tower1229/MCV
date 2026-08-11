@@ -35,7 +35,8 @@ describe('mcv restore', () => {
       .parseAsync(['node', 'mcv', 'restore', '--global', '--yes']);
 
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('restored content');
-    expect(vi.mocked(console.log)).toHaveBeenCalledWith('Restored 1 change(s) from the latest backup.');
+    expect(vi.mocked(console.log).mock.calls.flat().join('\n'))
+      .toContain('Restored 1 change(s) from the latest backup.');
 
     function createBackup(name: string, createdAt: string, content: string): void {
       const directory = path.join(backupRoot, name);
@@ -119,7 +120,7 @@ describe('mcv restore', () => {
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(output).toContain('Restore Plan: latest complete deployment backup');
     expect(output).toContain('Changes: 1 restore, 0 delete.');
-    expect(output).toContain('Review      ');
+    expect(output).toContain('Review  ');
     expect(output).not.toContain(targetPath);
     const reviewDirectory = path.join(stateRoot, 'mcv', 'reviews');
     const reviewFiles = fs.readdirSync(reviewDirectory);

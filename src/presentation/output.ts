@@ -3,8 +3,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { DeviceContext } from '../adapters/types.js';
 import type {
+  PresentationBlock,
   PresentationDocument,
   PresentationOptions,
+  PresentationRole,
   PresentationResult,
 } from './contracts.js';
 import {
@@ -182,6 +184,14 @@ export function presentDiagnostic(message: string): void {
   console.error(renderPresentationBlocks([status('danger', message)], capability));
 }
 
+export function presentBlocks(blocks: PresentationBlock[]): void {
+  const capability = resolveOutputCapability({
+    isTTY: Boolean(process.stdout.isTTY),
+    columns: process.stdout.columns,
+  });
+  printText(renderPresentationBlocks(blocks, capability));
+}
+
 export function presentPrompt(message: string): void {
   const capability = resolveOutputCapability({
     isTTY: Boolean(process.stdout.isTTY),
@@ -193,13 +203,17 @@ export function presentPrompt(message: string): void {
 export function presentOutcome(
   title: string,
   message: string,
-  role: 'success' | 'attention' | 'danger' | 'information' = 'information',
+  role: Exclude<PresentationRole, 'decision' | 'muted'> = 'information',
 ): void {
   const capability = resolveOutputCapability({
     isTTY: Boolean(process.stdout.isTTY),
     columns: process.stdout.columns,
   });
   printText(`${stylePresentationText(title, 'information', capability)}\n${renderPresentationBlocks([status(role, message)], capability)}`);
+}
+
+export function presentReviewReference(reviewPath: string): void {
+  printReviewPath(reviewPath);
 }
 
 function printReviewFailure(error: Error): void {

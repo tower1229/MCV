@@ -7,7 +7,7 @@ import {
 } from 'ink';
 import { useEffect, useReducer, useRef, useState } from 'react';
 import type { DeviceContext } from '../../adapters/types.js';
-import { writeHumanReviewArtifact } from '../../cli/human-output.js';
+import { writeReviewArtifact } from '../../presentation/output.js';
 import {
   applyCapturePlan,
   createCapturePlan,
@@ -36,7 +36,7 @@ export interface CaptureTuiDependencies {
   createPlan?: typeof createCapturePlan;
   applyPlan?: typeof applyCapturePlan;
   recordSuccess?: typeof recordCaptureSuccess;
-  writeReviewArtifact?: typeof writeHumanReviewArtifact;
+  writeReviewArtifact?: typeof writeReviewArtifact;
 }
 
 export interface CaptureTuiRuntime {
@@ -192,7 +192,7 @@ function CaptureReviewApp({
 function writeReview(
   context: DeviceContext,
   plan: CapturePlan,
-  write: typeof writeHumanReviewArtifact = writeHumanReviewArtifact,
+  write: typeof writeReviewArtifact = writeReviewArtifact,
 ): string | undefined {
   const document = renderCapturePlanDocument(plan);
   if (document.details.length === 0) return undefined;

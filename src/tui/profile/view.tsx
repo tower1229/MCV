@@ -6,6 +6,7 @@ import {
   type ProfileEditorState,
 } from './reducer.js';
 import { padDisplay, truncateDisplay } from './display-width.js';
+import { inkColor, inkEmphasisProps, inkRoleProps } from '../../presentation/ink-theme.js';
 
 export interface ProfileEditorViewProps {
   state: ProfileEditorState;
@@ -61,25 +62,25 @@ export function ProfileEditorView({ state, columns, rows }: ProfileEditorViewPro
 
   return (
     <Box flexDirection="column" width={columns} height={rows}>
-      <Text bold>{truncateDisplay('MCV Profile Editor', columns)}</Text>
+      <Text {...inkEmphasisProps()}>{truncateDisplay('MCV Profile Editor', columns)}</Text>
       <Text>{truncateDisplay(statusLine, columns)}</Text>
       <Text>{truncateDisplay(`Search: ${state.searchQuery}${state.focus === 'search' ? '█' : ''}`, columns)}</Text>
       <Text>{truncateDisplay(filterLine, columns)}</Text>
       <Box flexGrow={1}>
         <Box flexDirection="column" width={leftWidth} borderStyle="single" borderColor={paneColor(state, 'profiles')}>
-          <Text bold>Profiles</Text>
+          <Text {...inkEmphasisProps()}>Profiles</Text>
           {visibleWindow(profiles, state.profileCursor, listHeight).map((line, index) => (
             <Text key={`profile-${index}`}>{padDisplay(line, leftWidth - 2)}</Text>
           ))}
         </Box>
         <Box flexDirection="column" width={centerWidth} borderStyle="single" borderColor={paneColor(state, 'assets')}>
-          <Text bold>Assets</Text>
+          <Text {...inkEmphasisProps()}>Assets</Text>
           {visibleWindow(assetLines, state.assetCursor, listHeight).map((line, index) => (
             <Text key={`asset-${index}`}>{padDisplay(line, centerWidth - 2)}</Text>
           ))}
         </Box>
         <Box flexDirection="column" width={rightWidth} borderStyle="single" borderColor={paneColor(state, 'selected')}>
-          <Text bold>{`Selected (${selected.length})`}</Text>
+          <Text {...inkEmphasisProps()}>{`Selected (${selected.length})`}</Text>
           {visibleWindow(selectedLines, state.selectedCursor, listHeight).map((line, index) => (
             <Text key={`selected-${index}`}>{padDisplay(line, rightWidth - 2)}</Text>
           ))}
@@ -88,10 +89,10 @@ export function ProfileEditorView({ state, columns, rows }: ProfileEditorViewPro
       <Text>{truncateDisplay(`Changes: ${summary} · ${actions}`, columns)}</Text>
       <Text>{truncateDisplay(help, columns)}</Text>
       {state.conflictMessage ? (
-        <Text color="yellow">{truncateDisplay(`Conflict: ${state.conflictMessage}`, columns)}</Text>
+        <Text {...inkRoleProps('decision')}>{truncateDisplay(`Conflict: ${state.conflictMessage}`, columns)}</Text>
       ) : null}
       {state.errorMessage ? (
-        <Text color="red">{truncateDisplay(`Error: ${state.errorMessage}`, columns)}</Text>
+        <Text {...inkRoleProps('danger')}>{truncateDisplay(`Error: ${state.errorMessage}`, columns)}</Text>
       ) : null}
     </Box>
   );
@@ -118,7 +119,7 @@ function paneColor(
   state: ProfileEditorState,
   pane: 'profiles' | 'assets' | 'selected',
 ): string | undefined {
-  return state.focus === pane ? 'cyan' : undefined;
+  return state.focus === pane ? inkColor('information') : undefined;
 }
 
 function visibleWindow(lines: string[], cursor: number, height: number): string[] {

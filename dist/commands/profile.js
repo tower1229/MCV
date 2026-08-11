@@ -1,9 +1,9 @@
 import { OPERATION_SCHEMA_VERSION, } from '../operations/contracts.js';
 import { createProfileService, } from '../profiles/service.js';
 import { resolveBoundRepository } from '../utils/repository.js';
-import { renderJson } from '../renderers/json.js';
+import { presentJson } from '../renderers/json.js';
 import { renderProfileListDocument, renderProfileMutationDocument, renderProfileShowDocument, } from '../renderers/profile.js';
-import { presentHumanDocument } from '../cli/human-output.js';
+import { presentDocument } from '../presentation/output.js';
 export function listProfiles(context, options = {}) {
     try {
         const report = buildListReport(context);
@@ -269,29 +269,29 @@ function immutableIdGuidance(command) {
 }
 function renderList(context, report, options) {
     if (options.json) {
-        console.log(renderJson(report));
+        presentJson(report);
         return;
     }
-    presentHumanDocument(context, renderProfileListDocument(report), { verbose: options.verbose });
+    presentDocument(context, renderProfileListDocument(report), { verbose: options.verbose });
 }
 function renderShow(context, report, options) {
     if (options.json) {
-        console.log(renderJson(report));
+        presentJson(report);
         return;
     }
-    presentHumanDocument(context, renderProfileShowDocument(report), { verbose: options.verbose });
+    presentDocument(context, renderProfileShowDocument(report), { verbose: options.verbose });
 }
 function renderMutation(context, report, options) {
     if (options.json) {
-        console.log(renderJson(report));
+        presentJson(report);
         return;
     }
-    presentHumanDocument(context, renderProfileMutationDocument(report), { verbose: options.verbose });
+    presentDocument(context, renderProfileMutationDocument(report), { verbose: options.verbose });
 }
 function renderFailed(context, report, options) {
     if (options.json) {
-        console.log(renderJson(report));
+        presentJson(report);
         return;
     }
-    presentHumanDocument(context, renderProfileMutationDocument(report), { verbose: options.verbose });
+    presentDocument(context, renderProfileMutationDocument(report), { verbose: options.verbose });
 }

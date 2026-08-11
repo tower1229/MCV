@@ -1,10 +1,10 @@
 import { applyMigrationPlan, applyBindPlan, applyUnbindPlan, createBindPlan, createMigrationPlan, createUnbindPlan, inspectRepository, } from '../operations/repository.js';
-import { renderBindPlain, renderMigrationDocument, renderRepositoryPlain, renderUnbindPlain, } from '../renderers/repository.js';
-import { renderJson } from '../renderers/json.js';
-import { presentHumanDocument } from '../cli/human-output.js';
+import { renderBindDocument, renderMigrationDocument, renderRepositoryDocument, renderUnbindDocument, } from '../renderers/repository.js';
+import { presentJson } from '../renderers/json.js';
+import { presentDocument } from '../presentation/output.js';
 export function showRepository(context, options = {}) {
     const report = inspectRepository(context);
-    render(report, options, renderRepositoryPlain);
+    render(context, report, options, renderRepositoryDocument);
     return report;
 }
 export function bind(context, repositoryPath, options = {}) {
@@ -12,7 +12,7 @@ export function bind(context, repositoryPath, options = {}) {
     const contract = options.dryRun || !options.yes
         ? plan
         : applyBindPlan(context, plan);
-    render(contract, options, renderBindPlain);
+    render(context, contract, options, renderBindDocument);
     if (contract.status === 'failed')
         process.exitCode = 1;
     return contract;
@@ -22,7 +22,7 @@ export function unbind(context, options = {}) {
     const contract = options.dryRun || !options.yes
         ? plan
         : applyUnbindPlan(context, plan);
-    render(contract, options, renderUnbindPlain);
+    render(context, contract, options, renderUnbindDocument);
     if (contract.status === 'failed')
         process.exitCode = 1;
     return contract;
@@ -33,20 +33,19 @@ export function migrate(context, repositoryPath, options = {}) {
         ? plan
         : applyMigrationPlan(context, plan);
     if (options.json)
-        console.log(renderJson(contract));
+        presentJson(contract);
     else
-        presentHumanDocument(context, renderMigrationDocument(contract), {
+        presentDocument(context, renderMigrationDocument(contract), {
             verbose: options.verbose,
         });
     if (contract.status === 'failed')
         process.exitCode = 1;
     return contract;
 }
-function render(contract, options, renderPlain) {
+function render(context, contract, options, renderDocument) {
     if (options.json) {
-        console.log(renderJson(contract));
+        presentJson(contract);
         return;
     }
-    for (const line of renderPlain(contract))
-        console.log(line);
+    presentDocument(context, renderDocument(contract), { verbose: options.verbose });
 }

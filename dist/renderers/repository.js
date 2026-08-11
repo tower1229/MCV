@@ -1,114 +1,107 @@
-import { renderIssuePlain, styleText } from './color.js';
-import { withoutNextActions } from './human-document.js';
-export function renderMigrationDocument(contract) {
-    const full = renderMigrationPlain(contract);
-    const overflowSummary = contract.status === 'planned'
-        ? [
-            `Migration Plan: ${contract.repositoryPath}`,
-            `Changes: ${contract.changes.length}`,
-            `Issues: ${contract.issues.length}`,
-        ]
-        : full.slice(0, 3);
-    return {
-        operation: 'migrate',
-        title: contract.status === 'planned' ? 'Migration Plan' : 'Migration Result',
-        summary: [],
-        overflowSummary,
-        details: withoutNextActions(full),
-        nextActions: contract.nextActions,
-        detailPolicy: 'overflow',
-    };
-}
-export function renderRepositoryPlain(report) {
-    const lines = [
-        `Repository: ${report.repositoryPath ?? 'not bound'}`,
-        `Repository ID: ${report.repositoryId ?? 'unknown'}`,
-        `Schema version: ${report.repositorySchemaVersion ?? 'unknown'}`,
-        `Validity: ${report.valid ? styleText('valid', 'green') : styleText('invalid', 'red')}`,
+import { fact, issueBlocks, paragraph, status, } from '../presentation/builders.js';
+export function renderRepositoryDocument(report) {
+    const details = [
+        fact('Repository', report.repositoryPath ?? 'not bound', report.repositoryPath ? 'muted' : 'danger'),
+        fact('Identity', report.repositoryId ?? 'unknown', 'muted'),
+        fact('Schema', report.repositorySchemaVersion?.toString() ?? 'unknown', 'muted'),
+        status(report.valid ? 'success' : 'danger', report.valid
+            ? 'Repository is valid.'
+            : 'Repository is not valid.'),
     ];
     if (report.git) {
-        lines.push(`Git: ${report.git.clean ? styleText('clean', 'green') : styleText('dirty', 'yellow')}${report.git.branch ? ` (${report.git.branch})` : ''}`);
+        details.push(status(report.git.clean ? 'success' : 'attention', report.git.clean
+            ? `Git is clean${report.git.branch ? ` on ${report.git.branch}` : ''}.`
+            : `Git has ${report.git.uncommittedChanges} uncommitted change(s)${report.git.branch ? ` on ${report.git.branch}` : ''}.`));
     }
-    return appendIssuesAndActions(lines, report);
+    else if (report.repositoryPath) {
+        details.push(status('muted', 'Git is not enabled for this Repository.'));
+    }
+    details.push(...issueBlocks(report.issues));
+    return document('repository', 'Repository Report', details, report.nextActions, 'progressive');
 }
-export function renderBindPlain(contract) {
+export function renderBindDocument(contract) {
+    const details = [];
     if (contract.status === 'planned') {
-        return appendIssuesAndActions([
-            `Bind Plan: ${contract.repositoryPath}`,
-            ...contract.changes.map((change) => `[${change.kind}] ${change.previousRepositoryPath ?? 'not bound'} -> ${change.repositoryPath}`),
-        ], contract);
+        details.push(status(contract.readyToApply ? 'decision' : 'danger', contract.readyToApply
+            ? 'Repository binding is ready for confirmation.'
+            : 'Repository binding is blocked.'), fact('Repository', contract.repositoryPath ?? 'not bound', 'muted'), ...contract.changes.map((change) => paragraph(`${change.previousRepositoryPath ?? 'not bound'} -> ${change.repositoryPath ?? 'not bound'}`, 'attention')));
     }
-    if (contract.status === 'succeeded') {
-        return [`Bound this device to ${contract.repositoryPath}.`];
+    else if (contract.status === 'succeeded') {
+        details.push(status('success', `Bound this device to ${contract.repositoryPath}.`));
     }
-    return appendIssuesAndActions([], contract);
+    else {
+        details.push(status('danger', 'Repository binding failed.'));
+    }
+    details.push(...issueBlocks(contract.issues));
+    return document('bind', contract.status === 'planned' ? 'Bind Plan' : 'Bind Result', details, contract.nextActions);
 }
-export function renderUnbindPlain(contract) {
+export function renderUnbindDocument(contract) {
+    const details = [];
     if (contract.status === 'planned') {
-        return appendIssuesAndActions([
-            `Unbind Plan: ${contract.repositoryPath ?? 'not bound'}`,
-            ...contract.changes.map((change) => `[${change.kind}] ${change.previousRepositoryPath ?? 'not bound'}`),
-        ], contract);
+        details.push(status(contract.readyToApply ? 'decision' : 'danger', contract.readyToApply
+            ? 'Removing the local Repository binding requires confirmation.'
+            : 'Repository unbind is blocked.'), fact('Repository', contract.repositoryPath ?? 'not bound', 'muted'));
     }
-    if (contract.status !== 'succeeded')
-        return appendIssuesAndActions([], contract);
-    return appendIssuesAndActions(['Removed the MCV Repository binding from this device.'], contract);
+    else if (contract.status === 'succeeded') {
+        details.push(status('success', 'Removed the MCV Repository binding from this device.'));
+    }
+    else {
+        details.push(status('danger', 'Repository unbind failed.'));
+    }
+    details.push(...issueBlocks(contract.issues));
+    return document('unbind', contract.status === 'planned' ? 'Unbind Plan' : 'Unbind Result', details, contract.nextActions);
 }
-export function renderInitPlain(contract) {
+export function renderInitDocument(contract) {
+    const details = [];
     if (contract.status === 'planned') {
-        const lines = [
-            `Init Plan: ${contract.repositoryPath}`,
-            ...contract.changes.map((change) => `[${change.kind}] ${change.path ?? change.repositoryPath}`),
-        ];
-        return appendIssuesAndActions(lines, contract);
+        details.push(status(contract.readyToApply ? 'decision' : 'danger', contract.readyToApply
+            ? 'Repository initialization is ready for confirmation.'
+            : 'Repository initialization is blocked.'), fact('Repository', contract.repositoryPath ?? 'not bound', 'muted'), ...contract.changes.map((change) => paragraph(`${change.kind}: ${change.path ?? change.repositoryPath}`, change.kind === 'add' ? 'attention' : 'information')));
     }
-    if (contract.status === 'succeeded') {
-        return [`Initialized and bound MCV Repository at ${contract.repositoryPath}.`];
+    else if (contract.status === 'succeeded') {
+        details.push(status('success', `Initialized and bound MCV Repository at ${contract.repositoryPath}.`));
     }
-    return appendIssuesAndActions([], contract);
+    else {
+        details.push(status('danger', 'Repository initialization failed.'));
+    }
+    details.push(...issueBlocks(contract.issues));
+    return document('init', contract.status === 'planned' ? 'Init Plan' : 'Init Result', details, contract.nextActions);
 }
-export function renderMigrationPlain(contract) {
+export function renderMigrationDocument(contract) {
+    const details = [];
     if (contract.status === 'planned') {
-        const lines = [
-            `Migration Plan: ${contract.repositoryPath}`,
-            ...contract.changes.map((change) => {
-                if (change.kind === 'move')
-                    return `[move] ${change.sourcePath} -> ${change.targetPath}`;
-                if (change.kind === 'scan') {
-                    const assets = change.assetIds?.length
-                        ? change.assetIds.join(', ')
-                        : '(empty catalog)';
-                    return `[scan] Asset Catalog: ${assets}`;
-                }
-                if (change.id === 'schema-version') {
-                    return `[modify] ${change.path}: schema v${change.before} -> v${change.after}`;
-                }
-                if (change.id === 'device-state') {
-                    return `[modify] device state schema v${change.before} -> v${change.after}`;
-                }
-                if (change.id === 'repository-profiles') {
-                    const assets = change.assetIds?.length
-                        ? change.assetIds.join(', ')
-                        : '(empty)';
-                    return `[add] ${change.path} (global: ${assets})`;
-                }
-                return `[${change.kind}] ${change.path}`;
-            }),
-        ];
-        return appendIssuesAndActions(lines, contract);
+        details.push(status(contract.readyToApply ? 'decision' : 'danger', contract.readyToApply
+            ? 'Repository migration is ready for confirmation.'
+            : 'Repository migration is blocked.'), fact('Repository', contract.repositoryPath ?? 'not bound', 'muted'), ...contract.changes.map(renderMigrationChange));
     }
-    if (contract.status === 'succeeded') {
-        return [
-            `Migrated Repository at ${contract.repositoryPath} to schema v${contract.data?.repositorySchemaVersion}.`,
-            `Verified backup: ${contract.data?.backupPath}`,
-        ];
+    else if (contract.status === 'succeeded') {
+        details.push(status('success', `Migrated Repository to schema v${contract.data?.repositorySchemaVersion}.`), fact('Repository', contract.repositoryPath ?? 'not bound', 'muted'), fact('Verified backup', contract.data?.backupPath ?? 'unknown', 'muted'));
     }
-    return appendIssuesAndActions([], contract);
+    else {
+        details.push(status('danger', 'Repository migration failed.'));
+    }
+    details.push(...issueBlocks(contract.issues));
+    return document('migrate', contract.status === 'planned' ? 'Migration Plan' : 'Migration Result', details, contract.nextActions);
 }
-function appendIssuesAndActions(lines, contract) {
-    return [
-        ...lines,
-        ...contract.issues.map(renderIssuePlain),
-        ...contract.nextActions.map((action) => `Next: ${action}`),
-    ];
+function renderMigrationChange(change) {
+    if (change.kind === 'move')
+        return paragraph(`move: ${change.sourcePath} -> ${change.targetPath}`, 'attention');
+    if (change.kind === 'scan') {
+        return paragraph(`scan Asset Catalog: ${change.assetIds?.join(', ') || '(empty catalog)'}`, 'information');
+    }
+    if (change.before !== undefined && change.after !== undefined) {
+        return paragraph(`${change.kind}: ${change.path ?? change.id} · v${change.before} -> v${change.after}`, 'attention');
+    }
+    return paragraph(`${change.kind}: ${change.path ?? change.id}`, change.kind === 'backup' ? 'information' : 'attention');
+}
+function document(operation, title, details, nextActions, detailPolicy = 'overflow') {
+    return {
+        operation,
+        title,
+        summary: detailPolicy === 'progressive' ? details : [],
+        overflowSummary: details.slice(0, 4),
+        details,
+        nextActions,
+        detailPolicy,
+    };
 }

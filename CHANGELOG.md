@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Simple Capture Plans now use an enhanced line review that validates numbered choices, reviews deletion candidates and warnings explicitly, echoes resolved selections, and prints a final selection summary before Apply. Automatic TUI routing begins at two review items across decision groups, warnings, and deletions; `--verbose` remains line-oriented.
 - Large human-readable Reports and failed Results move details to the same Review Artifact after a shared 40-line or 8-KiB budget. JSON and MCP output remain complete and never create Review Artifacts.
 - Review Artifacts are created atomically under the per-user state directory, use POSIX `0700`/`0600` permissions where applicable, and may contain plaintext configuration. Creation best-effort removes `.txt` files older than 24 hours and prunes older files toward 10 files and 50 MiB while always retaining the newly created Artifact; a single oversized current file or failed cleanup may temporarily exceed those targets. Artifact creation failure falls back to complete terminal output.
+- Human CLI output now uses one semantic Presentation module across reports, prompts, results, and dedicated TUIs. Review Artifacts are always ANSI-free plain text, `NO_COLOR` and terminal capability are resolved per destination, and Review references print one native absolute path.
 - Bare `mcv` now prints the same read-only Overview in both TTY and non-TTY environments.
 
 ## [0.3.0-beta.1] - 2026-08-08

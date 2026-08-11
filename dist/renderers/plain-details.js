@@ -1,4 +1,10 @@
-import { renderIssuePlain } from './color.js';
+/** Classifies renderer-owned detail text while the destination adapter owns styling. */
+export function detailText(text, _role) {
+    return text;
+}
+export function renderIssuePlain(issue) {
+    return `[${issue.severity}] ${issue.code}: ${issue.message}`;
+}
 export function summarizeIssues(issues) {
     const count = (severity) => issues.filter((issue) => issue.severity === severity).length;
     return `Issues: ${count('error')} errors, ${count('warning')} warnings, ${count('decisionRequired')} decisions required, ${count('notice')} notices.`;
