@@ -3,7 +3,7 @@ import { recordCaptureSuccess } from '../utils/state.js';
 import { applyCapturePlan, createCapturePlan, } from '../operations/capture.js';
 import { renderCapturePlanDocument, renderCaptureResultDocument, } from '../renderers/capture.js';
 import { presentJson } from '../renderers/json.js';
-import { presentBlocks, presentDocument, presentOutcome, presentReviewReference, } from '../presentation/output.js';
+import { presentBlocks, presentDocument, presentDiagnostic, presentOutcome, presentOutcomeBlock, presentReviewReference, } from '../presentation/output.js';
 import { fact, paragraph, status } from '../presentation/builders.js';
 import { buildCaptureReviewModel, captureReviewSelection, createCaptureReviewDraft, setCaptureDecision, setCaptureWarningConfirmed, summarizeCaptureReview, toggleCaptureChange, } from '../review/capture.js';
 import { runCaptureReviewTui, } from '../tui/capture/app.js';
@@ -94,7 +94,7 @@ export async function captureConfigurations(context, dependencies = {}, options 
             const deletion = review.deletions[index];
             presentBlocks([
                 status('danger', `Deletion ${index + 1}/${review.deletions.length}: ${deletion.name}`),
-                fact('Target', deletion.repositoryPaths.join(', '), 'muted'),
+                fact('Target', deletion.repositoryPaths.join(', '), 'muted', 'path'),
             ]);
             const include = await resolveDeletionConfirmation(dependencies, deletion);
             if (include === undefined) {
@@ -182,13 +182,17 @@ export function shouldUseCaptureTui(review, options, terminal = {
 function presentCaptureTuiOutcome(context, outcome) {
     if (outcome.reviewPath)
         presentReviewReference(outcome.reviewPath);
+    if (outcome.reviewFailure) {
+        presentDiagnostic(`Could not create the local review file; printing full details instead. ${outcome.reviewFailure.message}`);
+        presentBlocks([{ kind: 'literal', text: outcome.reviewFailure.fallback }]);
+    }
     if (outcome.reason === 'interrupted') {
-        presentOutcome('Capture Result', outcome.presentation.text, 'danger');
+        presentOutcomeBlock('Capture Result', outcome.presentation);
         process.exitCode = 130;
         return;
     }
     if (!outcome.result) {
-        presentOutcome('Capture Result', outcome.presentation.text, 'attention');
+        presentOutcomeBlock('Capture Result', outcome.presentation);
         return;
     }
     if (outcome.result.status !== 'succeeded') {
@@ -221,8 +225,8 @@ function resolveWarningConfirmation(dependencies, warning) {
 async function selectConflictInTerminal(groupIndex, groupCount, message, name, candidates) {
     presentBlocks([
         status('decision', `Decision ${groupIndex + 1}/${groupCount}: ${message}`),
-        fact('Target', name, 'muted'),
-        { kind: 'list', items: candidates.map((candidate, index) => ({ text: `${index + 1}. ${candidate}` })) },
+        fact('Target', name, 'muted', 'path'),
+        { kind: 'list', items: candidates.map((candidate, index) => ({ text: `${index + 1}. ${candidate}`, kind: 'id' })) },
     ]);
     while (true) {
         const outcome = await askInTerminal('Choose authoritative source (blank to skip): ');

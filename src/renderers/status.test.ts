@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { StatusReport } from '../operations/status.js';
-import { renderStatusDocument, renderStatusPlain } from './status.js';
+import { renderStatusDocument } from './status.js';
 import { renderPresentationDocument } from '../presentation/render.js';
 
 type LinkFact = StatusReport['linkFacts'][number];
@@ -11,9 +11,9 @@ describe('Status renderer', () => {
 
     expect(document.detailPolicy).toBe('progressive');
     expect(renderPresentationDocument(document, 'summary', { color: false }))
-      .toContain('Skills      No linked packages');
+      .toContain('Skills  No linked packages');
     expect(renderPresentationDocument(document, 'details', { color: false }))
-      .toContain('Linked Skills: none');
+      .toContain('Linked Skills  none');
   });
 
   it('uses semantic ANSI colors in a TTY and preserves complete NO_COLOR text', () => {
@@ -30,17 +30,18 @@ describe('Status renderer', () => {
       report.pendingDeployment.total = 2;
       report.pendingDeployment.recommended = 2;
       const colored = renderPresentationDocument(renderStatusDocument(report), 'summary', { color: true });
-      expect(colored).toContain('\u001b[36mMCV configuration overview');
+      expect(colored).toContain('MCV configuration overview');
       expect(colored).toContain('\u001b[33m! 2 pending deployment changes');
-      expect(colored).toContain('\u001b[32mEnvironment ✓ No missing variables');
-      expect(colored).toContain('\u001b[2mRepository  /repository');
+      expect(colored).toContain('\u001b[36mEnvironment\u001b[0m');
+      expect(colored).toContain('\u001b[32m✓ No missing variables');
+      expect(colored).toContain('\u001b[36mRepository\u001b[0m  /repository');
 
       process.env.NO_COLOR = '';
       const plain = renderPresentationDocument(renderStatusDocument(report), 'summary', { color: false });
       expect(plain).not.toContain('\u001b[');
       expect(plain).toContain('! 2 pending deployment changes');
       expect(plain).toContain('No deletions or Advanced Cleanup');
-      expect(plain).toContain('Environment ✓ No missing variables');
+      expect(plain).toContain('Environment  ✓ No missing variables');
     } finally {
       Object.defineProperty(process.stdout, 'isTTY', {
         configurable: true,
@@ -88,20 +89,20 @@ describe('Status renderer', () => {
     const summary = renderPresentationDocument(document, 'summary', { color: false });
 
     expect(summary).toContain(
-      'Skills      ✓ 3 linked packages healthy',
+      'Skills  ✓ 3 linked packages healthy',
     );
     expect(summary).toContain('Coverage  Codex 2 · Claude Code 2 · 1 shared');
     expect(summary).toContain('External links preserved');
-    expect(summary).toContain('Details   mcv status --verbose');
+    expect(summary).toContain('Details  mcv status --verbose');
     expect(summary).not.toContain('cloudflare · Codex');
 
-    const details = renderStatusPlain(statusReport(facts)).join('\n');
+    const details = renderPresentationDocument(renderStatusDocument(statusReport(facts)), 'details', { color: false });
     expect(details).toContain('✓ cloudflare · Codex · Already matches');
-    expect(details).toContain('Ownership: outside MCV');
+    expect(details).toContain('Ownership  outside MCV');
     expect(details).toContain('/home/.agents/skills/cloudflare');
     expect(details).toContain('/home/.claude/skills/cloudflare');
     expect(details).toContain('321 expected file placements verified');
-    expect(details).toContain('Ownership: MCV-managed');
+    expect(details).toContain('Ownership  MCV-managed');
   });
 
   it('uses highest package severity and expands only actionable facts in the summary', () => {
@@ -137,18 +138,18 @@ describe('Status renderer', () => {
       renderStatusDocument(statusReport(facts)), 'summary', { color: false },
     );
 
-    expect(summary).toContain('Skills      5 packages · 1 healthy · 3 need review · 1 blocked');
+    expect(summary).toContain('Skills  × 5 packages · 1 healthy · 3 need review · 1 blocked');
     expect(summary).toContain('× duplicate · Codex · Blocked: link target is missing');
-    expect(summary).toContain('! decision · Codex · Decision required');
+    expect(summary).toContain('? decision · Codex · Decision required');
     expect(summary).toContain('Choose Preserve or Replace during Deploy.');
     expect(summary).toContain('! warning-a, warning-b · Gemini CLI · Review required');
     expect(summary).toContain('Acknowledge during Deploy to preserve the external shared link.');
     expect(summary).not.toContain('healthy · Codex · Already matches');
-    expect(summary.indexOf('× duplicate')).toBeLessThan(summary.indexOf('! decision'));
-    expect(summary.indexOf('! decision')).toBeLessThan(summary.indexOf('! warning-a'));
+    expect(summary.indexOf('× duplicate')).toBeLessThan(summary.indexOf('? decision'));
+    expect(summary.indexOf('? decision')).toBeLessThan(summary.indexOf('! warning-a'));
 
-    const details = renderStatusPlain(statusReport(facts)).join('\n');
-    expect(details).toContain('Coverage: 1 expected file placement affected');
+    const details = renderPresentationDocument(renderStatusDocument(statusReport(facts)), 'details', { color: false });
+    expect(details).toContain('Coverage  1 expected file placement affected');
   });
 
   it('reports Canonical Store and all supported Skill Surfaces without treating the Store as shared', () => {

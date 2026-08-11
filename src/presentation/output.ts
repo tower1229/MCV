@@ -6,6 +6,7 @@ import type {
   PresentationBlock,
   PresentationDocument,
   PresentationOptions,
+  PresentationNextAction,
   PresentationRole,
   PresentationResult,
 } from './contracts.js';
@@ -28,6 +29,18 @@ export function presentDocument(
   context: DeviceContext,
   document: PresentationDocument,
   options: PresentationOptions = {},
+): PresentationResult {
+  try {
+    return presentDocumentUnsafe(context, document, options);
+  } catch (error) {
+    throw new PresentationStageError(document.operation, document.outcome, document.title, error);
+  }
+}
+
+function presentDocumentUnsafe(
+  context: DeviceContext,
+  document: PresentationDocument,
+  options: PresentationOptions,
 ): PresentationResult {
   const plainDetails = renderPresentationDocument(
     document,
@@ -65,6 +78,14 @@ export function presentDocument(
   }
   printNextActions(document.nextActions);
   return artifact.reviewPath ? { reviewPath: artifact.reviewPath } : {};
+}
+
+export class PresentationStageError extends Error {
+  constructor(operation: string, outcome: string, title: string, cause: unknown) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    super(`${operation} ${outcome} ${title} could not be rendered during the presentation stage: ${message}`, { cause });
+    this.name = 'PresentationStageError';
+  }
 }
 
 function presentProgressiveDocument(
@@ -212,6 +233,17 @@ export function presentOutcome(
   printText(`${stylePresentationText(title, 'information', capability)}\n${renderPresentationBlocks([status(role, message)], capability)}`);
 }
 
+export function presentOutcomeBlock(
+  title: string,
+  block: Extract<PresentationBlock, { kind: 'status' }>,
+): void {
+  const capability = resolveOutputCapability({
+    isTTY: Boolean(process.stdout.isTTY),
+    columns: process.stdout.columns,
+  });
+  printText(`${stylePresentationText(title, 'information', capability)}\n${renderPresentationBlocks([block], capability)}`);
+}
+
 export function presentReviewReference(reviewPath: string): void {
   printReviewPath(reviewPath);
 }
@@ -220,13 +252,15 @@ function printReviewFailure(error: Error): void {
   presentDiagnostic(`Could not create the local review file; printing full details instead. ${error.message}`);
 }
 
-function printNextActions(nextActions: string[]): void {
+function printNextActions(nextActions: PresentationNextAction[]): void {
   if (nextActions.length === 0) return;
   const capability = resolveOutputCapability({
     isTTY: Boolean(process.stdout.isTTY),
     columns: process.stdout.columns,
   });
-  printText(renderPresentationBlocks(nextActions.map((action) => status('information', `Next: ${action}`)), capability));
+  printText(renderPresentationBlocks(nextActions.map((action): PresentationBlock => action.kind === 'command'
+    ? { kind: 'fact', label: 'Next command', value: action.text, valueKind: 'command' }
+    : { kind: 'paragraph', content: [{ text: `Next: ${action.text}` }] }), capability));
 }
 
 function printReviewPath(reviewPath: string): void {
@@ -239,6 +273,7 @@ function printReviewPath(reviewPath: string): void {
     label: 'Review',
     value: reviewPath,
     role: 'muted',
+    valueKind: 'path',
   }], capability));
 }
 

@@ -1,5 +1,5 @@
 import type { Issue } from '../operations/contracts.js';
-import type { PresentationBlock, PresentationRole, PresentationText } from './contracts.js';
+import type { PresentationBlock, PresentationNextAction, PresentationRole, PresentationText } from './contracts.js';
 
 export const spacer = (): PresentationBlock => ({ kind: 'spacer' });
 
@@ -13,16 +13,29 @@ export const fact = (
   label: string,
   value: string,
   role?: PresentationRole,
-): PresentationBlock => ({ kind: 'fact', label, value, role });
+  valueKind?: PresentationText['kind'],
+): PresentationBlock => ({ kind: 'fact', label, value, role, valueKind });
 
 export const paragraph = (
   text: string | PresentationText[],
-  role?: PresentationRole,
 ): PresentationBlock => ({
   kind: 'paragraph',
   content: typeof text === 'string' ? [{ text }] : text,
-  role,
 });
+
+export const instruction = (text: string): PresentationNextAction => ({ kind: 'instruction', text });
+export const command = (text: string): PresentationNextAction => ({ kind: 'command', text });
+
+export const instructionActions = (actions: string[]): PresentationNextAction[] => actions.map(instruction);
+
+export function diffLines(diff: string): Array<{ kind: 'metadata' | 'context' | 'add' | 'remove'; text: string }> {
+  return diff.split('\n').map((text) => {
+    if (text.startsWith('+++') || text.startsWith('---') || text.startsWith('@@')) return { kind: 'metadata', text };
+    if (text.startsWith('+')) return { kind: 'add', text };
+    if (text.startsWith('-')) return { kind: 'remove', text };
+    return { kind: 'context', text };
+  });
+}
 
 export const literal = (text: string): PresentationBlock => ({ kind: 'literal', text });
 
@@ -43,8 +56,4 @@ export function issueBlocks(issues: Issue[]): PresentationBlock[] {
       status(issueRole(issue.severity), `${issue.code}: ${issue.message}`),
       ...(issue.details ? [literal(issue.details)] : []),
     ]));
-}
-
-export function textLines(lines: string[]): PresentationBlock[] {
-  return lines.map((line) => line.length === 0 ? spacer() : paragraph(line));
 }

@@ -14,7 +14,9 @@ import { presentJson } from '../renderers/json.js';
 import {
   presentBlocks,
   presentDocument,
+  presentDiagnostic,
   presentOutcome,
+  presentOutcomeBlock,
   presentReviewReference,
 } from '../presentation/output.js';
 import { fact, paragraph, status } from '../presentation/builders.js';
@@ -153,7 +155,7 @@ export async function captureConfigurations(
       const deletion = review.deletions[index];
       presentBlocks([
         status('danger', `Deletion ${index + 1}/${review.deletions.length}: ${deletion.name}`),
-        fact('Target', deletion.repositoryPaths.join(', '), 'muted'),
+        fact('Target', deletion.repositoryPaths.join(', '), 'muted', 'path'),
       ]);
       const include = await resolveDeletionConfirmation(dependencies, deletion);
       if (include === undefined) {
@@ -249,13 +251,17 @@ export function shouldUseCaptureTui(
 
 function presentCaptureTuiOutcome(context: DeviceContext, outcome: CaptureTuiOutcome): void {
   if (outcome.reviewPath) presentReviewReference(outcome.reviewPath);
+  if (outcome.reviewFailure) {
+    presentDiagnostic(`Could not create the local review file; printing full details instead. ${outcome.reviewFailure.message}`);
+    presentBlocks([{ kind: 'literal', text: outcome.reviewFailure.fallback }]);
+  }
   if (outcome.reason === 'interrupted') {
-    presentOutcome('Capture Result', outcome.presentation.text, 'danger');
+    presentOutcomeBlock('Capture Result', outcome.presentation);
     process.exitCode = 130;
     return;
   }
   if (!outcome.result) {
-    presentOutcome('Capture Result', outcome.presentation.text, 'attention');
+    presentOutcomeBlock('Capture Result', outcome.presentation);
     return;
   }
   if (outcome.result.status !== 'succeeded') {
@@ -309,8 +315,8 @@ async function selectConflictInTerminal(
 ): Promise<{ interrupted: boolean; choice?: number }> {
   presentBlocks([
     status('decision', `Decision ${groupIndex + 1}/${groupCount}: ${message}`),
-    fact('Target', name, 'muted'),
-    { kind: 'list', items: candidates.map((candidate, index) => ({ text: `${index + 1}. ${candidate}` })) },
+    fact('Target', name, 'muted', 'path'),
+    { kind: 'list', items: candidates.map((candidate, index) => ({ text: `${index + 1}. ${candidate}`, kind: 'id' })) },
   ]);
   while (true) {
     const outcome = await askInTerminal('Choose authoritative source (blank to skip): ');

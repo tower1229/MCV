@@ -35,15 +35,15 @@ function renderBlock(block: PresentationBlock, capability: OutputCapability): st
       return wrapLine(renderStatus(block.role, block.text, capability), capability);
     case 'fact':
       return wrapLine(
-        `${stylePresentationText(block.label, 'information', capability)}  ${stylePresentationText(block.value, block.role, capability)}`,
+        `${stylePresentationText(block.label, 'information', capability)}  ${stylePresentationText(block.value, block.valueKind ? undefined : block.role, capability)}`,
         capability,
       );
     case 'paragraph':
-      return wrapLine(renderTextParts(block.content, block.role, capability), capability);
+      return wrapLine(renderTextParts(block.content, capability), capability);
     case 'list':
       return block.items.flatMap((item) => {
         const marker = item.selected === undefined ? '  ' : item.selected ? '[x]' : '[ ]';
-        return wrapLine(`${marker} ${stylePresentationText(item.text, item.role, capability)}`, capability, marker.length + 1);
+        return wrapLine(`${marker} ${stylePresentationText(item.text, item.kind ? undefined : item.role, capability)}`, capability, marker.length + 1);
       });
     case 'literal':
       return block.text.split('\n');
@@ -55,7 +55,7 @@ function renderBlock(block: PresentationBlock, capability: OutputCapability): st
       ));
     case 'section':
       return [
-        stylePresentationText(block.title, 'information', capability),
+        stylePresentationText(block.title, block.titleKind ? undefined : 'information', capability),
         ...block.blocks.flatMap((child) => renderBlock(child, capability).map((line) => `  ${line}`)),
       ];
     case 'spacer':
@@ -74,10 +74,9 @@ function renderStatus(
 
 function renderTextParts(
   content: PresentationText[],
-  fallbackRole: PresentationRole | undefined,
   capability: OutputCapability,
 ): string {
-  return content.map((part) => stylePresentationText(part.text, part.role ?? fallbackRole, capability)).join('');
+  return content.map((part) => stylePresentationText(part.text, undefined, capability)).join('');
 }
 
 function wrapLine(

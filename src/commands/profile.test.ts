@@ -99,19 +99,19 @@ describe('mcv profile', () => {
   it('renders list and show in plain text with Unassigned counts', async () => {
     await program().parseAsync(['node', 'mcv', 'profile', 'list']);
     const listOutput = vi.mocked(console.log).mock.calls.flat().join('\n');
-    expect(listOutput).toContain(`Repository: ${repositoryPath}`);
-    expect(listOutput).toContain('Profiles: 1');
+    expect(listOutput).toContain(`Repository  ${repositoryPath}`);
+    expect(listOutput).toContain('Profiles  1');
     expect(listOutput).toContain('global · Global · 1 assets');
-    expect(listOutput).toContain('Unassigned: 3 assets');
+    expect(listOutput).toContain('Unassigned  3 assets');
 
     vi.mocked(console.log).mockClear();
     await program().parseAsync(['node', 'mcv', 'profile', 'show', 'global']);
     const showOutput = vi.mocked(console.log).mock.calls.flat().join('\n');
-    expect(showOutput).toContain('Profile: global');
-    expect(showOutput).toContain('Title: Global');
-    expect(showOutput).toContain('Assets: 1');
+    expect(showOutput).toContain('Profile  global');
+    expect(showOutput).toContain('Title  Global');
+    expect(showOutput).toContain('Assets  1');
     expect(showOutput).toContain('rule:canonical');
-    expect(showOutput).toContain('Unassigned: 3 assets');
+    expect(showOutput).toContain('Unassigned  3 assets');
   });
 
   it('externalizes a large Profile list while keeping counts in the terminal', async () => {
@@ -129,7 +129,7 @@ describe('mcv profile', () => {
     await program().parseAsync(['node', 'mcv', 'profile', 'list']);
 
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
-    expect(output).toContain('Profiles: 42');
+    expect(output).toContain('Profiles  42');
     expect(output).toContain('Review  ');
     expect(output).not.toContain('profile-40');
     const reviewDirectory = path.join(stateRoot, 'mcv', 'reviews');

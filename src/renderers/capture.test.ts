@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import type { CapturePlan, CaptureResult } from '../operations/capture.js';
 import {
   formatContributingProjections,
-  renderCapturePlanPlain,
-  renderCaptureResultPlain,
+  renderCapturePlanDocument,
+  renderCaptureResultDocument,
 } from './capture.js';
+import { renderPresentationDocument } from '../presentation/render.js';
 
 describe('Capture plan rendering', () => {
   it('identifies contributing Skill projections without duplicating the package change', () => {
@@ -62,7 +63,7 @@ describe('Capture plan rendering', () => {
       },
     } satisfies CapturePlan;
 
-    const lines = renderCapturePlanPlain(plan);
+    const lines = renderPresentationDocument(renderCapturePlanDocument(plan), 'details', { color: false }).split('\n');
     expect(lines.filter((line) => line.includes('! add: shared-demo'))).toHaveLength(1);
     expect(lines.join('\n')).toContain(
       'Projections  claude-code (managed), codex (physical), gemini-cli (managed)',
@@ -94,7 +95,7 @@ describe('Capture result rendering', () => {
       },
     } satisfies CaptureResult;
 
-    expect(renderCaptureResultPlain(result)).toEqual([
+    expect(renderPresentationDocument(renderCaptureResultDocument(result), 'details', { color: false }).split('\n')).toEqual([
       '✓ Captured 1 selected item(s).',
       'Repository  /repo',
       'New Unassigned  1 asset(s) · skill:review',

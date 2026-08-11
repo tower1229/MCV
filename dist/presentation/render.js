@@ -14,13 +14,13 @@ function renderBlock(block, capability) {
         case 'status':
             return wrapLine(renderStatus(block.role, block.text, capability), capability);
         case 'fact':
-            return wrapLine(`${stylePresentationText(block.label, 'information', capability)}  ${stylePresentationText(block.value, block.role, capability)}`, capability);
+            return wrapLine(`${stylePresentationText(block.label, 'information', capability)}  ${stylePresentationText(block.value, block.valueKind ? undefined : block.role, capability)}`, capability);
         case 'paragraph':
-            return wrapLine(renderTextParts(block.content, block.role, capability), capability);
+            return wrapLine(renderTextParts(block.content, capability), capability);
         case 'list':
             return block.items.flatMap((item) => {
                 const marker = item.selected === undefined ? '  ' : item.selected ? '[x]' : '[ ]';
-                return wrapLine(`${marker} ${stylePresentationText(item.text, item.role, capability)}`, capability, marker.length + 1);
+                return wrapLine(`${marker} ${stylePresentationText(item.text, item.kind ? undefined : item.role, capability)}`, capability, marker.length + 1);
             });
         case 'literal':
             return block.text.split('\n');
@@ -28,7 +28,7 @@ function renderBlock(block, capability) {
             return block.lines.map((line) => stylePresentationText(line.text, line.kind === 'add' ? 'success' : line.kind === 'remove' ? 'danger' : line.kind === 'metadata' ? 'muted' : undefined, capability));
         case 'section':
             return [
-                stylePresentationText(block.title, 'information', capability),
+                stylePresentationText(block.title, block.titleKind ? undefined : 'information', capability),
                 ...block.blocks.flatMap((child) => renderBlock(child, capability).map((line) => `  ${line}`)),
             ];
         case 'spacer':
@@ -39,8 +39,8 @@ function renderStatus(role, text, capability) {
     const phrase = `${PRESENTATION_THEME[role].symbol} ${text}`;
     return stylePresentationText(phrase, role, capability);
 }
-function renderTextParts(content, fallbackRole, capability) {
-    return content.map((part) => stylePresentationText(part.text, part.role ?? fallbackRole, capability)).join('');
+function renderTextParts(content, capability) {
+    return content.map((part) => stylePresentationText(part.text, undefined, capability)).join('');
 }
 function wrapLine(line, capability, hangingIndent = 2) {
     const width = capability.columns;

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import * as pty from 'node-pty';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -52,7 +53,7 @@ describe.skipIf(process.platform !== 'win32')('packaged Capture TUI in Windows C
       '[uint32]$before = 0',
       'if (-not [McvCaptureTest.ConsoleMode]::GetConsoleMode($inputHandle, [ref]$before)) { throw "GetConsoleMode before TUI failed" }',
       'Set-Location $Repo',
-      '& $Node $Cli capture --tui',
+      'if ($env:MCV_CAPTURE_RENDER_FAILURE -eq "1") { & $Node (Join-Path $Repo "render-failure.mjs") } else { & $Node $Cli capture --tui }',
       '$code = $LASTEXITCODE',
       '[uint32]$after = 0',
       'if (-not [McvCaptureTest.ConsoleMode]::GetConsoleMode($inputHandle, [ref]$after)) { throw "GetConsoleMode after TUI failed" }',
@@ -75,10 +76,24 @@ describe.skipIf(process.platform !== 'win32')('packaged Capture TUI in Windows C
     ]);
 
     expect(outcome.code).toBe(0);
-    expectRestoredTerminal(outcome.output);
+    expect(outcome.output).toContain('\u001b[?1049l');
+    expect(outcome.output).toContain('\u001b[?25h');
     expect(outcome.output).toContain('INPUT_MODE:restored');
     expect(outcome.output).toContain('Capture cancelled; repository was not changed.');
     expect(fs.existsSync(path.join(repositoryPath, 'common', 'AGENTS.md'))).toBe(true);
+  }, 45_000);
+
+  it('keeps Capture semantics visible without SGR under NO_COLOR and restores ConPTY', async () => {
+    const repositoryPath = createFixture(testRoot, 'capture-conpty-no-color');
+    writeBinding(testRoot, repositoryPath, 'capture-conpty-no-color');
+    const outcome = await runConPty(repositoryPath, [
+      { pattern: 'MCV Capture Review', input: 'q', delay: 100 },
+    ], { NO_COLOR: '1' });
+
+    expect(outcome.code).toBe(0);
+    expectRestoredTerminal(outcome.output);
+    expect(outcome.output).not.toMatch(/\u001b\[[0-9;]*m/u);
+    expect(outcome.output).toContain('× Destructive');
   }, 45_000);
 
   it('returns 130 on Ctrl+C and restores ConPTY input mode', async () => {
@@ -93,11 +108,54 @@ describe.skipIf(process.platform !== 'win32')('packaged Capture TUI in Windows C
     expect(outcome.output).toContain('INPUT_MODE:restored');
   }, 45_000);
 
+  it('completes a reviewed Capture and restores ConPTY input mode', async () => {
+    const repositoryPath = createFixture(testRoot, 'capture-conpty-complete');
+    writeBinding(testRoot, repositoryPath, 'capture-conpty-complete');
+    const outcome = await runConPty(repositoryPath, [
+      { pattern: 'MCV Capture Review', input: ' ', delay: 100 },
+      { pattern: '[x] × Destructive', input: 'n', delay: 100 },
+      { pattern: 'Warnings · explicit confirmation required', input: ' ', delay: 100 },
+      { pattern: '[x] A source item was skipped', input: '\r', delay: 100 },
+      { pattern: 'Final confirmation', input: '\r', delay: 100 },
+      { pattern: 'Succeeded: captured', input: '\r', delay: 100 },
+    ]);
+
+    expect(outcome.code).toBe(0);
+    expectRestoredTerminal(outcome.output);
+    expect(outcome.output).toContain('INPUT_MODE:restored');
+    expect(outcome.output).toMatch(/[✓!×?]/u);
+    expect(outcome.output).toMatch(/\u001b\[[0-9;]*m/u);
+  }, 45_000);
+
+  it('restores ConPTY input mode, cursor, and alternate screen after a Capture render failure', async () => {
+    const repositoryPath = createFixture(testRoot, 'capture-conpty-render-failure');
+    fs.writeFileSync(path.join(repositoryPath, 'render-failure.mjs'), [
+      'const { runCaptureReviewTui } = await import(process.env.MCV_CAPTURE_APP_URL);',
+      'const plan = { schemaVersion: 3, operation: "capture", status: "planned", readyToApply: true, operationId: "failure", preconditions: {}, repositoryPath: process.cwd(), changes: [], issues: [], nextActions: [], summary: { parameterizedPathCount: 0, excludedFileCount: 0 } };',
+      'try {',
+      '  await runCaptureReviewTui({ homeDir: process.env.USERPROFILE, platform: "win32", env: process.env }, plan, {}, { render: () => { throw new Error("forced render failure"); } });',
+      '} catch (error) {',
+      '  console.log(`RENDER_FAILURE:handled:${error.message}`);',
+      '}',
+      '',
+    ].join('\n'));
+    const outcome = await runConPty(repositoryPath, [
+      { pattern: 'RENDER_FAILURE:handled:forced render failure' },
+    ], { MCV_CAPTURE_RENDER_FAILURE: '1' });
+
+    expect(outcome.code).toBe(0);
+    expect(outcome.output).toContain('\u001b[?1049l');
+    expect(outcome.output).toContain('\u001b[?25h');
+    expect(outcome.output).toContain('INPUT_MODE:restored');
+  }, 45_000);
+
   function runConPty(
     repositoryPath: string,
     steps: Array<{ pattern: string; input?: string; delay?: number }>,
+    environment: NodeJS.ProcessEnv = {},
   ): Promise<{ code: number; output: string }> {
     return new Promise((resolve, reject) => {
+      const { NO_COLOR: _noColor, ...baseEnvironment } = process.env;
       const terminal = pty.spawn('powershell.exe', [
         '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', wrapperPath,
         '-Node', process.execPath, '-Cli', cliPath, '-ModeProbe', modeProbePath,
@@ -107,11 +165,14 @@ describe.skipIf(process.platform !== 'win32')('packaged Capture TUI in Windows C
         rows: 30,
         cwd: process.cwd(),
         env: {
-          ...process.env,
+          ...baseEnvironment,
+          FORCE_COLOR: '1',
           HOME: testRoot,
           USERPROFILE: testRoot,
           APPDATA: testRoot,
           LOCALAPPDATA: testRoot,
+          MCV_CAPTURE_APP_URL: pathToFileURL(path.join(process.cwd(), 'dist', 'tui', 'capture', 'app.js')).href,
+          ...environment,
         },
       });
       let output = '';

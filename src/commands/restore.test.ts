@@ -119,13 +119,13 @@ describe('mcv restore', () => {
 
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(output).toContain('Restore Plan: latest complete deployment backup');
-    expect(output).toContain('Changes: 1 restore, 0 delete.');
+    expect(output).toContain('Changes  1 restore, 0 delete');
     expect(output).toContain('Review  ');
     expect(output).not.toContain(targetPath);
     const reviewDirectory = path.join(stateRoot, 'mcv', 'reviews');
     const reviewFiles = fs.readdirSync(reviewDirectory);
     expect(fs.readFileSync(path.join(reviewDirectory, reviewFiles[0]), 'utf8'))
-      .toContain(`  [restore] ${targetPath} [Ordinary file]`);
+      .toContain(`restore  ${targetPath} [Ordinary file]`);
     expect(fs.readFileSync(targetPath, 'utf8')).toBe('deployed content');
     expect(fs.existsSync(path.join(stateRoot, 'mcv', 'restore-backups'))).toBe(false);
   });

@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DeployChange, DeployPlan, DeployResult } from '../operations/deploy.js';
 import {
   renderDeployPlanDocument,
-  renderDeployPlanPlain,
-  renderDeployResultPlain,
+  renderDeployResultDocument,
 } from './deploy.js';
 import { renderPresentationDocument } from '../presentation/render.js';
 
@@ -22,9 +21,9 @@ describe('plain Deploy renderer', () => {
         'summary',
         { color: true },
       );
-      expect(colored).toContain('\u001b[36mDeploy global configuration');
-      expect(colored).toContain('\u001b[32m✓ Ready to deploy');
-      expect(colored).toContain('\u001b[2mRepository  /repository');
+      expect(colored).toContain('Deploy global configuration');
+      expect(colored).toContain('\u001b[32m✓ No selected changes to deploy');
+      expect(colored).toContain('\u001b[36mRepository\u001b[0m  /repository');
 
       process.env.NO_COLOR = '';
       const plain = renderPresentationDocument(
@@ -33,7 +32,7 @@ describe('plain Deploy renderer', () => {
         { color: false },
       );
       expect(plain).not.toContain('\u001b[');
-      expect(plain).toContain('✓ Ready to deploy');
+      expect(plain).toContain('✓ No selected changes to deploy');
       expect(plain).toContain('No deletions or topology migrations');
     } finally {
       Object.defineProperty(process.stdout, 'isTTY', {
@@ -87,10 +86,11 @@ describe('plain Deploy renderer', () => {
       },
     };
 
-    expect(renderDeployPlanPlain(plan).join('\n')).toContain('Gemini CLI / Skills');
-    expect(renderDeployPlanPlain(plan).join('\n')).toContain('Antigravity / Skills');
-    expect(renderDeployResultPlain(result)).toContain(
-      'Copy projections: 2 (Antigravity, Gemini CLI)',
+    const details = renderPresentationDocument(renderDeployPlanDocument(plan), 'details', { color: false });
+    expect(details).toContain('Gemini CLI / Skills');
+    expect(details).toContain('Antigravity / Skills');
+    expect(renderPresentationDocument(renderDeployResultDocument(result), 'details', { color: false })).toContain(
+      'Copy projections  2 (Antigravity, Gemini CLI)',
     );
   });
 });

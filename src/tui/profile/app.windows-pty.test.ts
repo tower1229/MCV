@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import * as pty from 'node-pty';
 import * as yaml from 'yaml';
@@ -68,7 +69,7 @@ describe.skipIf(process.platform !== 'win32')('packaged Profile TUI in Windows C
       '[uint32]$before = 0',
       'if (-not [McvTest.ConsoleMode]::GetConsoleMode($inputHandle, [ref]$before)) { throw "GetConsoleMode before TUI failed" }',
       'Set-Location $Repo',
-      'if ([string]::IsNullOrWhiteSpace($Args)) { & $Node $Cli profile } else { & $Node $Cli profile ($Args -split " ") }',
+      'if ($Args -eq "__render-failure") { & $Node (Join-Path $Repo "render-failure.mjs") } elseif ([string]::IsNullOrWhiteSpace($Args)) { & $Node $Cli profile } else { & $Node $Cli profile ($Args -split " ") }',
       '$code = $LASTEXITCODE',
       '[uint32]$after = 0',
       'if (-not [McvTest.ConsoleMode]::GetConsoleMode($inputHandle, [ref]$after)) { throw "GetConsoleMode after TUI failed" }',
@@ -95,9 +96,24 @@ describe.skipIf(process.platform !== 'win32')('packaged Profile TUI in Windows C
     ], { repositoryPath });
 
     expect(outcome.code).toBe(0);
-    expectRestoredTerminal(outcome.output);
+    expect(outcome.output).toContain('\u001b[?1049l');
+    expect(outcome.output).toContain('\u001b[?25h');
     expect(outcome.output).toContain('INPUT_MODE:restored');
     expect(outcome.output).toContain('Profile edits discarded.');
+    expect(outcome.output).toMatch(/\u001b\[[0-9;]*m/u);
+  }, 45_000);
+
+  it('keeps Profile semantics visible without SGR under NO_COLOR and restores ConPTY', async () => {
+    const repositoryPath = createRepository(testRoot, 'profile-conpty-no-color');
+    writeBinding(repositoryPath, 'profile-conpty-no-color');
+    const outcome = await runConPty('edit global', [
+      { pattern: 'MCV Profile Editor', input: '\u001b', delay: 100 },
+    ], { repositoryPath, environment: { NO_COLOR: '1' } });
+
+    expect(outcome.code).toBe(0);
+    expectRestoredTerminal(outcome.output);
+    expect(outcome.output).not.toMatch(/\u001b\[[0-9;]*m/u);
+    expect(outcome.output).toContain('Status: ready');
   }, 45_000);
 
   it('returns 130 on Ctrl+C and restores ConPTY input mode', async () => {
@@ -112,10 +128,31 @@ describe.skipIf(process.platform !== 'win32')('packaged Profile TUI in Windows C
     expect(outcome.output).toContain('INPUT_MODE:restored');
   }, 45_000);
 
+  it('restores ConPTY input mode, cursor, and alternate screen after an Ink render failure', async () => {
+    const repositoryPath = createRepository(testRoot, 'profile-conpty-render-failure');
+    fs.writeFileSync(path.join(repositoryPath, 'render-failure.mjs'), [
+      'const { runProfileEditor } = await import(process.env.MCV_PROFILE_APP_URL);',
+      'try {',
+      '  await runProfileEditor({ homeDir: process.env.USERPROFILE, platform: "win32", env: process.env }, {}, {}, { render: () => { throw new Error("forced render failure"); } });',
+      '} catch (error) {',
+      '  console.log(`RENDER_FAILURE:handled:${error.message}`);',
+      '}',
+      '',
+    ].join('\n'));
+    const outcome = await runConPty('__render-failure', [
+      { pattern: 'RENDER_FAILURE:handled:forced render failure' },
+    ], { repositoryPath });
+
+    expect(outcome.code).toBe(0);
+    expect(outcome.output).toContain('\u001b[?1049l');
+    expect(outcome.output).toContain('\u001b[?25h');
+    expect(outcome.output).toContain('INPUT_MODE:restored');
+  }, 45_000);
+
   function runConPty(
     args: string,
     steps: Array<{ pattern: string; input?: string; delay?: number }>,
-    options: { repositoryPath: string },
+    options: { repositoryPath: string; environment?: NodeJS.ProcessEnv },
   ): Promise<{ code: number; output: string }> {
     return new Promise((resolve, reject) => {
       const arguments_ = [
@@ -136,15 +173,19 @@ describe.skipIf(process.platform !== 'win32')('packaged Profile TUI in Windows C
         '-Repo',
         options.repositoryPath,
       ];
+      const { NO_COLOR: _noColor, ...baseEnvironment } = process.env;
       const terminal = pty.spawn('powershell.exe', arguments_, {
         cols: 120,
         rows: 30,
         cwd: process.cwd(),
         env: {
-          ...process.env,
+          ...baseEnvironment,
+          FORCE_COLOR: '1',
           HOME: testRoot,
           USERPROFILE: testRoot,
           APPDATA: testRoot,
+          MCV_PROFILE_APP_URL: pathToFileURL(path.join(process.cwd(), 'dist', 'tui', 'profile', 'app.js')).href,
+          ...options.environment,
         },
       });
       let output = '';

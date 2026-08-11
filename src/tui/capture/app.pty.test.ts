@@ -65,7 +65,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged Capture TUI in a real PTY'
     const outcome = await runExpect(testRoot, repositoryPath, [
       'set timeout 12',
       'log_user 1',
-      'spawn /bin/zsh -f -c {trap : INT; stty rows 24 columns 100; cd "$MCV_TEST_REPO"; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI" capture; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'spawn /bin/zsh -f -c {trap : INT; stty rows 24 columns 100; cd "$MCV_TEST_REPO"; unset NO_COLOR; FORCE_COLOR=1 TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI" capture; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
       expectExact('MCV Capture Review', 'Capture title'),
       expectExact('Ctrl+C Interrupt', 'Capture footer'),
       'after 1000',
@@ -87,6 +87,8 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged Capture TUI in a real PTY'
 
     expect(outcome.code, outcome.output).toBe(0);
     expectRestoredTerminal(outcome.output);
+    expect(outcome.output).toMatch(/\u001b\[[0-9;]*m/u);
+    expect(outcome.output).toMatch(/[✓!×?]/u);
     expect(fs.existsSync(path.join(repositoryPath, 'common', 'AGENTS.md'))).toBe(false);
   }, 30_000);
 

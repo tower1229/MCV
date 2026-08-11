@@ -1,10 +1,11 @@
-import { fact, status } from '../presentation/builders.js';
+import { fact, instructionActions, status } from '../presentation/builders.js';
 export function renderEnvironmentDocument(report) {
     const foundPathCount = report.environments.reduce((total, environment) => total + [...environment.configDirectories, ...environment.configFiles]
         .filter((configPath) => configPath.exists).length, 0);
     const totalPathCount = report.environments.reduce((total, environment) => total + environment.configDirectories.length + environment.configFiles.length, 0);
     return {
         operation: 'discover',
+        outcome: report.status,
         title: 'Environment Report',
         summary: [],
         overflowSummary: [
@@ -13,15 +14,9 @@ export function renderEnvironmentDocument(report) {
         ],
         details: report.environments.flatMap((environment) => [
             status(environment.detected ? 'success' : 'muted', `${environment.name}: ${environment.detected ? 'detected' : 'not detected'}`),
-            ...[...environment.configDirectories, ...environment.configFiles].map((configPath) => fact(configPath.exists ? 'Found' : 'Optional', configPath.path, configPath.exists ? 'success' : 'muted')),
+            ...[...environment.configDirectories, ...environment.configFiles].map((configPath) => fact(configPath.exists ? 'Found' : 'Optional', configPath.path, configPath.exists ? 'success' : 'muted', 'path')),
         ]),
-        nextActions: report.nextActions,
+        nextActions: instructionActions(report.nextActions),
         detailPolicy: 'overflow',
     };
-}
-export function renderEnvironmentPlain(report) {
-    return report.environments.flatMap((environment) => [
-        `${environment.name}: ${environment.detected ? 'detected' : 'not detected'}`,
-        ...[...environment.configDirectories, ...environment.configFiles].map((configPath) => `[${configPath.exists ? 'found' : 'missing'}] ${configPath.path}`),
-    ]);
 }

@@ -27,13 +27,13 @@ import {
   type ProfileEditorState,
 } from './reducer.js';
 import { ProfileEditorView } from './view.js';
-import type { PresentationRole } from '../../presentation/contracts.js';
+import type { PresentationBlock } from '../../presentation/contracts.js';
 
 export interface ProfileEditorOutcome {
   reason: ProfileEditorExitReason;
   profilesRevision?: string;
   catalogRevision?: string;
-  presentation?: { role: PresentationRole; text: string };
+  presentation?: Extract<PresentationBlock, { kind: 'status' }>;
 }
 
 export interface ProfileEditorDependencies {
@@ -138,7 +138,7 @@ function ProfileEditorApp({
     } catch (error) {
       exit({
         reason: 'interrupted',
-        presentation: { role: 'danger', text: error instanceof Error ? error.message : String(error) },
+        presentation: { kind: 'status', role: 'danger', text: error instanceof Error ? error.message : String(error) },
       } satisfies ProfileEditorOutcome);
     }
   }, [context, dependencies, exit, state.status]);
@@ -189,6 +189,7 @@ function ProfileEditorApp({
       profilesRevision: state.profilesRevision,
       catalogRevision: state.catalogRevision,
       presentation: {
+        kind: 'status',
         role: state.exitReason === 'cancelled' ? 'attention' : 'danger',
         text: state.exitSummary
           ?? (state.exitReason === 'cancelled'
@@ -357,7 +358,7 @@ function finishInterrupted(
     reason: 'interrupted',
     profilesRevision: state.profilesRevision,
     catalogRevision: state.catalogRevision,
-    presentation: { role: 'danger', text: 'Profile editor interrupted.' },
+    presentation: { kind: 'status', role: 'danger', text: 'Profile editor interrupted.' },
   });
 }
 

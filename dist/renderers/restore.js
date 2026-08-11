@@ -1,103 +1,69 @@
-import { textLines } from '../presentation/builders.js';
+import { fact, instruction, instructionActions, issueBlocks, paragraph, status } from '../presentation/builders.js';
 import { restoreLayoutLabel } from './restore-layout.js';
-import { renderCriticalIssues, renderIssuePlain, summarizeIssues, withoutNextActions } from './plain-details.js';
 export function renderRestorePlanDocument(plan) {
     const restoreCount = plan.changes.filter((change) => change.action === 'restore').length;
     const deleteCount = plan.changes.length - restoreCount;
     const summary = [
-        'Restore Plan: latest complete deployment backup',
-        ...(plan.backup ? [`Backup time: ${plan.backup.createdAt}`] : []),
-        `Changes: ${restoreCount} restore, ${deleteCount} delete.`,
-        ...(deleteCount > 0 ? [`[destructive] Deletes selected by Restore: ${deleteCount}.`] : []),
-        summarizeIssues(plan.issues),
-        ...renderCriticalIssues(plan.issues),
+        paragraph('Restore Plan: latest complete deployment backup'),
+        status(plan.status === 'failed' ? 'danger' : deleteCount > 0 ? 'decision' : 'information', plan.status === 'failed' ? 'Restore Plan failed.' : 'Restore Plan uses the latest complete deployment backup.'),
+        ...(plan.backup ? [fact('Backup time', plan.backup.createdAt, 'muted')] : []),
+        fact('Changes', `${restoreCount} restore, ${deleteCount} delete`, deleteCount > 0 ? 'danger' : 'information'),
+        ...(deleteCount > 0 ? [status('danger', `${deleteCount} deletion(s) selected by Restore.`)] : []),
+        ...issueBlocks(plan.issues),
     ];
     if (plan.status === 'failed')
-        summary.push(`Error: ${plan.error.message}`);
-    const hasReviewDetails = plan.changes.length > 0
-        || plan.issues.some((issue) => issue.details)
-        || (plan.status === 'failed' && Boolean(plan.error.technicalDetails));
+        summary.push(status('danger', plan.error.message));
     return {
         operation: 'restore',
+        outcome: plan.status,
         title: 'Restore Plan',
-        summary: textLines(summary),
-        details: textLines(hasReviewDetails ? renderRestorePlanPlain(plan) : []),
+        summary,
+        details: restorePlanDetails(plan),
         nextActions: [
-            ...(plan.changes.length > 0 ? ['Review every affected path before confirming Restore.'] : []),
-            ...plan.nextActions,
+            ...(plan.changes.length > 0 ? [instruction('Review every affected path before confirming Restore.')] : []),
+            ...instructionActions(plan.nextActions),
         ],
         detailPolicy: 'review',
     };
 }
-export function renderRestorePlanPlain(plan) {
-    const lines = ['Restore Plan: latest complete deployment backup'];
+function restorePlanDetails(plan) {
+    const blocks = [status('information', 'Latest complete deployment backup')];
     if (plan.backup)
-        lines.push(`Backup time: ${plan.backup.createdAt}`);
+        blocks.push(fact('Backup time', plan.backup.createdAt, 'muted'));
     for (const change of plan.changes) {
-        lines.push(`  [${change.action}] ${change.targetPath} [${restoreLayoutLabel(change.layoutKind, change.nodeKind)}]`);
+        const role = change.action === 'delete' ? 'danger' : 'attention';
+        blocks.push(fact(change.action, `${change.targetPath} [${restoreLayoutLabel(change.layoutKind, change.nodeKind)}]`, role, 'path'));
         if (change.linkTarget)
-            lines.push(`    ${change.targetPath} -> ${change.linkTarget}`);
+            blocks.push(fact('Link', `${change.targetPath} -> ${change.linkTarget}`, 'muted', 'path'));
     }
     const restoreCount = plan.changes.filter((change) => change.action === 'restore').length;
     const deleteCount = plan.changes.length - restoreCount;
-    const projectionCount = plan.changes.filter((change) => change.layoutKind === 'managed-link-projection').length;
-    const packageCount = plan.changes.filter((change) => change.layoutKind === 'physical-package').length;
-    lines.push(`Summary: ${restoreCount} change(s) to restore, ${deleteCount} change(s) to delete.`);
-    lines.push(`Managed-link projections: ${projectionCount}`);
-    lines.push(`Physical packages: ${packageCount}`);
-    for (const issue of plan.issues) {
-        lines.push(renderIssuePlain(issue));
-        if (issue.details) {
-            for (const detail of issue.details.split('\n'))
-                lines.push(`  ${detail}`);
-        }
+    blocks.push(fact('Summary', `${restoreCount} restore · ${deleteCount} delete`, deleteCount > 0 ? 'danger' : 'information'), fact('Managed-link projections', String(plan.changes.filter((change) => change.layoutKind === 'managed-link-projection').length), 'muted'), fact('Physical packages', String(plan.changes.filter((change) => change.layoutKind === 'physical-package').length), 'muted'), ...issueBlocks(plan.issues));
+    if (plan.status === 'failed') {
+        blocks.push(status('danger', plan.error.message));
+        if (plan.error.technicalDetails)
+            blocks.push({ kind: 'literal', text: plan.error.technicalDetails });
     }
-    if (plan.status === 'failed')
-        lines.push(`Error: ${plan.error.message}`);
-    for (const action of plan.nextActions)
-        lines.push(`Next: ${action}`);
-    return lines;
-}
-export function renderRestoreResultPlain(result) {
-    if (result.status === 'succeeded') {
-        return [
-            `Current pre-restore state saved to ${result.data?.backupPath}.`,
-            `Restored ${result.data?.appliedChangeIds.length ?? 0} change(s) from the latest backup.`,
-        ];
-    }
-    const lines = [`Restore ${result.status}.`];
-    for (const issue of result.issues) {
-        lines.push(renderIssuePlain(issue));
-        if (issue.details) {
-            for (const detail of issue.details.split('\n'))
-                lines.push(`  ${detail}`);
-        }
-    }
-    if (result.status === 'failed') {
-        lines.push(`Error: ${result.error.message}`);
-        if (result.error.technicalDetails)
-            lines.push(`Details: ${result.error.technicalDetails}`);
-    }
-    for (const action of result.nextActions)
-        lines.push(`Next: ${action}`);
-    return lines;
+    return blocks;
 }
 export function renderRestoreResultDocument(result) {
-    const full = renderRestoreResultPlain(result);
-    const overflowSummary = result.status === 'succeeded'
-        ? [`Restored ${result.data?.appliedChangeIds.length ?? 0} change(s) from the latest backup.`]
+    const applied = result.data?.appliedChangeIds.length ?? 0;
+    const details = result.status === 'succeeded'
+        ? [
+            status('success', `Restored ${applied} change(s) from the latest backup.`),
+            fact('Pre-restore backup', result.data?.backupPath ?? 'not available', 'muted', 'path'),
+        ]
         : [
-            `Restore ${result.status}.`,
-            `Issues: ${result.issues.length}`,
-            ...(result.status === 'failed' ? [`Error: ${result.error.message}`] : []),
+            status(result.status === 'failed' ? 'danger' : 'attention', `Restore ${result.status}.`),
+            ...issueBlocks(result.issues),
         ];
+    if (result.status === 'failed') {
+        details.push(status('danger', result.error.message));
+        if (result.error.technicalDetails)
+            details.push({ kind: 'literal', text: result.error.technicalDetails });
+    }
     return {
-        operation: 'restore',
-        title: 'Restore Result',
-        summary: [],
-        overflowSummary: textLines(overflowSummary),
-        details: textLines(withoutNextActions(full)),
-        nextActions: result.nextActions,
-        detailPolicy: 'overflow',
+        operation: 'restore', outcome: result.status, title: 'Restore Result', summary: [],
+        overflowSummary: details.slice(0, 2), details, nextActions: instructionActions(result.nextActions), detailPolicy: 'overflow',
     };
 }

@@ -10,6 +10,14 @@ const REVIEW_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 const INLINE_MAX_LINES = 40;
 const INLINE_MAX_BYTES = 8 * 1024;
 export function presentDocument(context, document, options = {}) {
+    try {
+        return presentDocumentUnsafe(context, document, options);
+    }
+    catch (error) {
+        throw new PresentationStageError(document.operation, document.outcome, document.title, error);
+    }
+}
+function presentDocumentUnsafe(context, document, options) {
     const plainDetails = renderPresentationDocument(document, 'details', resolveOutputCapability({ forcePlain: true }));
     const hasDetails = plainDetails.length > 0;
     if (!hasDetails) {
@@ -38,6 +46,13 @@ export function presentDocument(context, document, options = {}) {
     }
     printNextActions(document.nextActions);
     return artifact.reviewPath ? { reviewPath: artifact.reviewPath } : {};
+}
+export class PresentationStageError extends Error {
+    constructor(operation, outcome, title, cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        super(`${operation} ${outcome} ${title} could not be rendered during the presentation stage: ${message}`, { cause });
+        this.name = 'PresentationStageError';
+    }
 }
 function presentProgressiveDocument(context, document, plainDetails, options) {
     const needsReviewFile = exceedsInlineBudget(plainDetails);
@@ -161,6 +176,13 @@ export function presentOutcome(title, message, role = 'information') {
     });
     printText(`${stylePresentationText(title, 'information', capability)}\n${renderPresentationBlocks([status(role, message)], capability)}`);
 }
+export function presentOutcomeBlock(title, block) {
+    const capability = resolveOutputCapability({
+        isTTY: Boolean(process.stdout.isTTY),
+        columns: process.stdout.columns,
+    });
+    printText(`${stylePresentationText(title, 'information', capability)}\n${renderPresentationBlocks([block], capability)}`);
+}
 export function presentReviewReference(reviewPath) {
     printReviewPath(reviewPath);
 }
@@ -174,7 +196,9 @@ function printNextActions(nextActions) {
         isTTY: Boolean(process.stdout.isTTY),
         columns: process.stdout.columns,
     });
-    printText(renderPresentationBlocks(nextActions.map((action) => status('information', `Next: ${action}`)), capability));
+    printText(renderPresentationBlocks(nextActions.map((action) => action.kind === 'command'
+        ? { kind: 'fact', label: 'Next command', value: action.text, valueKind: 'command' }
+        : { kind: 'paragraph', content: [{ text: `Next: ${action.text}` }] }), capability));
 }
 function printReviewPath(reviewPath) {
     const capability = resolveOutputCapability({
@@ -186,6 +210,7 @@ function printReviewPath(reviewPath) {
             label: 'Review',
             value: reviewPath,
             role: 'muted',
+            valueKind: 'path',
         }], capability));
 }
 function printText(value) {

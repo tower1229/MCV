@@ -26,7 +26,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged Profile TUI in a real PTY'
     const outcome = await runExpect([
       'set timeout 8',
       'log_user 1',
-      'spawn /bin/zsh -f -c {trap : INT; stty rows 30 columns 120; cd "$MCV_TEST_REPO"; TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI" profile; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      'spawn /bin/zsh -f -c {trap : INT; stty rows 30 columns 120; cd "$MCV_TEST_REPO"; unset NO_COLOR; FORCE_COLOR=1 TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI" profile; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
       expectExact('MCV Profile Editor', 'Profile title'),
       expectExact('Status: ready · profile global', 'ready status'),
       expectExact('Ctrl+C quit', 'ready frame footer'),
@@ -48,6 +48,28 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged Profile TUI in a real PTY'
 
     expect(outcome.code, outcome.output).toBe(0);
     expectRestoredTerminal(outcome.output);
+    expect(outcome.output).toMatch(/\u001b\[[0-9;]*m/u);
+    expect(outcome.output).toContain('›');
+  }, 20_000);
+
+  it('keeps Profile semantics visible without SGR styling under NO_COLOR', async () => {
+    const repositoryPath = createRepository(testRoot, 'profile-no-color');
+    writeBinding(repositoryPath, 'profile-no-color');
+    const outcome = await runExpect([
+      'set timeout 8',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {trap : INT; stty rows 30 columns 120; cd "$MCV_TEST_REPO"; NO_COLOR=1 TERM=xterm-256color "$MCV_TEST_NODE" "$MCV_TEST_CLI" profile edit global; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      expectExact('MCV Profile Editor', 'Profile title'),
+      'send "\\033"',
+      expectExact('EXIT_CODE:0', 'exit marker'),
+      expectEof(),
+      'exit 0',
+    ], { MCV_TEST_REPO: repositoryPath });
+
+    expect(outcome.code, outcome.output).toBe(0);
+    expectRestoredTerminal(outcome.output);
+    expect(outcome.output).not.toMatch(/\u001b\[[0-9;]*m/u);
+    expect(outcome.output).toContain('Status: ready');
   }, 20_000);
 
   it('returns 130 on Ctrl+C and restores the alternate screen', async () => {

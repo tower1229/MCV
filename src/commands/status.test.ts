@@ -75,8 +75,8 @@ describe('mcv status', () => {
     expect(output).toContain('Overview Report');
     expect(output).toContain(`Repository  ${repositoryPath}`);
     expect(output).toContain('✓ No pending deployment changes');
-    expect(output).toContain('Device      × 1 drifted · 1 missing · 1 unchanged');
-    expect(output).toContain('Last        × deploy failed · 2026-07-19T01:00:00.000Z');
+    expect(output).toContain('Device  × 1 drifted · 1 missing · 1 unchanged');
+    expect(output).toContain('Last  × deploy failed · 2026-07-19T01:00:00.000Z');
   });
 
   it('collapses healthy linked Skills consistently and reveals exact topology with --verbose', async () => {
@@ -100,7 +100,7 @@ describe('mcv status', () => {
     await program().parseAsync(['node', 'mcv', 'status', '--plain']);
     const plain = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(plain).toContain(
-      'Skills      ✓ 1 linked package healthy',
+      'Skills  ✓ 1 linked package healthy',
     );
     expect(plain).toContain('Coverage  Codex 1');
     expect(plain).not.toContain('✓ review · Codex · Already matches');

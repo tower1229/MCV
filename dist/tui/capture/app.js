@@ -5,6 +5,8 @@ import { writeReviewArtifact } from '../../presentation/output.js';
 import { applyCapturePlan, createCapturePlan, } from '../../operations/capture.js';
 import { captureReviewSelection } from '../../review/capture.js';
 import { renderCapturePlanDocument } from '../../renderers/capture.js';
+import { escapeTerminalControls, renderPresentationDocument } from '../../presentation/render.js';
+import { resolveOutputCapability } from '../../presentation/theme.js';
 import { recordCaptureSuccess } from '../../utils/state.js';
 import { preserveTerminalInputMode } from '../terminal-input-mode.js';
 import { captureTuiReducer, createCaptureTuiState, } from './reducer.js';
@@ -38,7 +40,8 @@ export async function runCaptureReviewTui(context, initialPlan, dependencies = {
 }
 function CaptureReviewApp({ context, initialPlan, dependencies, }) {
     const [state, dispatch] = useReducer(captureTuiReducer, initialPlan, createCaptureTuiState);
-    const [reviewPath, setReviewPath] = useState(() => writeReview(context, initialPlan, dependencies.writeReviewArtifact));
+    const [review, setReview] = useState(() => createCaptureReviewAttempt(context, initialPlan, dependencies.writeReviewArtifact));
+    const reviewPath = review.path;
     const { exit } = useApp();
     const windowSize = useWindowSize();
     const stateRef = useRef(state);
@@ -55,7 +58,7 @@ function CaptureReviewApp({ context, initialPlan, dependencies, }) {
             if (result.status === 'failed' && result.error.code === 'operation.stalePlan') {
                 dispatch({ type: 'regenerating' });
                 const regenerated = await create(context);
-                setReviewPath(writeReview(context, regenerated, dependencies.writeReviewArtifact));
+                setReview(createCaptureReviewAttempt(context, regenerated, dependencies.writeReviewArtifact));
                 dispatch({ type: 'regenerated', plan: regenerated });
                 applyInFlightRef.current = false;
                 return;
@@ -69,10 +72,11 @@ function CaptureReviewApp({ context, initialPlan, dependencies, }) {
             finish({
                 reason: 'interrupted',
                 reviewPath,
-                presentation: { role: 'danger', text: error instanceof Error ? error.message : String(error) },
+                reviewFailure: review.failure,
+                presentation: { kind: 'status', role: 'danger', text: error instanceof Error ? error.message : String(error) },
             });
         });
-    }, [context, dependencies, reviewPath, state]);
+    }, [context, dependencies, review, reviewPath, state]);
     useInput((input, key) => {
         const current = stateRef.current;
         if (key.ctrl && input === 'c') {
@@ -80,7 +84,8 @@ function CaptureReviewApp({ context, initialPlan, dependencies, }) {
                 finish({
                     reason: 'interrupted',
                     reviewPath,
-                    presentation: { role: 'attention', text: 'Capture interrupted; repository was not changed.' },
+                    reviewFailure: review.failure,
+                    presentation: { kind: 'status', role: 'attention', text: 'Capture interrupted; repository was not changed.' },
                 });
             }
             return;
@@ -89,18 +94,18 @@ function CaptureReviewApp({ context, initialPlan, dependencies, }) {
             return;
         if (current.status === 'result') {
             if (key.return || input === 'q')
-                finish(resultOutcome(current, reviewPath));
+                finish(resultOutcome(current, review));
             return;
         }
         if (key.escape) {
             if (current.status === 'diff')
                 dispatch({ type: 'closeDiff' });
             else
-                finish(cancelledOutcome(reviewPath));
+                finish(cancelledOutcome(review));
             return;
         }
         if (input === 'q') {
-            finish(cancelledOutcome(reviewPath));
+            finish(cancelledOutcome(review));
             return;
         }
         if (key.upArrow)
@@ -132,42 +137,48 @@ function CaptureReviewApp({ context, initialPlan, dependencies, }) {
     }
     return (_jsx(CaptureTuiView, { state: state, columns: windowSize.columns, rows: windowSize.rows, reviewPath: reviewPath }));
 }
-function writeReview(context, plan, write = writeReviewArtifact) {
+export function createCaptureReviewAttempt(context, plan, write = writeReviewArtifact) {
     const document = renderCapturePlanDocument(plan);
     if (document.details.length === 0)
-        return undefined;
+        return {};
     try {
-        return write(context, document);
+        return { path: write(context, document) };
     }
-    catch {
-        return undefined;
+    catch (error) {
+        const normalized = error instanceof Error ? error : new Error(String(error));
+        const details = renderPresentationDocument(document, 'details', resolveOutputCapability({ forcePlain: true }));
+        return { failure: { message: normalized.message, fallback: escapeTerminalControls(details) } };
     }
 }
-function resultOutcome(state, reviewPath) {
+function resultOutcome(state, review) {
+    const reviewPath = review.path;
     const result = state.result;
     if (!result)
-        return { reason: 'completed', reviewPath, presentation: { role: 'information', text: 'Capture finished.' } };
+        return { reason: 'completed', reviewPath, reviewFailure: review.failure, presentation: { kind: 'status', role: 'information', text: 'Capture finished.' } };
     if (result.status === 'succeeded') {
         const applied = result.changes.filter((change) => change.decision !== 'skip').length;
         return {
             reason: 'completed',
             result,
             reviewPath,
-            presentation: { role: 'success', text: `Captured ${applied} selected item(s) into ${result.repositoryPath}.` },
+            reviewFailure: review.failure,
+            presentation: { kind: 'status', role: 'success', text: `Captured ${applied} selected item(s) into ${result.repositoryPath}.` },
         };
     }
     return {
         reason: 'completed',
         result,
         reviewPath,
-        presentation: { role: result.status === 'failed' ? 'danger' : 'attention', text: `Capture ${result.status}; repository was not changed.` },
+        reviewFailure: review.failure,
+        presentation: { kind: 'status', role: result.status === 'failed' ? 'danger' : 'attention', text: `Capture ${result.status}; repository was not changed.` },
     };
 }
-function cancelledOutcome(reviewPath) {
+function cancelledOutcome(review) {
     return {
         reason: 'cancelled',
-        reviewPath,
-        presentation: { role: 'attention', text: 'Capture cancelled; repository was not changed.' },
+        reviewPath: review.path,
+        reviewFailure: review.failure,
+        presentation: { kind: 'status', role: 'attention', text: 'Capture cancelled; repository was not changed.' },
     };
 }
 function restoreAfterRenderFailure(wasRaw) {

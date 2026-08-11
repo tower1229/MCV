@@ -160,7 +160,7 @@ describe('mcv deploy', () => {
     await deployWithGlobalProfile(['--dry-run', '--json'], deviceContext('win32'));
     const json = JSON.parse(String(vi.mocked(console.log).mock.calls[0][0]));
     expect(json).toMatchObject({ status: 'planned' });
-    expect(plain).toContain('Skills      1 projection already satisfied');
+    expect(plain).toContain('Skills  1 projection already satisfied');
     expect(json.linkOutcomes).toEqual([expect.objectContaining({
       status: 'satisfied-via-link',
       ownership: 'external',
@@ -195,8 +195,8 @@ describe('mcv deploy', () => {
     vi.mocked(console.log).mockClear();
     await deployWithGlobalProfile([], deviceContext(), { confirmDeploy: async () => true });
     const resultText = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
-    expect(resultText).toContain('Physical materializations: 1');
-    expect(resultText).toContain('Managed-link projections: 1');
+    expect(resultText).toContain('Physical materializations  1');
+    expect(resultText).toContain('Managed-link projections  1');
   });
 
   it('distinguishes topology migration in Plan, JSON, and refuses --yes', async () => {
@@ -456,13 +456,13 @@ describe('mcv deploy', () => {
     vi.mocked(console.log).mockClear();
     await run('status');
     expect(vi.mocked(console.log).mock.calls.flat().join('\n'))
-      .toContain('Device      ✓ 1 unchanged');
+      .toContain('Device  ✓ 1 unchanged');
 
     fs.appendFileSync(settingsPath, '\n');
     vi.mocked(console.log).mockClear();
     await run('status');
     expect(vi.mocked(console.log).mock.calls.flat().join('\n'))
-      .toContain('Device      ! 1 drifted · 0 unchanged');
+      .toContain('Device  ! 1 drifted · 0 unchanged');
   });
 
   it('deletes only prior managed inventory when prune is explicitly confirmed', async () => {

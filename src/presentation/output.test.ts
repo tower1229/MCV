@@ -59,6 +59,21 @@ describe('Presentation output', () => {
     expect(fs.existsSync(path.join(context.env.XDG_STATE_HOME!, 'mcv', 'reviews'))).toBe(false);
   });
 
+  it('uses the native Windows state path and keeps the Review Artifact control-free', () => {
+    context = {
+      homeDir: path.join(testRoot, 'home'),
+      platform: 'win32',
+      env: { LOCALAPPDATA: path.join(testRoot, 'Local App Data') },
+    };
+
+    const result = presentDocument(context, reviewDocument());
+
+    expect(result.reviewPath).toMatch(new RegExp(`^${escapeRegExp(path.join(context.env.LOCALAPPDATA!, 'mcv', 'reviews'))}`));
+    const artifact = fs.readFileSync(result.reviewPath!, 'utf8');
+    expect(artifact).not.toMatch(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0080-\u009f]/u);
+    expect(artifact).not.toMatch(/\u001b\[/u);
+  });
+
   it('uses unwrapped Plain Details for the 40-line overflow threshold', () => {
     const document = reviewDocument();
     document.operation = 'discover';
@@ -75,6 +90,24 @@ describe('Presentation output', () => {
     expect(loggedText()).toContain('• large report');
     expect(loggedText()).not.toContain('detail 40');
     expect(fs.readFileSync(result.reviewPath!, 'utf8')).toContain('detail 40');
+  });
+
+  it('renders a copyable Next command through its command content kind', () => {
+    const document = reviewDocument();
+    document.details = [];
+    document.nextActions = [{ kind: 'command', text: 'mcv status --verbose' }];
+
+    presentDocument(context, document);
+
+    expect(loggedText()).toContain('Next command  mcv status --verbose');
+  });
+
+  it('identifies the known operation outcome when primary presentation rendering fails', () => {
+    const document = reviewDocument();
+    Object.defineProperty(document, 'details', { get: () => { throw new Error('renderer exploded'); } });
+
+    expect(() => presentDocument(context, document))
+      .toThrow('capture planned Capture Plan could not be rendered during the presentation stage');
   });
 
   it('retains at most ten recent Review Artifacts', () => {
@@ -96,6 +129,7 @@ describe('Presentation output', () => {
 function reviewDocument(): PresentationDocument {
   return {
     operation: 'capture',
+    outcome: 'planned',
     title: 'Capture Plan',
     summary: [{ kind: 'status', role: 'success', text: '1 change ready for review.' }],
     details: [
@@ -105,7 +139,11 @@ function reviewDocument(): PresentationDocument {
         lines: [{ kind: 'add', text: '+ apiToken: plaintext' }],
       },
     ],
-    nextActions: ['Review the complete diff.'],
+    nextActions: [{ kind: 'instruction', text: 'Review the complete diff.' }],
     detailPolicy: 'review',
   };
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }

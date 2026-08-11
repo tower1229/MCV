@@ -1,5 +1,4 @@
-import { fact, issueBlocks, status } from '../presentation/builders.js';
-import { renderPresentationDocument } from '../presentation/render.js';
+import { diffLines, fact, instruction, instructionActions, issueBlocks, status } from '../presentation/builders.js';
 export function renderCapturePlanDocument(plan) {
     const counts = {
         add: plan.changes.filter((change) => change.change === 'add').length,
@@ -10,7 +9,7 @@ export function renderCapturePlanDocument(plan) {
     const selected = plan.changes.filter((change) => change.defaultSelected).length;
     const summary = [
         status(plan.status === 'failed' ? 'danger' : plan.readyToApply ? 'success' : 'decision', plan.status === 'failed' ? 'Capture Plan failed.' : plan.readyToApply ? 'Capture Plan is ready.' : 'Capture Plan requires review.'),
-        fact('Repository', plan.repositoryPath ?? 'not bound', 'muted'),
+        fact('Repository', plan.repositoryPath ?? 'not bound', 'muted', 'path'),
         fact('Changes', `${plan.changes.length} · ${counts.add} add · ${counts.modify} modify · ${counts.delete} delete · ${counts.conflict} conflict`, 'information'),
         fact('Selection', `${selected} selected · ${plan.changes.length - selected} excluded`, 'information'),
         ...(counts.delete ? [status('danger', `${counts.delete} deletion candidate(s), not selected by default.`)] : []),
@@ -20,32 +19,33 @@ export function renderCapturePlanDocument(plan) {
         summary.push(status('danger', plan.error.message));
     return {
         operation: 'capture',
+        outcome: plan.status,
         title: 'Capture Plan',
         summary,
         details: capturePlanDetails(plan),
         nextActions: [
-            ...(plan.changes.length ? ['Review the complete diff before confirming Capture.'] : []),
-            ...plan.nextActions,
+            ...(plan.changes.length ? [instruction('Review the complete diff before confirming Capture.')] : []),
+            ...instructionActions(plan.nextActions),
         ],
         detailPolicy: 'review',
     };
 }
 function capturePlanDetails(plan) {
-    const blocks = [fact('Repository', plan.repositoryPath ?? 'not bound', 'muted')];
+    const blocks = [fact('Repository', plan.repositoryPath ?? 'not bound', 'muted', 'path')];
     for (const change of plan.changes) {
         const role = change.change === 'delete' ? 'danger'
             : change.change === 'conflict' ? 'decision' : 'attention';
         const children = [
             status(role, `${change.change}: ${change.name}`),
-            fact('ID', change.id, 'muted'),
+            fact('ID', change.id, 'muted', 'id'),
             fact('Selection', change.defaultSelected ? 'selected' : 'not selected', change.defaultSelected ? 'information' : 'muted'),
             ...(change.sourceLabel ? [fact('Source', change.sourceLabel, 'muted')] : []),
             ...(change.contributingProjections?.length ? [fact('Projections', formatContributingProjections(change.contributingProjections), 'muted')] : []),
         ];
         for (const preview of change.previews) {
             children.push(preview.kind === 'binary'
-                ? fact('Binary', `${preview.repositoryPath} · ${preview.bytes} bytes · sha256 ${preview.sha256}`, 'muted')
-                : { kind: 'section', title: preview.repositoryPath, blocks: [{ kind: 'diff', lines: preview.diff.split('\n').map(classifyDiffLine) }] });
+                ? fact('Binary', `${preview.repositoryPath} · ${preview.bytes} bytes · sha256 ${preview.sha256}`, 'muted', 'path')
+                : { kind: 'section', title: preview.repositoryPath, titleKind: 'path', blocks: [{ kind: 'diff', lines: diffLines(preview.diff) }] });
         }
         blocks.push({ kind: 'section', title: `${displayIde(change.ide)} / ${displayItemType(change.itemType)}`, blocks: children });
     }
@@ -65,7 +65,7 @@ export function renderCaptureResultDocument(result) {
         ?? result.changes.filter((change) => change.decision !== 'skip').length;
     const details = [
         status(result.status === 'succeeded' ? 'success' : result.status === 'failed' ? 'danger' : 'attention', result.status === 'succeeded' ? `Captured ${applied} selected item(s).` : `Capture ${result.status}; Repository was not changed.`),
-        fact('Repository', result.repositoryPath ?? 'not bound', 'muted'),
+        fact('Repository', result.repositoryPath ?? 'not bound', 'muted', 'path'),
         ...(result.data?.newUnassignedCount ? [fact('New Unassigned', `${result.data.newUnassignedCount} asset(s) · ${result.data.newUnassignedAssetIds.join(', ')}`, 'information')] : []),
         ...issueBlocks(result.issues),
     ];
@@ -75,24 +75,9 @@ export function renderCaptureResultDocument(result) {
             details.push({ kind: 'literal', text: result.error.technicalDetails });
     }
     return {
-        operation: 'capture', title: 'Capture Result', summary: [],
-        overflowSummary: details.slice(0, 3), details, nextActions: result.nextActions, detailPolicy: 'overflow',
+        operation: 'capture', outcome: result.status, title: 'Capture Result', summary: [],
+        overflowSummary: details.slice(0, 3), details, nextActions: instructionActions(result.nextActions), detailPolicy: 'overflow',
     };
-}
-export function renderCapturePlanPlain(plan) {
-    return renderPresentationDocument(renderCapturePlanDocument(plan), 'details', { color: false }).split('\n');
-}
-export function renderCaptureResultPlain(result) {
-    return renderPresentationDocument(renderCaptureResultDocument(result), 'details', { color: false }).split('\n');
-}
-function classifyDiffLine(text) {
-    if (text.startsWith('+++') || text.startsWith('---') || text.startsWith('@@'))
-        return { kind: 'metadata', text };
-    if (text.startsWith('+'))
-        return { kind: 'add', text };
-    if (text.startsWith('-'))
-        return { kind: 'remove', text };
-    return { kind: 'context', text };
 }
 export function formatContributingProjections(projections) {
     return projections.map((projection) => `${projection.surface} (${projection.ownership})`).join(', ');

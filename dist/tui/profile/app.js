@@ -67,7 +67,7 @@ function ProfileEditorApp({ context, initialProfileId, dependencies, }) {
         catch (error) {
             exit({
                 reason: 'interrupted',
-                presentation: { role: 'danger', text: error instanceof Error ? error.message : String(error) },
+                presentation: { kind: 'status', role: 'danger', text: error instanceof Error ? error.message : String(error) },
             });
         }
     }, [context, dependencies, exit, state.status]);
@@ -120,6 +120,7 @@ function ProfileEditorApp({ context, initialProfileId, dependencies, }) {
             profilesRevision: state.profilesRevision,
             catalogRevision: state.catalogRevision,
             presentation: {
+                kind: 'status',
                 role: state.exitReason === 'cancelled' ? 'attention' : 'danger',
                 text: state.exitSummary
                     ?? (state.exitReason === 'cancelled'
@@ -270,7 +271,7 @@ function finishInterrupted(state, exit, exitingRef) {
         reason: 'interrupted',
         profilesRevision: state.profilesRevision,
         catalogRevision: state.catalogRevision,
-        presentation: { role: 'danger', text: 'Profile editor interrupted.' },
+        presentation: { kind: 'status', role: 'danger', text: 'Profile editor interrupted.' },
     });
 }
 function cloneProfiles(profiles) {

@@ -5,7 +5,7 @@ import {
   type ProfileEditorDependencies,
   type ProfileEditorRuntime,
 } from '../tui/profile/app.js';
-import { presentOutcome } from '../presentation/output.js';
+import { presentOutcomeBlock } from '../presentation/output.js';
 
 export interface OpenProfileEditorOptions {
   initialProfileId?: string;
@@ -19,11 +19,7 @@ export async function openProfileEditor(
 ): Promise<ProfileEditorOutcome> {
   const outcome = await runProfileEditor(context, options, dependencies, runtime);
   if (outcome.presentation) {
-    presentOutcome(
-      'Profile Result',
-      outcome.presentation.text,
-      outcome.reason === 'interrupted' ? 'danger' : 'attention',
-    );
+    presentOutcomeBlock('Profile Result', outcome.presentation);
   }
   if (outcome.reason === 'interrupted') {
     process.exitCode = 130;

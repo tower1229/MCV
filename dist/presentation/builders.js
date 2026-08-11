@@ -4,12 +4,25 @@ export const status = (role, text) => ({
     role,
     text,
 });
-export const fact = (label, value, role) => ({ kind: 'fact', label, value, role });
-export const paragraph = (text, role) => ({
+export const fact = (label, value, role, valueKind) => ({ kind: 'fact', label, value, role, valueKind });
+export const paragraph = (text) => ({
     kind: 'paragraph',
     content: typeof text === 'string' ? [{ text }] : text,
-    role,
 });
+export const instruction = (text) => ({ kind: 'instruction', text });
+export const command = (text) => ({ kind: 'command', text });
+export const instructionActions = (actions) => actions.map(instruction);
+export function diffLines(diff) {
+    return diff.split('\n').map((text) => {
+        if (text.startsWith('+++') || text.startsWith('---') || text.startsWith('@@'))
+            return { kind: 'metadata', text };
+        if (text.startsWith('+'))
+            return { kind: 'add', text };
+        if (text.startsWith('-'))
+            return { kind: 'remove', text };
+        return { kind: 'context', text };
+    });
+}
 export const literal = (text) => ({ kind: 'literal', text });
 export function issueRole(severity) {
     switch (severity) {
@@ -27,7 +40,4 @@ export function issueBlocks(issues) {
         status(issueRole(issue.severity), `${issue.code}: ${issue.message}`),
         ...(issue.details ? [literal(issue.details)] : []),
     ]));
-}
-export function textLines(lines) {
-    return lines.map((line) => line.length === 0 ? spacer() : paragraph(line));
 }

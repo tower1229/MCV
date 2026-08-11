@@ -95,6 +95,65 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
     expect(result.stderr).toBe('');
   });
 
+  it('routes every packaged human command through control-free Presentation output', () => {
+    const isolatedRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-human-matrix-')));
+    const repositoryPath = path.join(isolatedRoot, 'repository');
+    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+      'schemaVersion: 4',
+      'repositoryId: process-human-matrix',
+      'initializedAt: 2026-08-11T00:00:00.000Z',
+      'capture: { preserveUnknownNativeFields: true }',
+      'deploy: { backupBeforeWrite: true, useSymlinks: false }',
+      'targets: { codex: { enabled: true } }',
+      'variables: {}',
+      '',
+    ].join('\n'));
+    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Packaged human matrix\n');
+    seedGlobalProfileWithCatalog(repositoryPath);
+    const invoke = (...args: string[]) => spawnSync(process.execPath, [cliPath, ...args], {
+      cwd: repositoryPath,
+      encoding: 'utf8',
+      env: { ...isolatedEnvironment(isolatedRoot), NO_COLOR: '1' },
+    });
+    const expectHuman = (result: ReturnType<typeof invoke>, marker: string, allowedStatuses = [0]): void => {
+      expect(allowedStatuses, result.stderr).toContain(result.status);
+      expect(result.stdout).toContain(marker);
+      expect(result.stdout).not.toMatch(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0080-\u009f]/u);
+      expect(result.stdout).not.toMatch(/\u001b\[/u);
+      expect(result.stdout.trimStart()).not.toMatch(/^\{/u);
+    };
+
+    try {
+      expectHuman(invoke('discover', '--plain'), 'Environment Report');
+      expectHuman(invoke('repo', '--plain'), 'Repository Report');
+      expectHuman(invoke('status', '--plain'), 'Overview Report');
+      expectHuman(invoke('init', '--dry-run'), 'Init Result', [0, 1, 3]);
+      expectHuman(invoke('migrate', repositoryPath, '--dry-run'), 'Migration Result', [0, 1]);
+      const capturePlan = invoke('capture', '--dry-run');
+      expectHuman(capturePlan, 'Capture Plan');
+      const reviewPath = capturePlan.stdout.match(/^Review  (.+)$/mu)?.[1];
+      expect(reviewPath).toBeDefined();
+      expect(path.isAbsolute(reviewPath!)).toBe(true);
+      if (process.platform === 'win32') expect(reviewPath).toContain(path.join(isolatedRoot, 'mcv', 'reviews'));
+      const review = fs.readFileSync(reviewPath!, 'utf8');
+      expect(review).not.toMatch(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u0080-\u009f]/u);
+      expect(review).not.toMatch(/\u001b\[/u);
+      expectHuman(invoke('deploy', '--global', '--dry-run'), 'Deploy Plan');
+      expectHuman(invoke('restore', '--global', '--dry-run'), 'Restore Plan', [0, 1]);
+      expectHuman(invoke('bind', repositoryPath, '--yes'), 'Bind Result');
+      expectHuman(invoke('unbind', '--dry-run'), 'Unbind Plan');
+      expectHuman(invoke('profile', 'list'), 'Profile List');
+      expectHuman(invoke('profile', 'show', 'global'), 'Profile Details');
+      expectHuman(invoke('profile', 'create', 'temporary'), 'Profile Result');
+      expectHuman(invoke('profile', 'edit', 'temporary', '--title', 'Temporary'), 'Profile Result');
+      expectHuman(invoke('profile', 'delete', 'temporary'), 'Profile Result');
+      expectHuman(invoke('unbind', '--yes'), 'Unbind Result');
+    } finally {
+      fs.rmSync(isolatedRoot, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it('prints exactly one Environment Report JSON document', () => {
     const result = spawnSync(process.execPath, [cliPath, 'discover', '--json'], {
       encoding: 'utf8',
@@ -113,6 +172,25 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       nextActions: [],
     }));
     expect(result.stdout).not.toMatch(/\u001b\[/);
+  });
+
+  it('applies color capability precedence through the packaged human CLI', () => {
+    const invoke = (env: NodeJS.ProcessEnv) => spawnSync(process.execPath, [cliPath, 'discover', '--plain'], {
+      encoding: 'utf8',
+      env: { ...process.env, ...env },
+    });
+    const forced = invoke({ FORCE_COLOR: '1', NO_COLOR: undefined, TERM: 'xterm-256color' });
+    expect(forced.status).toBe(0);
+    expect(forced.stdout).toMatch(/\u001b\[/u);
+    for (const env of [
+      { FORCE_COLOR: '0', NO_COLOR: undefined, TERM: 'xterm-256color' },
+      { FORCE_COLOR: '1', NO_COLOR: '1', TERM: 'xterm-256color' },
+      { FORCE_COLOR: '1', NO_COLOR: undefined, TERM: 'dumb' },
+    ]) {
+      const result = invoke(env);
+      expect(result.status).toBe(0);
+      expect(result.stdout).not.toMatch(/\u001b\[/u);
+    }
   });
 
   it('rejects conflicting read-only output modes as usage errors', () => {
@@ -636,7 +714,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       expect(plainStatusResult.status).toBe(0);
       expect(overviewResult.stdout).toBe(plainStatusResult.stdout);
       expect(plainStatusResult.stdout).toContain(
-        'Skills      ✓ 1 linked package healthy',
+        'Skills  ✓ 1 linked package healthy',
       );
       expect(plainStatusResult.stdout).toContain('Coverage  Claude Code 1');
       expect(plainStatusResult.stdout).not.toContain('✓ review · Claude Code · Already matches');
