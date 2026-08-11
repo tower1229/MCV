@@ -69,7 +69,7 @@ function CaptureReviewApp({ context, initialPlan, dependencies, }) {
             finish({
                 reason: 'interrupted',
                 reviewPath,
-                summary: error instanceof Error ? error.message : String(error),
+                presentation: { role: 'danger', text: error instanceof Error ? error.message : String(error) },
             });
         });
     }, [context, dependencies, reviewPath, state]);
@@ -80,7 +80,7 @@ function CaptureReviewApp({ context, initialPlan, dependencies, }) {
                 finish({
                     reason: 'interrupted',
                     reviewPath,
-                    summary: 'Capture interrupted; repository was not changed.',
+                    presentation: { role: 'attention', text: 'Capture interrupted; repository was not changed.' },
                 });
             }
             return;
@@ -146,28 +146,28 @@ function writeReview(context, plan, write = writeReviewArtifact) {
 function resultOutcome(state, reviewPath) {
     const result = state.result;
     if (!result)
-        return { reason: 'completed', reviewPath, summary: 'Capture finished.' };
+        return { reason: 'completed', reviewPath, presentation: { role: 'information', text: 'Capture finished.' } };
     if (result.status === 'succeeded') {
         const applied = result.changes.filter((change) => change.decision !== 'skip').length;
         return {
             reason: 'completed',
             result,
             reviewPath,
-            summary: `Captured ${applied} selected item(s) into ${result.repositoryPath}.`,
+            presentation: { role: 'success', text: `Captured ${applied} selected item(s) into ${result.repositoryPath}.` },
         };
     }
     return {
         reason: 'completed',
         result,
         reviewPath,
-        summary: `Capture ${result.status}; repository was not changed.`,
+        presentation: { role: result.status === 'failed' ? 'danger' : 'attention', text: `Capture ${result.status}; repository was not changed.` },
     };
 }
 function cancelledOutcome(reviewPath) {
     return {
         reason: 'cancelled',
         reviewPath,
-        summary: 'Capture cancelled; repository was not changed.',
+        presentation: { role: 'attention', text: 'Capture cancelled; repository was not changed.' },
     };
 }
 function restoreAfterRenderFailure(wasRaw) {

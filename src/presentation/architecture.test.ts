@@ -12,6 +12,8 @@ describe('Human Presentation architecture boundary', () => {
       expect(source, filePath).not.toMatch(/console\.(?:log|error|warn)\s*\(/u);
       expect(source, filePath).not.toMatch(/\\u001[bB]|\\x1[bB]|\\033/u);
     }
+    expect(fs.readFileSync(path.join(sourceRoot, 'index.ts'), 'utf8'))
+      .not.toMatch(/console\.(?:log|error|warn)\s*\(/u);
   });
 
   it('keeps operation renderers semantic and free of terminal controls', () => {

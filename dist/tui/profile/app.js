@@ -67,7 +67,7 @@ function ProfileEditorApp({ context, initialProfileId, dependencies, }) {
         catch (error) {
             exit({
                 reason: 'interrupted',
-                summary: error instanceof Error ? error.message : String(error),
+                presentation: { role: 'danger', text: error instanceof Error ? error.message : String(error) },
             });
         }
     }, [context, dependencies, exit, state.status]);
@@ -119,10 +119,13 @@ function ProfileEditorApp({ context, initialProfileId, dependencies, }) {
             reason: state.exitReason,
             profilesRevision: state.profilesRevision,
             catalogRevision: state.catalogRevision,
-            summary: state.exitSummary
-                ?? (state.exitReason === 'cancelled'
-                    ? 'Profile editor closed.'
-                    : 'Profile editor interrupted.'),
+            presentation: {
+                role: state.exitReason === 'cancelled' ? 'attention' : 'danger',
+                text: state.exitSummary
+                    ?? (state.exitReason === 'cancelled'
+                        ? 'Profile editor closed.'
+                        : 'Profile editor interrupted.'),
+            },
         });
     }, [exit, state]);
     useInput((input, key) => {
@@ -267,7 +270,7 @@ function finishInterrupted(state, exit, exitingRef) {
         reason: 'interrupted',
         profilesRevision: state.profilesRevision,
         catalogRevision: state.catalogRevision,
-        summary: 'Profile editor interrupted.',
+        presentation: { role: 'danger', text: 'Profile editor interrupted.' },
     });
 }
 function cloneProfiles(profiles) {

@@ -24,12 +24,13 @@ import {
   type CaptureTuiState,
 } from './reducer.js';
 import { CaptureTuiView } from './view.js';
+import type { PresentationRole } from '../../presentation/contracts.js';
 
 export interface CaptureTuiOutcome {
   reason: 'completed' | 'cancelled' | 'interrupted';
   result?: CaptureResult;
   reviewPath?: string;
-  summary: string;
+  presentation: { role: PresentationRole; text: string };
 }
 
 export interface CaptureTuiDependencies {
@@ -129,7 +130,7 @@ function CaptureReviewApp({
       finish({
         reason: 'interrupted',
         reviewPath,
-        summary: error instanceof Error ? error.message : String(error),
+        presentation: { role: 'danger', text: error instanceof Error ? error.message : String(error) },
       });
     });
   }, [context, dependencies, reviewPath, state]);
@@ -141,7 +142,7 @@ function CaptureReviewApp({
         finish({
           reason: 'interrupted',
           reviewPath,
-          summary: 'Capture interrupted; repository was not changed.',
+          presentation: { role: 'attention', text: 'Capture interrupted; repository was not changed.' },
         });
       }
       return;
@@ -205,21 +206,21 @@ function writeReview(
 
 function resultOutcome(state: CaptureTuiState, reviewPath?: string): CaptureTuiOutcome {
   const result = state.result;
-  if (!result) return { reason: 'completed', reviewPath, summary: 'Capture finished.' };
+  if (!result) return { reason: 'completed', reviewPath, presentation: { role: 'information', text: 'Capture finished.' } };
   if (result.status === 'succeeded') {
     const applied = result.changes.filter((change) => change.decision !== 'skip').length;
     return {
       reason: 'completed',
       result,
       reviewPath,
-      summary: `Captured ${applied} selected item(s) into ${result.repositoryPath}.`,
+      presentation: { role: 'success', text: `Captured ${applied} selected item(s) into ${result.repositoryPath}.` },
     };
   }
   return {
     reason: 'completed',
     result,
     reviewPath,
-    summary: `Capture ${result.status}; repository was not changed.`,
+    presentation: { role: result.status === 'failed' ? 'danger' : 'attention', text: `Capture ${result.status}; repository was not changed.` },
   };
 }
 
@@ -227,7 +228,7 @@ function cancelledOutcome(reviewPath?: string): CaptureTuiOutcome {
   return {
     reason: 'cancelled',
     reviewPath,
-    summary: 'Capture cancelled; repository was not changed.',
+    presentation: { role: 'attention', text: 'Capture cancelled; repository was not changed.' },
   };
 }
 

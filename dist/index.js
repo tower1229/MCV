@@ -13,6 +13,7 @@ import { bind, migrate, showRepository, unbind } from './commands/binding.js';
 import { createProfile, deleteProfile, editProfile, listProfiles, showProfile, } from './commands/profile.js';
 import { openProfileEditor, shouldOpenProfileEditor, } from './commands/profile-editor.js';
 import { startMcpServer } from './commands/mcp.js';
+import { presentDiagnostic } from './presentation/output.js';
 // package.json is the single version source for both npm and the CLI.
 const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 export function createDefaultDeviceContext() {
@@ -310,7 +311,7 @@ export async function runCli(argv = process.argv) {
             return;
         }
         process.exitCode = 1;
-        console.error(`MCV failed: ${error instanceof Error ? error.message : String(error)}`);
+        presentDiagnostic(`MCV failed: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 function applyExitOverride(command) {

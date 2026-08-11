@@ -63,9 +63,9 @@ describe('Capture plan rendering', () => {
     } satisfies CapturePlan;
 
     const lines = renderCapturePlanPlain(plan);
-    expect(lines.filter((line) => line.includes('[add] shared-demo'))).toHaveLength(1);
-    expect(lines).toContain(
-      '    Projections: claude-code (managed), codex (physical), gemini-cli (managed)',
+    expect(lines.filter((line) => line.includes('! add: shared-demo'))).toHaveLength(1);
+    expect(lines.join('\n')).toContain(
+      'Projections  claude-code (managed), codex (physical), gemini-cli (managed)',
     );
     expect(formatContributingProjections(plan.changes[0].contributingProjections!)).toBe(
       'claude-code (managed), codex (physical), gemini-cli (managed)',
@@ -95,9 +95,9 @@ describe('Capture result rendering', () => {
     } satisfies CaptureResult;
 
     expect(renderCaptureResultPlain(result)).toEqual([
-      'Captured 1 selected item(s) into /repo.',
-      'New Unassigned: 1 asset(s) (skill:review).',
-      'Next: Classify 1 new Unassigned Asset(s) with an Agent or `mcv profile edit <id> --add ...`, or create a Profile.',
+      '✓ Captured 1 selected item(s).',
+      'Repository  /repo',
+      'New Unassigned  1 asset(s) · skill:review',
     ]);
   });
 });

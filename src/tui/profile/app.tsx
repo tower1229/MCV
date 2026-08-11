@@ -27,12 +27,13 @@ import {
   type ProfileEditorState,
 } from './reducer.js';
 import { ProfileEditorView } from './view.js';
+import type { PresentationRole } from '../../presentation/contracts.js';
 
 export interface ProfileEditorOutcome {
   reason: ProfileEditorExitReason;
   profilesRevision?: string;
   catalogRevision?: string;
-  summary?: string;
+  presentation?: { role: PresentationRole; text: string };
 }
 
 export interface ProfileEditorDependencies {
@@ -137,7 +138,7 @@ function ProfileEditorApp({
     } catch (error) {
       exit({
         reason: 'interrupted',
-        summary: error instanceof Error ? error.message : String(error),
+        presentation: { role: 'danger', text: error instanceof Error ? error.message : String(error) },
       } satisfies ProfileEditorOutcome);
     }
   }, [context, dependencies, exit, state.status]);
@@ -187,10 +188,13 @@ function ProfileEditorApp({
       reason: state.exitReason,
       profilesRevision: state.profilesRevision,
       catalogRevision: state.catalogRevision,
-      summary: state.exitSummary
-        ?? (state.exitReason === 'cancelled'
-          ? 'Profile editor closed.'
-          : 'Profile editor interrupted.'),
+      presentation: {
+        role: state.exitReason === 'cancelled' ? 'attention' : 'danger',
+        text: state.exitSummary
+          ?? (state.exitReason === 'cancelled'
+            ? 'Profile editor closed.'
+            : 'Profile editor interrupted.'),
+      },
     } satisfies ProfileEditorOutcome);
   }, [exit, state]);
 
@@ -353,7 +357,7 @@ function finishInterrupted(
     reason: 'interrupted',
     profilesRevision: state.profilesRevision,
     catalogRevision: state.catalogRevision,
-    summary: 'Profile editor interrupted.',
+    presentation: { role: 'danger', text: 'Profile editor interrupted.' },
   });
 }
 

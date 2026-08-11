@@ -250,12 +250,12 @@ export function shouldUseCaptureTui(
 function presentCaptureTuiOutcome(context: DeviceContext, outcome: CaptureTuiOutcome): void {
   if (outcome.reviewPath) presentReviewReference(outcome.reviewPath);
   if (outcome.reason === 'interrupted') {
-    presentOutcome('Capture Result', outcome.summary, 'danger');
+    presentOutcome('Capture Result', outcome.presentation.text, 'danger');
     process.exitCode = 130;
     return;
   }
   if (!outcome.result) {
-    presentOutcome('Capture Result', outcome.summary, 'attention');
+    presentOutcome('Capture Result', outcome.presentation.text, 'attention');
     return;
   }
   if (outcome.result.status !== 'succeeded') {

@@ -1,4 +1,4 @@
-import { createInterface } from 'readline/promises';
+import { askInTerminal } from '../cli/prompt.js';
 import type { DeviceContext } from '../adapters/types.js';
 import {
   applyRestorePlan,
@@ -70,7 +70,11 @@ export async function restoreLatestBackup(
       try {
         confirmed = await (dependencies.confirmRestore
           ? dependencies.confirmRestore()
-          : confirmInTerminal(cancellation));
+        : confirmInTerminal(
+            cancellation,
+            reviewPlan.changes.length,
+            options.global === true ? 'device-global locations' : options.target ?? process.cwd(),
+          ));
       } catch (error) {
         if (!cancellation.signal.aborted && !isAbortError(error)) throw error;
       }
@@ -109,20 +113,21 @@ export async function restoreLatestBackup(
   }
 }
 
-async function confirmInTerminal(cancellation: AbortController): Promise<boolean> {
-  const prompt = createInterface({ input: process.stdin, output: process.stdout });
-  const handleInterrupt = (): void => cancellation.abort();
-  prompt.once('SIGINT', handleInterrupt);
-  try {
-    const answer = await prompt.question(
-      'Restore every file in this Plan? [y/N] ',
-      { signal: cancellation.signal },
-    );
-    return /^(y|yes)$/i.test(answer.trim());
-  } finally {
-    prompt.off('SIGINT', handleInterrupt);
-    prompt.close();
+async function confirmInTerminal(
+  cancellation: AbortController,
+  selectedCount: number,
+  targetRoot: string,
+): Promise<boolean> {
+  const outcome = await askInTerminal(
+    `Restore · ${selectedCount} selected changes · target: ${targetRoot} · Apply? [y/N] `,
+  );
+  if (outcome.interrupted) {
+    cancellation.abort();
+    const error = new Error('Restore interrupted.');
+    error.name = 'AbortError';
+    throw error;
   }
+  return /^(y|yes)$/i.test(outcome.answer.trim());
 }
 
 function isAbortError(error: unknown): boolean {

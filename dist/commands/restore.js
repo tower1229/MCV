@@ -1,4 +1,4 @@
-import { createInterface } from 'readline/promises';
+import { askInTerminal } from '../cli/prompt.js';
 import { applyRestorePlan, createRestorePlan, } from '../operations/restore.js';
 import { presentJson } from '../renderers/json.js';
 import { renderRestorePlanDocument, renderRestoreResultDocument } from '../renderers/restore.js';
@@ -51,7 +51,7 @@ export async function restoreLatestBackup(context, dependencies = {}, options = 
             try {
                 confirmed = await (dependencies.confirmRestore
                     ? dependencies.confirmRestore()
-                    : confirmInTerminal(cancellation));
+                    : confirmInTerminal(cancellation, reviewPlan.changes.length, options.global === true ? 'device-global locations' : options.target ?? process.cwd()));
             }
             catch (error) {
                 if (!cancellation.signal.aborted && !isAbortError(error))
@@ -90,18 +90,15 @@ export async function restoreLatestBackup(context, dependencies = {}, options = 
         process.off('SIGINT', handleInterrupt);
     }
 }
-async function confirmInTerminal(cancellation) {
-    const prompt = createInterface({ input: process.stdin, output: process.stdout });
-    const handleInterrupt = () => cancellation.abort();
-    prompt.once('SIGINT', handleInterrupt);
-    try {
-        const answer = await prompt.question('Restore every file in this Plan? [y/N] ', { signal: cancellation.signal });
-        return /^(y|yes)$/i.test(answer.trim());
+async function confirmInTerminal(cancellation, selectedCount, targetRoot) {
+    const outcome = await askInTerminal(`Restore · ${selectedCount} selected changes · target: ${targetRoot} · Apply? [y/N] `);
+    if (outcome.interrupted) {
+        cancellation.abort();
+        const error = new Error('Restore interrupted.');
+        error.name = 'AbortError';
+        throw error;
     }
-    finally {
-        prompt.off('SIGINT', handleInterrupt);
-        prompt.close();
-    }
+    return /^(y|yes)$/i.test(outcome.answer.trim());
 }
 function isAbortError(error) {
     return error instanceof Error && error.name === 'AbortError';

@@ -88,8 +88,8 @@ describe('mcv capture', () => {
     ]);
 
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
-    expect(output).toContain(`Capture Plan: ${repositoryPath}`);
-    expect(output).toContain('Changes: 1');
+    expect(output).toContain(`Repository  ${repositoryPath}`);
+    expect(output).toContain('Changes  1');
     expect(output).toContain('Review  ');
     expect(output).not.toContain('must-not-leak');
     const reviewDirectory = path.join(stateRoot, 'mcv', 'reviews');
@@ -151,7 +151,7 @@ describe('mcv capture', () => {
 
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(output).toContain('Captured 1 selected item(s)');
-    expect(output).toContain('New Unassigned: 1 asset(s) (native:claude-code/user-settings).');
+    expect(output).toContain('New Unassigned  1 asset(s) · native:claude-code/user-settings');
     expect(output).not.toContain('Capture Plan:');
   });
 
@@ -252,7 +252,7 @@ describe('mcv capture', () => {
     fs.writeFileSync(staleRules, '# Repository-only rules\n');
     const runTui = vi.fn().mockResolvedValue({
       reason: 'cancelled',
-      summary: 'Capture cancelled; repository was not changed.',
+      presentation: { role: 'attention', text: 'Capture cancelled; repository was not changed.' },
     });
 
     await createProgram(deviceContext(), {

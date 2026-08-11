@@ -1,141 +1,101 @@
-import { textLines } from '../presentation/builders.js';
-import { renderCriticalIssues, renderIssuePlain, summarizeIssues, withoutNextActions } from './plain-details.js';
+import { fact, issueBlocks, status } from '../presentation/builders.js';
+import { renderPresentationDocument } from '../presentation/render.js';
 export function renderCapturePlanDocument(plan) {
-    const changeCounts = {
+    const counts = {
         add: plan.changes.filter((change) => change.change === 'add').length,
         modify: plan.changes.filter((change) => change.change === 'modify').length,
         delete: plan.changes.filter((change) => change.change === 'delete').length,
         conflict: plan.changes.filter((change) => change.change === 'conflict').length,
     };
-    const selectedCount = plan.changes.filter((change) => change.defaultSelected).length;
+    const selected = plan.changes.filter((change) => change.defaultSelected).length;
     const summary = [
-        `Capture Plan: ${plan.repositoryPath ?? 'not bound'}`,
-        `Changes: ${plan.changes.length} (${changeCounts.add} add, ${changeCounts.modify} modify, ${changeCounts.delete} delete, ${changeCounts.conflict} conflict).`,
-        `Selection: ${selectedCount} selected, ${plan.changes.length - selectedCount} not selected.`,
-        ...(changeCounts.delete > 0
-            ? [`[destructive] Deletes: ${changeCounts.delete} (not selected by default).`]
-            : []),
-        summarizeIssues(plan.issues),
-        ...renderCriticalIssues(plan.issues),
+        status(plan.status === 'failed' ? 'danger' : plan.readyToApply ? 'success' : 'decision', plan.status === 'failed' ? 'Capture Plan failed.' : plan.readyToApply ? 'Capture Plan is ready.' : 'Capture Plan requires review.'),
+        fact('Repository', plan.repositoryPath ?? 'not bound', 'muted'),
+        fact('Changes', `${plan.changes.length} · ${counts.add} add · ${counts.modify} modify · ${counts.delete} delete · ${counts.conflict} conflict`, 'information'),
+        fact('Selection', `${selected} selected · ${plan.changes.length - selected} excluded`, 'information'),
+        ...(counts.delete ? [status('danger', `${counts.delete} deletion candidate(s), not selected by default.`)] : []),
+        ...issueBlocks(plan.issues),
     ];
     if (plan.status === 'failed')
-        summary.push(`Error: ${plan.error.message}`);
-    const hasReviewDetails = plan.changes.length > 0
-        || plan.issues.some((issue) => issue.details)
-        || (plan.status === 'failed' && Boolean(plan.error.technicalDetails));
+        summary.push(status('danger', plan.error.message));
     return {
         operation: 'capture',
         title: 'Capture Plan',
-        summary: textLines(summary),
-        details: textLines(hasReviewDetails ? renderCapturePlanPlain(plan) : []),
+        summary,
+        details: capturePlanDetails(plan),
         nextActions: [
-            ...(plan.changes.length > 0 ? ['Review the complete diff before confirming Capture.'] : []),
+            ...(plan.changes.length ? ['Review the complete diff before confirming Capture.'] : []),
             ...plan.nextActions,
         ],
         detailPolicy: 'review',
     };
 }
-export function renderCapturePlanPlain(plan) {
-    const lines = [`Capture Plan: ${plan.repositoryPath ?? 'not bound'}`];
-    let currentGroup = '';
+function capturePlanDetails(plan) {
+    const blocks = [fact('Repository', plan.repositoryPath ?? 'not bound', 'muted')];
     for (const change of plan.changes) {
-        const group = `${change.ide} / ${change.itemType}`;
-        if (group !== currentGroup) {
-            lines.push(`${displayIde(change.ide)} / ${displayItemType(change.itemType)}`);
-            currentGroup = group;
-        }
-        lines.push(`  [${change.change}] ${change.name} (${change.id})${change.defaultSelected ? ' [selected]' : ' [not selected]'}`);
-        if (change.sourceLabel)
-            lines.push(`    Source: ${change.sourceLabel}`);
-        if (change.contributingProjections && change.contributingProjections.length > 0) {
-            lines.push(`    Projections: ${formatContributingProjections(change.contributingProjections)}`);
-        }
-        for (const preview of change.previews) {
-            if (preview.kind === 'binary') {
-                lines.push(`    ${preview.repositoryPath}: binary, ${preview.bytes} bytes, sha256 ${preview.sha256}`);
-                continue;
-            }
-            lines.push(`    ${preview.repositoryPath}:`);
-            for (const line of preview.diff.split('\n'))
-                lines.push(`      ${line}`);
-        }
-    }
-    if (plan.changes.length === 0 && plan.status === 'planned') {
-        lines.push('No configuration changes to capture.');
-    }
-    lines.push(`Summary: ${plan.changes.length} item(s), ${plan.summary.parameterizedPathCount} path(s) parameterized, ${plan.summary.excludedFileCount} file(s) excluded.`);
-    for (const issue of plan.issues) {
-        lines.push(renderIssuePlain(issue));
-        if (issue.details) {
-            for (const detail of issue.details.split('\n'))
-                lines.push(`  ${detail}`);
-        }
-    }
-    if (plan.status === 'failed') {
-        lines.push(`Error: ${plan.error.message}`);
-        if (plan.error.technicalDetails)
-            lines.push(`Details: ${plan.error.technicalDetails}`);
-    }
-    for (const action of plan.nextActions)
-        lines.push(`Next: ${action}`);
-    return lines;
-}
-export function renderCaptureResultPlain(result) {
-    if (result.status === 'succeeded') {
-        const appliedCount = result.changes.length > 0
-            ? result.changes.filter((change) => change.decision !== 'skip').length
-            : result.data?.appliedChangeIds.length ?? 0;
-        const lines = [
-            `Captured ${appliedCount} selected item(s) into ${result.repositoryPath}.`,
+        const role = change.change === 'delete' ? 'danger'
+            : change.change === 'conflict' ? 'decision' : 'attention';
+        const children = [
+            status(role, `${change.change}: ${change.name}`),
+            fact('ID', change.id, 'muted'),
+            fact('Selection', change.defaultSelected ? 'selected' : 'not selected', change.defaultSelected ? 'information' : 'muted'),
+            ...(change.sourceLabel ? [fact('Source', change.sourceLabel, 'muted')] : []),
+            ...(change.contributingProjections?.length ? [fact('Projections', formatContributingProjections(change.contributingProjections), 'muted')] : []),
         ];
-        const newUnassignedCount = result.data?.newUnassignedCount ?? 0;
-        if (newUnassignedCount > 0) {
-            const ids = result.data?.newUnassignedAssetIds ?? [];
-            lines.push(`New Unassigned: ${newUnassignedCount} asset(s) (${ids.join(', ')}).`);
+        for (const preview of change.previews) {
+            children.push(preview.kind === 'binary'
+                ? fact('Binary', `${preview.repositoryPath} · ${preview.bytes} bytes · sha256 ${preview.sha256}`, 'muted')
+                : { kind: 'section', title: preview.repositoryPath, blocks: [{ kind: 'diff', lines: preview.diff.split('\n').map(classifyDiffLine) }] });
         }
-        for (const action of result.nextActions)
-            lines.push(`Next: ${action}`);
-        return lines;
+        blocks.push({ kind: 'section', title: `${displayIde(change.ide)} / ${displayItemType(change.itemType)}`, blocks: children });
     }
-    const lines = [
-        ...result.issues.map(renderIssuePlain),
-    ];
-    if (result.status === 'failed') {
-        lines.push(`Error: ${result.error.message}`);
-        if (result.error.technicalDetails)
-            lines.push(`Details: ${result.error.technicalDetails}`);
+    if (!plan.changes.length && plan.status === 'planned')
+        blocks.push(status('success', 'No configuration changes to capture.'));
+    blocks.push(fact('Summary', `${plan.changes.length} item(s) · ${plan.summary.parameterizedPathCount} path(s) parameterized · ${plan.summary.excludedFileCount} file(s) excluded`, 'information'));
+    blocks.push(...issueBlocks(plan.issues));
+    if (plan.status === 'failed') {
+        blocks.push(status('danger', plan.error.message));
+        if (plan.error.technicalDetails)
+            blocks.push({ kind: 'literal', text: plan.error.technicalDetails });
     }
-    lines.push(...result.nextActions.map((action) => `Next: ${action}`));
-    return lines;
+    return blocks;
 }
 export function renderCaptureResultDocument(result) {
-    const full = renderCaptureResultPlain(result);
-    const overflowSummary = result.status === 'succeeded'
-        ? [
-            `Captured ${result.changes.length > 0
-                ? result.changes.filter((change) => change.decision !== 'skip').length
-                : result.data?.appliedChangeIds.length ?? 0} selected item(s) into ${result.repositoryPath}.`,
-            `New Unassigned: ${result.data?.newUnassignedCount ?? 0} asset(s).`,
-        ]
-        : [
-            `Capture ${result.status}.`,
-            `Issues: ${result.issues.length}`,
-            ...(result.status === 'failed' ? [`Error: ${result.error.message}`] : []),
-        ];
+    const applied = result.data?.appliedChangeIds.length
+        ?? result.changes.filter((change) => change.decision !== 'skip').length;
+    const details = [
+        status(result.status === 'succeeded' ? 'success' : result.status === 'failed' ? 'danger' : 'attention', result.status === 'succeeded' ? `Captured ${applied} selected item(s).` : `Capture ${result.status}; Repository was not changed.`),
+        fact('Repository', result.repositoryPath ?? 'not bound', 'muted'),
+        ...(result.data?.newUnassignedCount ? [fact('New Unassigned', `${result.data.newUnassignedCount} asset(s) · ${result.data.newUnassignedAssetIds.join(', ')}`, 'information')] : []),
+        ...issueBlocks(result.issues),
+    ];
+    if (result.status === 'failed') {
+        details.push(status('danger', result.error.message));
+        if (result.error.technicalDetails)
+            details.push({ kind: 'literal', text: result.error.technicalDetails });
+    }
     return {
-        operation: 'capture',
-        title: 'Capture Result',
-        summary: [],
-        overflowSummary: textLines(overflowSummary),
-        details: textLines(withoutNextActions(full)),
-        nextActions: result.nextActions,
-        detailPolicy: 'overflow',
+        operation: 'capture', title: 'Capture Result', summary: [],
+        overflowSummary: details.slice(0, 3), details, nextActions: result.nextActions, detailPolicy: 'overflow',
     };
 }
+export function renderCapturePlanPlain(plan) {
+    return renderPresentationDocument(renderCapturePlanDocument(plan), 'details', { color: false }).split('\n');
+}
+export function renderCaptureResultPlain(result) {
+    return renderPresentationDocument(renderCaptureResultDocument(result), 'details', { color: false }).split('\n');
+}
+function classifyDiffLine(text) {
+    if (text.startsWith('+++') || text.startsWith('---') || text.startsWith('@@'))
+        return { kind: 'metadata', text };
+    if (text.startsWith('+'))
+        return { kind: 'add', text };
+    if (text.startsWith('-'))
+        return { kind: 'remove', text };
+    return { kind: 'context', text };
+}
 export function formatContributingProjections(projections) {
-    return projections
-        .map((projection) => `${projection.surface} (${projection.ownership})`)
-        .join(', ');
+    return projections.map((projection) => `${projection.surface} (${projection.ownership})`).join(', ');
 }
 function displayIde(ide) {
     if (ide === 'shared')

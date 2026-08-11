@@ -18,10 +18,10 @@ export async function openProfileEditor(
   runtime: ProfileEditorRuntime = {},
 ): Promise<ProfileEditorOutcome> {
   const outcome = await runProfileEditor(context, options, dependencies, runtime);
-  if (outcome.summary) {
+  if (outcome.presentation) {
     presentOutcome(
       'Profile Result',
-      outcome.summary,
+      outcome.presentation.text,
       outcome.reason === 'interrupted' ? 'danger' : 'attention',
     );
   }
