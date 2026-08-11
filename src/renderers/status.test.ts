@@ -9,8 +9,43 @@ describe('Status renderer', () => {
     const document = renderStatusDocument(statusReport([]));
 
     expect(document.detailPolicy).toBe('progressive');
-    expect(document.summary).toContain('Linked Skills: none');
+    expect(document.summary).toContain('Skills      No linked packages');
     expect(document.details).toContain('Linked Skills: none');
+  });
+
+  it('uses semantic ANSI colors in a TTY and preserves complete NO_COLOR text', () => {
+    const originalIsTTY = process.stdout.isTTY;
+    const originalTerm = process.env.TERM;
+    const originalNoColor = process.env.NO_COLOR;
+    Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: true });
+    process.env.TERM = 'xterm-256color';
+    delete process.env.NO_COLOR;
+
+    try {
+      const report = statusReport([]);
+      report.pendingDeployment.modify = 2;
+      report.pendingDeployment.total = 2;
+      report.pendingDeployment.recommended = 2;
+      const colored = renderStatusDocument(report).summary.join('\n');
+      expect(colored).toContain('\u001b[36mMCV configuration overview');
+      expect(colored).toContain('\u001b[33m! 2 pending deployment changes');
+      expect(colored).toContain('\u001b[32m✓ No missing variables');
+      expect(colored).toContain('\u001b[2m/repository');
+
+      process.env.NO_COLOR = '';
+      const plain = renderStatusDocument(report).summary.join('\n');
+      expect(plain).not.toContain('\u001b[');
+      expect(plain).toContain('! 2 pending deployment changes');
+      expect(plain).toContain('No deletions or Advanced Cleanup');
+      expect(plain).toContain('Environment ✓ No missing variables');
+    } finally {
+      Object.defineProperty(process.stdout, 'isTTY', {
+        configurable: true,
+        value: originalIsTTY,
+      });
+      restoreEnvironmentVariable('TERM', originalTerm);
+      restoreEnvironmentVariable('NO_COLOR', originalNoColor);
+    }
   });
 
   it('collapses healthy packages into unique package and Surface coverage counts', () => {
@@ -50,11 +85,11 @@ describe('Status renderer', () => {
     const summary = document.summary.join('\n');
 
     expect(summary).toContain(
-      'Linked Skills: ✓ 3 packages match through existing local links · no action required',
+      'Skills      ✓ 3 linked packages healthy',
     );
-    expect(summary).toContain('Coverage: Codex 2 · Claude Code 2 · 1 shared');
-    expect(summary).toContain('External links are outside MCV ownership and will be preserved.');
-    expect(summary).toContain('Details: mcv status --verbose');
+    expect(summary).toContain('Coverage  Codex 2 · Claude Code 2 · 1 shared');
+    expect(summary).toContain('External links preserved');
+    expect(summary).toContain('Details   mcv status --verbose');
     expect(summary).not.toContain('cloudflare · Codex');
 
     const details = renderStatusPlain(statusReport(facts)).join('\n');
@@ -97,7 +132,7 @@ describe('Status renderer', () => {
 
     const summary = renderStatusDocument(statusReport(facts)).summary.join('\n');
 
-    expect(summary).toContain('Linked Skills: 5 packages · 1 healthy · 3 need review · 1 blocked');
+    expect(summary).toContain('Skills      5 packages · 1 healthy · 3 need review · 1 blocked');
     expect(summary).toContain('× duplicate · Codex · Blocked: link target is missing');
     expect(summary).toContain('! decision · Codex · Decision required');
     expect(summary).toContain('Choose Preserve or Replace during Deploy.');
@@ -131,7 +166,7 @@ describe('Status renderer', () => {
     const summary = renderStatusDocument(statusReport(facts)).summary.join('\n');
 
     expect(summary).toContain(
-      'Coverage: Gemini CLI 1 · Antigravity 1 · Canonical Device Skill Store 1 · 1 shared',
+      'Coverage  Gemini CLI 1 · Antigravity 1 · Canonical Device Skill Store 1 · 1 shared',
     );
   });
 });
@@ -194,4 +229,9 @@ function statusReport(linkFacts: LinkFact[]): StatusReport {
     issues: [],
     nextActions: [],
   };
+}
+
+function restoreEnvironmentVariable(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
 }

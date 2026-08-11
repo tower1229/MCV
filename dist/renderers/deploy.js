@@ -1,24 +1,49 @@
 import { displaySkillSurface } from '../core/skill-surfaces.js';
-import { renderIssuePlain } from './color.js';
-import { renderCriticalIssues, summarizeIssues, withoutNextActions } from './human-document.js';
+import { renderIssuePlain, styleText } from './color.js';
+import { renderCriticalIssues, withoutNextActions } from './human-document.js';
 export function renderDeployPlanDocument(plan) {
     const selectedCount = plan.changes.filter((change) => change.defaultSelected).length;
+    const unselectedCount = plan.changes.length - selectedCount;
+    const addCount = countDeployChanges(plan, 'add');
+    const modifyCount = countDeployChanges(plan, 'modify');
+    const deleteCount = countDeployChanges(plan, 'delete');
     const destructive = plan.changes.filter((change) => change.change === 'delete' || change.deploymentKind === 'topology-migration');
-    const topologyMigrations = destructive.filter((change) => change.deploymentKind === 'topology-migration');
+    const topologyMigrationCount = destructive.filter((change) => change.deploymentKind === 'topology-migration').length;
+    const selectedDestructive = destructive.filter((change) => change.defaultSelected).length;
+    const issueCounts = countIssues(plan);
+    const requiresReview = issueCounts.errors > 0
+        || issueCounts.warnings > 0
+        || issueCounts.decisions > 0;
+    const changeSummary = [
+        `${selectedCount} selected ${selectedCount === 1 ? 'change' : 'changes'}`,
+        ...(unselectedCount > 0 ? [`${unselectedCount} not selected`] : []),
+        ...formatNonZeroChangeCounts(addCount, modifyCount, deleteCount),
+    ].join(' · ');
+    const status = plan.status === 'failed'
+        ? styleText('× Deploy plan failed', 'red')
+        : plan.readyToApply && !requiresReview
+            ? styleText('✓ Ready to deploy', 'green')
+            : styleText('! Review required before deploy', 'yellow');
     const summary = [
-        `Deploy Plan: ${plan.repositoryPath ?? 'not bound'}`,
-        `Scope: ${plan.scope} · Target: ${plan.targetRoot}`,
-        `Changes: ${plan.changes.length} (${countDeployChanges(plan, 'add')} add, ${countDeployChanges(plan, 'modify')} modify, ${countDeployChanges(plan, 'delete')} delete).`,
-        `Selection: ${selectedCount} selected, ${plan.changes.length - selectedCount} not selected, ${destructive.length} destructive.`,
-        summarizeIssues(plan.issues),
-        ...(plan.linkOutcomes.length > 0 ? [summarizeLinkOutcomes(plan)] : []),
-        ...(countDeployChanges(plan, 'delete') > 0
-            ? [`[destructive] Deletes: ${countDeployChanges(plan, 'delete')} (not selected by default).`]
-            : []),
-        ...(topologyMigrations.length > 0
-            ? [`[destructive] Topology migration: ${topologyMigrations.length} (${topologyMigrations.filter((change) => change.defaultSelected).length} selected, ${topologyMigrations.filter((change) => !change.defaultSelected).length} not selected).`]
+        styleText(`Deploy ${plan.scope} configuration`, 'cyan'),
+        '',
+        `${styleText('Repository', 'cyan')}  ${styleText(plan.repositoryPath ?? 'not bound', 'dim')}`,
+        `${styleText('Target', 'cyan')}      ${styleText(plan.targetRoot, 'dim')}`,
+        '',
+        status,
+        `  ${styleText(changeSummary, plan.readyToApply && !requiresReview ? 'cyan' : 'yellow')}`,
+        ...(destructive.length === 0
+            ? [`  ${styleText('No deletions or topology migrations', 'green')}`]
+            : [`  ${styleText(`${formatDestructiveCounts(deleteCount, topologyMigrationCount)} · ${selectedDestructive} selected`, selectedDestructive > 0 ? 'red' : 'yellow')}`]),
+        ...(issueCounts.errors === 0 && issueCounts.warnings === 0 && issueCounts.decisions === 0
+            ? [`  ${styleText('No errors, warnings, or decisions required', 'green')}`]
+            : [`  ${styleText(formatActionableIssueCounts(issueCounts), issueCounts.errors > 0 ? 'red' : 'yellow')}`]),
+        ...(plan.linkOutcomes.length > 0 ? [formatLinkOutcomes(plan)] : []),
+        ...(issueCounts.notices > 0
+            ? [`${styleText('Info', 'cyan')}        ${styleText(`${issueCounts.notices} ${issueCounts.notices === 1 ? 'notice' : 'notices'} · details included in review`, 'dim')}`]
             : []),
         ...renderCriticalIssues(plan.issues),
+        '',
     ];
     if (plan.status === 'failed')
         summary.push(`Error: ${plan.error.message}`);
@@ -31,19 +56,53 @@ export function renderDeployPlanDocument(plan) {
         title: 'Deploy Plan',
         summary,
         details: hasReviewDetails ? renderDeployPlanPlain(plan) : [],
-        nextActions: [
-            ...(plan.changes.length > 0 ? ['Review the complete diff before confirming Deploy.'] : []),
-            ...plan.nextActions,
-        ],
+        nextActions: plan.nextActions,
         detailPolicy: 'review',
     };
 }
 function countDeployChanges(plan, kind) {
     return plan.changes.filter((change) => change.change === kind).length;
 }
-function summarizeLinkOutcomes(plan) {
+function formatLinkOutcomes(plan) {
     const satisfied = plan.linkOutcomes.filter((outcome) => outcome.status === 'satisfied-via-link').length;
-    return `Linked Skill outcomes: ${satisfied} satisfied, ${plan.linkOutcomes.length - satisfied} blocked.`;
+    const blocked = plan.linkOutcomes.length - satisfied;
+    const summary = blocked === 0
+        ? `${satisfied} ${satisfied === 1 ? 'projection' : 'projections'} already satisfied`
+        : `${satisfied} satisfied · ${blocked} blocked`;
+    return `${styleText('Skills', 'cyan')}      ${styleText(summary, blocked > 0 ? 'red' : 'green')}`;
+}
+function formatNonZeroChangeCounts(add, modify, remove) {
+    return [
+        ...(add > 0 ? [`${add} add`] : []),
+        ...(modify > 0 ? [`${modify} modify`] : []),
+        ...(remove > 0 ? [`${remove} delete`] : []),
+    ];
+}
+function formatDestructiveCounts(deletions, topologyMigrations) {
+    return [
+        ...(deletions > 0
+            ? [`${deletions} deletion ${deletions === 1 ? 'candidate' : 'candidates'}`]
+            : []),
+        ...(topologyMigrations > 0
+            ? [`${topologyMigrations} topology migration ${topologyMigrations === 1 ? 'candidate' : 'candidates'}`]
+            : []),
+    ].join(' · ');
+}
+function countIssues(plan) {
+    const count = (severity) => plan.issues.filter((issue) => issue.severity === severity).length;
+    return {
+        errors: count('error'),
+        warnings: count('warning'),
+        decisions: count('decisionRequired'),
+        notices: count('notice'),
+    };
+}
+function formatActionableIssueCounts(counts) {
+    return [
+        ...(counts.errors > 0 ? [`${counts.errors} ${counts.errors === 1 ? 'error' : 'errors'}`] : []),
+        ...(counts.warnings > 0 ? [`${counts.warnings} ${counts.warnings === 1 ? 'warning' : 'warnings'}`] : []),
+        ...(counts.decisions > 0 ? [`${counts.decisions} ${counts.decisions === 1 ? 'decision' : 'decisions'} required`] : []),
+    ].join(' · ');
 }
 export function renderDeployPlanPlain(plan) {
     const lines = [`Deploy Plan: ${plan.repositoryPath ?? 'not bound'}`];

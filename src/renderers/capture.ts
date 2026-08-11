@@ -1,10 +1,11 @@
 import type { CapturePlan, CaptureResult } from '../operations/capture.js';
 import type { SkillProjection } from '../core/skills.js';
-import type { HumanDocument } from '../cli/human-output.js';
+import type { PresentationDocument } from '../presentation/contracts.js';
+import { textLines } from '../presentation/builders.js';
 import { renderIssuePlain } from './color.js';
 import { renderCriticalIssues, summarizeIssues, withoutNextActions } from './human-document.js';
 
-export function renderCapturePlanDocument(plan: CapturePlan): HumanDocument {
+export function renderCapturePlanDocument(plan: CapturePlan): PresentationDocument {
   const changeCounts = {
     add: plan.changes.filter((change) => change.change === 'add').length,
     modify: plan.changes.filter((change) => change.change === 'modify').length,
@@ -29,8 +30,8 @@ export function renderCapturePlanDocument(plan: CapturePlan): HumanDocument {
   return {
     operation: 'capture',
     title: 'Capture Plan',
-    summary,
-    details: hasReviewDetails ? renderCapturePlanPlain(plan) : [],
+    summary: textLines(summary),
+    details: textLines(hasReviewDetails ? renderCapturePlanPlain(plan) : []),
     nextActions: [
       ...(plan.changes.length > 0 ? ['Review the complete diff before confirming Capture.'] : []),
       ...plan.nextActions,
@@ -115,7 +116,7 @@ export function renderCaptureResultPlain(result: CaptureResult): string[] {
   return lines;
 }
 
-export function renderCaptureResultDocument(result: CaptureResult): HumanDocument {
+export function renderCaptureResultDocument(result: CaptureResult): PresentationDocument {
   const full = renderCaptureResultPlain(result);
   const overflowSummary = result.status === 'succeeded'
     ? [
@@ -133,8 +134,8 @@ export function renderCaptureResultDocument(result: CaptureResult): HumanDocumen
     operation: 'capture',
     title: 'Capture Result',
     summary: [],
-    overflowSummary,
-    details: withoutNextActions(full),
+    overflowSummary: textLines(overflowSummary),
+    details: textLines(withoutNextActions(full)),
     nextActions: result.nextActions,
     detailPolicy: 'overflow',
   };

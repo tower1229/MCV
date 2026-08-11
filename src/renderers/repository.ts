@@ -9,13 +9,14 @@ import type {
   UnbindPlan,
   UnbindResult,
 } from '../operations/repository.js';
-import type { HumanDocument } from '../cli/human-output.js';
+import type { PresentationDocument } from '../presentation/contracts.js';
+import { textLines } from '../presentation/builders.js';
 import { renderIssuePlain, styleText } from './color.js';
 import { withoutNextActions } from './human-document.js';
 
 export function renderMigrationDocument(
   contract: MigrationPlan | MigrationResult,
-): HumanDocument {
+): PresentationDocument {
   const full = renderMigrationPlain(contract);
   const overflowSummary = contract.status === 'planned'
     ? [
@@ -28,8 +29,8 @@ export function renderMigrationDocument(
     operation: 'migrate',
     title: contract.status === 'planned' ? 'Migration Plan' : 'Migration Result',
     summary: [],
-    overflowSummary,
-    details: withoutNextActions(full),
+    overflowSummary: textLines(overflowSummary),
+    details: textLines(withoutNextActions(full)),
     nextActions: contract.nextActions,
     detailPolicy: 'overflow',
   };

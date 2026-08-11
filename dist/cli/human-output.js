@@ -1,7 +1,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { pathToFileURL } from 'url';
+import { styleText } from '../renderers/color.js';
 const REVIEW_MAX_AGE_MS = 24 * 60 * 60 * 1_000;
 const REVIEW_MAX_FILES = 10;
 const REVIEW_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
@@ -34,9 +34,7 @@ export function presentHumanDocument(context, document, options = {}) {
     let reviewPath;
     try {
         reviewPath = writeHumanReviewArtifact(context, document);
-        console.log('Full review:');
-        console.log(`  ${pathToFileURL(reviewPath).href}`);
-        console.log(`  ${reviewPath}`);
+        printReviewPath(reviewPath);
     }
     catch (error) {
         console.error(`Could not create the local review file; printing full details instead. ${errorMessage(error)}`);
@@ -65,9 +63,7 @@ function presentProgressiveDocument(context, document, options) {
     for (const line of output)
         console.log(line);
     if (reviewPath) {
-        console.log('Full review:');
-        console.log(`  ${pathToFileURL(reviewPath).href}`);
-        console.log(`  ${reviewPath}`);
+        printReviewPath(reviewPath);
     }
     printNextActions(document.nextActions);
     return reviewPath ? { reviewPath } : {};
@@ -197,6 +193,9 @@ function exceedsInlineBudget(lines) {
 function printNextActions(nextActions) {
     for (const action of nextActions)
         console.log(`Next: ${action}`);
+}
+function printReviewPath(reviewPath) {
+    console.log(`${styleText('Review', 'cyan')}      ${styleText(reviewPath, 'dim')}`);
 }
 function errorMessage(error) {
     return error instanceof Error ? error.message : String(error);

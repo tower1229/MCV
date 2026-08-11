@@ -1,5 +1,6 @@
 import { z } from 'zod';
 export const READ_ASSETS_MAX_RESPONSE_BYTES = 64 * 1024;
+export const READ_ASSETS_MAX_CURSOR_BYTES = 8 * 1024;
 export const AssetSummarySchema = z.object({
     id: z.string(),
     type: z.enum(['rule', 'skill', 'mcp', 'native']),
@@ -29,7 +30,7 @@ export const ReadAssetsInputSchema = z.object({
     assetIds: z.array(z.string()).min(1).max(50).optional(),
     includeFiles: z.boolean().optional(),
     cursor: z.string().optional(),
-});
+}).refine((input) => (input.assetIds === undefined) !== (input.cursor === undefined), { message: 'Provide exactly one of assetIds or cursor.' });
 export const AssetFileContentSchema = z.object({
     path: z.string(),
     content: z.string(),

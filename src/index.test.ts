@@ -121,7 +121,7 @@ describe('mcv default path without fullscreen Shell', () => {
     await cli.parseAsync(['node', 'mcv']);
 
     expect(output.join('')).not.toContain('Usage: mcv [options] [command]');
-    expect(loggedText()).toContain('Repository:');
+    expect(loggedText()).toContain('Repository  ');
     expect(terminalPrompt.question).not.toHaveBeenCalled();
   });
 
@@ -133,25 +133,25 @@ describe('mcv default path without fullscreen Shell', () => {
 
     await createProgram(context()).parseAsync(['node', 'mcv']);
 
-    expect(loggedText()).toContain('Repository:');
-    expect(loggedText()).toContain('Pending deployment:');
+    expect(loggedText()).toContain('Repository  ');
+    expect(loggedText()).toContain('pending deployment');
     expect(terminalPrompt.question).not.toHaveBeenCalled();
   });
 
   it('prints a plain-text Overview for bare mcv in a TTY and exits', async () => {
     await createProgram(context()).parseAsync(['node', 'mcv']);
 
-    expect(loggedText()).toContain('Repository:');
+    expect(loggedText()).toContain('Repository  ');
     expect(loggedText()).toContain(repositoryPath);
-    expect(loggedText()).toContain('Pending deployment:');
+    expect(loggedText()).toContain('pending deployment');
     expect(terminalPrompt.question).not.toHaveBeenCalled();
   });
 
   it('prints the same Overview through the status compatibility alias', async () => {
     await createProgram(context()).parseAsync(['node', 'mcv', 'status']);
 
-    expect(loggedText()).toContain('Repository:');
-    expect(loggedText()).toContain('Pending deployment:');
+    expect(loggedText()).toContain('Repository  ');
+    expect(loggedText()).toContain('pending deployment');
     expect(terminalPrompt.question).not.toHaveBeenCalled();
   });
 
@@ -217,7 +217,7 @@ describe('mcv default path without fullscreen Shell', () => {
   it('runs deploy through the one-shot command path in a TTY', async () => {
     await createProgram(context()).parseAsync(['node', 'mcv', 'deploy', '--global']);
 
-    expect(loggedText()).toMatch(/already in sync|Deploy Plan:/);
+    expect(loggedText()).toMatch(/already in sync|Deploy global configuration/);
   });
 
   it('runs restore through the one-shot command path in a TTY', async () => {

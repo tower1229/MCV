@@ -109,9 +109,9 @@ describe('mcv deploy', () => {
 
     await deployWithGlobalProfile(['--dry-run'], deviceContext('win32'));
     const plain = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
-    expect(plain).toContain('Deploy Plan:');
-    expect(plain).toContain('Changes:');
-    expect(plain).toContain('Full review:');
+    expect(plain).toContain('Deploy global configuration');
+    expect(plain).toContain('selected change');
+    expect(plain).toContain('Review      ');
     expect(plain).not.toContain('# Rules');
     const reviewDirectory = path.join(stateRoot, 'mcv', 'reviews');
     const reviewFiles = fs.readdirSync(reviewDirectory);
@@ -161,7 +161,7 @@ describe('mcv deploy', () => {
     await deployWithGlobalProfile(['--dry-run', '--json'], deviceContext('win32'));
     const json = JSON.parse(String(vi.mocked(console.log).mock.calls[0][0]));
     expect(json).toMatchObject({ status: 'planned' });
-    expect(plain).toContain('Linked Skill outcomes: 1 satisfied, 0 blocked.');
+    expect(plain).toContain('Skills      1 projection already satisfied');
     expect(json.linkOutcomes).toEqual([expect.objectContaining({
       status: 'satisfied-via-link',
       ownership: 'external',
@@ -219,7 +219,7 @@ describe('mcv deploy', () => {
     const planText = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
     expect(planText).toContain('Topology migration');
     expect(planText).toContain('1 not selected');
-    expect(planText).toContain('[destructive]');
+    expect(planText).toContain('topology migration candidate');
     expect(planText).toContain('Topology migration available');
 
     vi.mocked(console.log).mockClear();
@@ -458,14 +458,14 @@ describe('mcv deploy', () => {
     vi.mocked(console.log).mockClear();
     await run('status');
     expect(vi.mocked(console.log)).toHaveBeenCalledWith(
-      'Post-deploy local state: 1 unchanged, 0 content Drift, 0 topology Drift, 0 Drift, 0 missing',
+      'Device      ✓ 1 unchanged',
     );
 
     fs.appendFileSync(settingsPath, '\n');
     vi.mocked(console.log).mockClear();
     await run('status');
     expect(vi.mocked(console.log)).toHaveBeenCalledWith(
-      'Post-deploy local state: 0 unchanged, 0 content Drift, 0 topology Drift, 1 Drift, 0 missing',
+      'Device      ! 1 drifted · 0 unchanged',
     );
   });
 

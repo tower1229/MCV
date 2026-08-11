@@ -1,8 +1,5 @@
 import { readFileSync } from 'fs';
-import {
-  DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
-  McpServer,
-} from '@modelcontextprotocol/server';
+import { McpServer } from '@modelcontextprotocol/server';
 import type { DeviceContext } from '../adapters/types.js';
 import {
   DeployProfilesInputSchema,
@@ -20,9 +17,10 @@ import {
   PROFILE_CLASSIFICATION_URI,
 } from './profile-classification.js';
 import { readAssets } from './read-assets.js';
+import { toolResult } from './tool-result.js';
 import { updateProfiles } from './update-profiles.js';
 
-export const PINNED_PROTOCOL_VERSION = DEFAULT_NEGOTIATED_PROTOCOL_VERSION;
+export const MCP_PROTOCOL_VERSION = '2026-07-28';
 
 export const MCP_SERVER_INSTRUCTIONS = [
   'MCV manages Profiles and Assets for the bound Repository over MCP.',
@@ -50,7 +48,7 @@ export function createMcvMcpServer(
     },
     {
       instructions: MCP_SERVER_INSTRUCTIONS,
-      supportedProtocolVersions: [PINNED_PROTOCOL_VERSION],
+      supportedProtocolVersions: [MCP_PROTOCOL_VERSION],
       capabilities: {
         tools: {},
         resources: {},
@@ -71,7 +69,7 @@ export function createMcvMcpServer(
         openWorldHint: false,
       },
     },
-    async (args) => toolResult(inspectInventory(repositoryPath, args)),
+    async (args) => toolResult('inspect_inventory', inspectInventory(repositoryPath, args)),
   );
 
   server.registerTool(
@@ -87,7 +85,7 @@ export function createMcvMcpServer(
         openWorldHint: false,
       },
     },
-    async (args) => toolResult(readAssets(repositoryPath, args)),
+    async (args) => toolResult('read_assets', readAssets(repositoryPath, args)),
   );
 
   server.registerTool(
@@ -104,7 +102,7 @@ export function createMcvMcpServer(
         idempotentHint: true,
       },
     },
-    async (args) => toolResult(updateProfiles(repositoryPath, args)),
+    async (args) => toolResult('update_profiles', updateProfiles(repositoryPath, args)),
   );
 
   server.registerTool(
@@ -123,7 +121,10 @@ export function createMcvMcpServer(
     },
     async (args) => {
       const { deployProfiles } = await import('./deploy-profiles.js');
-      return toolResult(await deployProfiles(repositoryPath, context, args));
+      return toolResult(
+        'deploy_profiles',
+        await deployProfiles(repositoryPath, context, args),
+      );
     },
   );
 
@@ -148,14 +149,4 @@ export function createMcvMcpServer(
   );
 
   return server;
-}
-
-function toolResult<T extends { status: string }>(output: T): {
-  content: Array<{ type: 'text'; text: string }>;
-  structuredContent: T;
-} {
-  return {
-    content: [{ type: 'text', text: JSON.stringify(output) }],
-    structuredContent: output,
-  };
 }

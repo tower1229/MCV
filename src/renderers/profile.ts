@@ -4,38 +4,39 @@ import type {
   ProfileMutationReport,
   ProfileShowReport,
 } from '../commands/profile.js';
-import type { HumanDocument } from '../cli/human-output.js';
+import type { PresentationDocument } from '../presentation/contracts.js';
+import { textLines } from '../presentation/builders.js';
 import { withoutNextActions } from './human-document.js';
 
-export function renderProfileListDocument(report: ProfileListReport): HumanDocument {
+export function renderProfileListDocument(report: ProfileListReport): PresentationDocument {
   return {
     operation: 'profile',
     title: 'Profile List',
     summary: [],
-    overflowSummary: [
+    overflowSummary: textLines([
       `Repository: ${report.repositoryPath}`,
       `Profiles: ${report.profiles.length}`,
       `Unassigned: ${report.unassignedCount} assets`,
-    ],
-    details: withoutNextActions(renderProfileListPlain(report)),
+    ]),
+    details: textLines(withoutNextActions(renderProfileListPlain(report))),
     nextActions: report.nextActions,
     detailPolicy: 'overflow',
   };
 }
 
-export function renderProfileShowDocument(report: ProfileShowReport): HumanDocument {
+export function renderProfileShowDocument(report: ProfileShowReport): PresentationDocument {
   const title = report.profile.title ? ` · ${truncate(report.profile.title)}` : '';
   return {
     operation: 'profile',
     title: 'Profile Details',
     summary: [],
-    overflowSummary: [
+    overflowSummary: textLines([
       `Repository: ${report.repositoryPath}`,
       `Profile: ${report.profile.id}${title}`,
       `Assets: ${report.profile.assetCount}`,
       `Unassigned: ${report.unassignedCount} assets`,
-    ],
-    details: withoutNextActions(renderProfileShowPlain(report)),
+    ]),
+    details: textLines(withoutNextActions(renderProfileShowPlain(report))),
     nextActions: report.nextActions,
     detailPolicy: 'overflow',
   };
@@ -104,7 +105,7 @@ export function renderProfileMutationPlain(
 
 export function renderProfileMutationDocument(
   report: ProfileMutationReport | ProfileFailedReport,
-): HumanDocument {
+): PresentationDocument {
   const full = renderProfileMutationPlain(report);
   const overflowSummary = report.status === 'failed'
     ? [
@@ -116,8 +117,8 @@ export function renderProfileMutationDocument(
     operation: 'profile',
     title: 'Profile Result',
     summary: [],
-    overflowSummary,
-    details: withoutNextActions(full),
+    overflowSummary: textLines(overflowSummary),
+    details: textLines(withoutNextActions(full)),
     nextActions: report.nextActions,
     detailPolicy: 'overflow',
   };

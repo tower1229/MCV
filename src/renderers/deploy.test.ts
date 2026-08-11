@@ -1,8 +1,41 @@
 import { describe, expect, it } from 'vitest';
 import type { DeployChange, DeployPlan, DeployResult } from '../operations/deploy.js';
-import { renderDeployPlanPlain, renderDeployResultPlain } from './deploy.js';
+import {
+  renderDeployPlanDocument,
+  renderDeployPlanPlain,
+  renderDeployResultPlain,
+} from './deploy.js';
 
 describe('plain Deploy renderer', () => {
+  it('uses semantic ANSI colors in a TTY and preserves complete NO_COLOR text', () => {
+    const originalIsTTY = process.stdout.isTTY;
+    const originalTerm = process.env.TERM;
+    const originalNoColor = process.env.NO_COLOR;
+    Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: true });
+    process.env.TERM = 'xterm-256color';
+    delete process.env.NO_COLOR;
+
+    try {
+      const colored = renderDeployPlanDocument(deployPlan()).summary.join('\n');
+      expect(colored).toContain('\u001b[36mDeploy global configuration');
+      expect(colored).toContain('\u001b[32m✓ Ready to deploy');
+      expect(colored).toContain('\u001b[2m/repository');
+
+      process.env.NO_COLOR = '';
+      const plain = renderDeployPlanDocument(deployPlan()).summary.join('\n');
+      expect(plain).not.toContain('\u001b[');
+      expect(plain).toContain('✓ Ready to deploy');
+      expect(plain).toContain('No deletions or topology migrations');
+    } finally {
+      Object.defineProperty(process.stdout, 'isTTY', {
+        configurable: true,
+        value: originalIsTTY,
+      });
+      restoreEnvironmentVariable('TERM', originalTerm);
+      restoreEnvironmentVariable('NO_COLOR', originalNoColor);
+    }
+  });
+
   it('renders Gemini Skill Surfaces independently while retaining the Gemini IDE contract', () => {
     const changes = [
       skillChange('gemini-cli-change', 'gemini-cli', '/home/.gemini/skills/review/SKILL.md'),
@@ -52,6 +85,35 @@ describe('plain Deploy renderer', () => {
     );
   });
 });
+
+function deployPlan(): DeployPlan {
+  return {
+    schemaVersion: 3,
+    operation: 'deploy',
+    status: 'planned',
+    readyToApply: true,
+    operationId: 'color-test',
+    preconditions: {},
+    repositoryPath: '/repository',
+    scope: 'global',
+    targetRoot: '/home',
+    profileIds: ['global'],
+    profilesRevision: 'rev-profiles',
+    catalogRevision: 'rev-catalog',
+    assetIds: [],
+    changes: [],
+    linkOutcomes: [],
+    linkFacts: [],
+    decisions: [],
+    issues: [],
+    nextActions: [],
+  };
+}
+
+function restoreEnvironmentVariable(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
 
 function skillChange(
   id: string,

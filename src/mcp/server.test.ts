@@ -6,11 +6,12 @@ import * as yaml from 'yaml';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import type { DeviceContext } from '../adapters/types.js';
 import {
   createMcvMcpServer,
+  MCP_PROTOCOL_VERSION,
   MCP_SERVER_INSTRUCTIONS,
-  PINNED_PROTOCOL_VERSION,
 } from './server.js';
 import {
   claudeCodeMcpServersConfig,
@@ -21,6 +22,7 @@ import {
 import {
   DeployProfilesOutputSchema,
   InspectInventoryOutputSchema,
+  READ_ASSETS_MAX_CURSOR_BYTES,
   READ_ASSETS_MAX_RESPONSE_BYTES,
   ReadAssetsOutputSchema,
   UpdateProfilesOutputSchema,
@@ -48,7 +50,9 @@ describe('MCV MCP server', () => {
     const { client, close } = await connectInMemory(repositoryPath);
     try {
       expect(client.getInstructions()).toBe(MCP_SERVER_INSTRUCTIONS);
-      expect(PINNED_PROTOCOL_VERSION).toBe('2025-03-26');
+      expect(client.getProtocolEra()).toBe('modern');
+      expect(client.getNegotiatedProtocolVersion()).toBe(MCP_PROTOCOL_VERSION);
+      expect(MCP_PROTOCOL_VERSION).toBe('2026-07-28');
       expect(MCP_SERVER_INSTRUCTIONS.toLowerCase()).not.toContain('global:');
       expect(MCP_SERVER_INSTRUCTIONS).not.toMatch(/AGENTS\.md|CLAUDE\.md|GEMINI\.md/);
 
@@ -329,23 +333,46 @@ describe('MCV MCP server', () => {
 
     const { client, close } = await connectInMemory(repositoryPath);
     try {
-      const first = await callStructured(client, 'read_assets', {
-        assetIds: ['skill:debug', 'skill:bulk', 'mcp:context7'],
-        includeFiles: true,
+      const firstResult = await client.callTool({
+        name: 'read_assets',
+        arguments: {
+          assetIds: ['skill:debug', 'skill:bulk', 'mcp:context7'],
+          includeFiles: true,
+        },
       });
+      const first = ReadAssetsOutputSchema.parse(firstResult.structuredContent);
       expect(first.status).toBe('ok');
       expect(first.truncated).toBe(true);
       expect(first.nextCursor).toEqual(expect.any(String));
-      expect(first.responseBytes).toBeLessThanOrEqual(READ_ASSETS_MAX_RESPONSE_BYTES);
+      expect(Buffer.byteLength(JSON.stringify(firstResult), 'utf8'))
+        .toBeLessThanOrEqual(READ_ASSETS_MAX_RESPONSE_BYTES);
+      expect(first.responseBytes).toBeLessThanOrEqual(
+        Buffer.byteLength(JSON.stringify(firstResult), 'utf8'),
+      );
+      expect(Buffer.byteLength(first.nextCursor!, 'utf8')).toBeLessThanOrEqual(
+        READ_ASSETS_MAX_CURSOR_BYTES,
+      );
+      const decodedCursor = Buffer.from(first.nextCursor!, 'base64url').toString('utf8');
+      expect(decodedCursor).not.toContain('secret=alpha');
+      expect(decodedCursor).not.toContain('secret=beta');
+      expect(JSON.stringify(firstResult.content)).not.toContain('plaintext-token');
       expect(JSON.stringify(first)).toContain('plaintext-token');
       expect(JSON.stringify(first)).not.toContain('secret=beta');
 
-      const second = await callStructured(client, 'read_assets', {
-        cursor: first.nextCursor,
-      });
-      expect(second.status).toBe('ok');
-      expect(second.responseBytes).toBeLessThanOrEqual(READ_ASSETS_MAX_RESPONSE_BYTES);
-      const allContent = `${JSON.stringify(first)}${JSON.stringify(second)}`;
+      const pages = [first];
+      let cursor = first.nextCursor;
+      while (cursor) {
+        const result = await client.callTool({
+          name: 'read_assets',
+          arguments: { cursor },
+        });
+        expect(Buffer.byteLength(JSON.stringify(result), 'utf8'))
+          .toBeLessThanOrEqual(READ_ASSETS_MAX_RESPONSE_BYTES);
+        const page = ReadAssetsOutputSchema.parse(result.structuredContent);
+        pages.push(page);
+        cursor = page.nextCursor;
+      }
+      const allContent = pages.map((page) => JSON.stringify(page)).join('');
       expect(allContent).toContain('secret=alpha');
       expect(allContent).toContain('secret=beta');
       expect(allContent).toContain('context7');
@@ -387,6 +414,72 @@ describe('MCV MCP server', () => {
       expect(JSON.stringify(second)).toContain('TAIL=end');
     } finally {
       await close();
+    }
+  });
+
+  it('read_assets preserves multibyte content and rejects a stale continuation cursor', async () => {
+    const skillDir = path.join(repositoryPath, 'common', 'skills', 'unicode');
+    fs.mkdirSync(skillDir, { recursive: true });
+    const content = '你好🙂"\\\n'.repeat(14_000);
+    fs.writeFileSync(
+      path.join(skillDir, 'SKILL.md'),
+      `---\nname: unicode\ndescription: unicode\n---\n${content}`,
+    );
+
+    const { client, close } = await connectInMemory(repositoryPath);
+    try {
+      const chunks: string[] = [];
+      const first = await callStructured(client, 'read_assets', {
+        assetIds: ['skill:unicode'],
+      });
+      for (const asset of first.assets ?? []) {
+        chunks.push(...asset.files.map((file) => file.content));
+      }
+      expect(first.nextCursor).toEqual(expect.any(String));
+
+      fs.appendFileSync(path.join(skillDir, 'SKILL.md'), '\nchanged\n');
+      const stale = await callStructured(client, 'read_assets', {
+        cursor: first.nextCursor,
+      });
+      expect(stale).toMatchObject({
+        status: 'error',
+        error: { code: 'mcp.staleCursor' },
+      });
+
+      fs.writeFileSync(
+        path.join(skillDir, 'SKILL.md'),
+        `---\nname: unicode\ndescription: unicode\n---\n${content}`,
+      );
+      let cursor = first.nextCursor;
+      while (cursor) {
+        const page = await callStructured(client, 'read_assets', { cursor });
+        for (const asset of page.assets ?? []) {
+          chunks.push(...asset.files.map((file) => file.content));
+        }
+        cursor = page.nextCursor;
+      }
+      expect(chunks.join('')).toBe(`---\nname: unicode\ndescription: unicode\n---\n${content}`);
+    } finally {
+      await close();
+    }
+  });
+
+  it('rejects legacy initialize clients without falling back from the modern protocol', async () => {
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const server = await serveStdio(
+      () => createMcvMcpServer(repositoryPath, {
+        homeDir: os.tmpdir(),
+        platform: process.platform,
+        env: {},
+      }),
+      { legacy: 'reject', transport: serverTransport },
+    );
+    const client = new Client({ name: 'legacy-client', version: '0.0.0' });
+    try {
+      await expect(client.connect(clientTransport)).rejects.toThrow(/protocol version|unsupported/i);
+    } finally {
+      await client.close();
+      await server.close();
     }
   });
 
@@ -538,9 +631,16 @@ describe('MCV MCP host client configurations', () => {
           },
           cwd: repositoryPath,
         });
-        const client = new Client({ name: `${host.id}-contract`, version: '0.0.0' });
+        const client = new Client(
+          { name: `${host.id}-contract`, version: '0.0.0' },
+          {
+            supportedProtocolVersions: [MCP_PROTOCOL_VERSION],
+            versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } },
+          },
+        );
         await client.connect(transport);
         try {
+          expect(client.getProtocolEra()).toBe('modern');
           expect(client.getInstructions()).toBe(MCP_SERVER_INSTRUCTIONS);
           const { tools } = await client.listTools();
           expect(tools.map((tool) => tool.name).sort()).toEqual([
@@ -634,10 +734,18 @@ async function connectInMemory(
   client: Client;
   close: () => Promise<void>;
 }> {
-  const server = createMcvMcpServer(repositoryPath, context);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await server.connect(serverTransport);
-  const client = new Client({ name: 'mcv-test', version: '0.0.0' });
+  const server = await serveStdio(
+    () => createMcvMcpServer(repositoryPath, context),
+    { legacy: 'reject', transport: serverTransport },
+  );
+  const client = new Client(
+    { name: 'mcv-test', version: '0.0.0' },
+    {
+      supportedProtocolVersions: [MCP_PROTOCOL_VERSION],
+      versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } },
+    },
+  );
   await client.connect(clientTransport);
   return {
     client,

@@ -132,7 +132,7 @@ describe('mcv profile', () => {
 
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(output).toContain('Profiles: 42');
-    expect(output).toContain('Full review:');
+    expect(output).toContain('Review      ');
     expect(output).not.toContain('profile-40');
     const reviewDirectory = path.join(stateRoot, 'mcv', 'reviews');
     const reviewFiles = fs.readdirSync(reviewDirectory);

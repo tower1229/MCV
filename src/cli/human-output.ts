@@ -1,9 +1,9 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { pathToFileURL } from 'url';
 import type { DeviceContext } from '../adapters/types.js';
 import type { OperationName } from '../operations/contracts.js';
+import { styleText } from '../renderers/color.js';
 
 const REVIEW_MAX_AGE_MS = 24 * 60 * 60 * 1_000;
 const REVIEW_MAX_FILES = 10;
@@ -59,9 +59,7 @@ export function presentHumanDocument(
   let reviewPath: string | undefined;
   try {
     reviewPath = writeHumanReviewArtifact(context, document);
-    console.log('Full review:');
-    console.log(`  ${pathToFileURL(reviewPath).href}`);
-    console.log(`  ${reviewPath}`);
+    printReviewPath(reviewPath);
   } catch (error) {
     console.error(
       `Could not create the local review file; printing full details instead. ${errorMessage(error)}`,
@@ -97,9 +95,7 @@ function presentProgressiveDocument(
     : document.summary;
   for (const line of output) console.log(line);
   if (reviewPath) {
-    console.log('Full review:');
-    console.log(`  ${pathToFileURL(reviewPath).href}`);
-    console.log(`  ${reviewPath}`);
+    printReviewPath(reviewPath);
   }
   printNextActions(document.nextActions);
   return reviewPath ? { reviewPath } : {};
@@ -233,6 +229,10 @@ function exceedsInlineBudget(lines: string[]): boolean {
 
 function printNextActions(nextActions: string[]): void {
   for (const action of nextActions) console.log(`Next: ${action}`);
+}
+
+function printReviewPath(reviewPath: string): void {
+  console.log(`${styleText('Review', 'cyan')}      ${styleText(reviewPath, 'dim')}`);
 }
 
 function errorMessage(error: unknown): string {

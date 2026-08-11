@@ -72,20 +72,27 @@ describe('mcv status', () => {
     await program().parseAsync(['node', 'mcv', 'status', '--plain']);
 
     expect(vi.mocked(console.log).mock.calls.map(([line]) => line)).toEqual([
-      `Repository: ${repositoryPath}`,
-      'Repository ID: repository-id',
-      'Repository schema: 4',
-      'Pending deployment: 0 changes (0 add, 0 modify, 0 delete; 0 recommended, 0 optional; 0 Advanced Cleanup excluded)',
-      'Linked Skills: none',
-      'Post-deploy local state: 1 unchanged, 0 content Drift, 0 topology Drift, 1 Drift, 1 missing',
-      'Environment: 0 missing variables',
-      'IDE support:',
-      '  Codex: disabled, not detected',
-      '  Claude Code: disabled, not detected',
-      '  Gemini: disabled, not detected',
-      '    gemini-cli: absent',
-      '    antigravity: absent',
-      'Last operation on this device: deploy · failure · 2026-07-19T01:00:00.000Z',
+      'MCV configuration overview',
+      '',
+      `Repository  ${repositoryPath}`,
+      'Identity    repository-id · schema 4',
+      '',
+      '✓ No pending deployment changes',
+      '',
+      'Skills      No linked packages',
+      '',
+      'Device      × 1 drifted · 1 missing · 1 unchanged',
+      '  1 missing-file drift',
+      '',
+      'Environment ✓ No missing variables',
+      'IDEs        0 enabled · 0 detected',
+      '  · Codex · disabled, not detected',
+      '  · Claude Code · disabled, not detected',
+      '  · Gemini · disabled, not detected',
+      '    gemini-cli · antigravity absent',
+      '',
+      'Last        × deploy failed · 2026-07-19T01:00:00.000Z',
+      '',
     ]);
   });
 
@@ -110,9 +117,9 @@ describe('mcv status', () => {
     await program().parseAsync(['node', 'mcv', 'status', '--plain']);
     const plain = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(plain).toContain(
-      'Linked Skills: ✓ 1 package matches through existing local links · no action required',
+      'Skills      ✓ 1 linked package healthy',
     );
-    expect(plain).toContain('Coverage: Codex 1');
+    expect(plain).toContain('Coverage  Codex 1');
     expect(plain).not.toContain('✓ review · Codex · Already matches');
     expect(plain).not.toContain(externalSkill);
 

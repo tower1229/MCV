@@ -117,6 +117,14 @@ _Avoid_: "secret scanner", "credential vault", "safe Repository"
 A private short-lived Local/Runtime text file containing complete human-readable review details that would otherwise flood terminal history. It is presentation data, not a persisted Plan, operation log, backup, or Apply authorization. JSON and MCP never create one; `--verbose` prints the same complete details inline without suppressing the Artifact. Artifact creation must not mutate the Repository, target, Managed Receipt, Baseline Snapshot, or device operation state.
 _Avoid_: "saved plan", "audit log", "replay file"
 
+**Human Presentation（人类界面呈现）**:
+MCV's human-facing expression of operation facts across line-oriented terminal output, Review Artifacts, and dedicated TUIs. It may change emphasis and layout for its destination, but never changes operation meaning; JSON and MCP remain separate structured representations.
+_Avoid_: "CLI formatting", "human protocol", "pretty output"
+
+**Presentation Role（呈现角色）**:
+An output-only classification — Success, Attention, Decision, Danger, Information, or Muted — used to give an already-known operation fact consistent emphasis. A Role is not an Operation state, output stream, or authorization signal; complete wording remains authoritative when color is absent.
+_Avoid_: "semantic state", "severity", "color"
+
 ## Example dialogue
 
 > **Developer:** Status reports Drift in an MCV-managed field. Can Capture silently treat it as Native configuration?
@@ -138,5 +146,9 @@ _Avoid_: "saved plan", "audit log", "replay file"
 > **Developer:** The Managed Receipt records which project files MCV owns. Isn't that a Project Binding?
 >
 > **Domain expert:** No. The Receipt lives inside the project and records only file ownership and hashes; MCV keeps no project list, path table, or cross-device identity, and deleting the Receipt just returns cleanup to conservative mode.
+>
+> **Developer:** A safely unselected deletion is shown with the Danger Presentation Role. Does that mean the Deploy Plan failed?
+>
+> **Domain expert:** No. Danger emphasizes the destructive fact; the Plan's own status separately states whether its current selection is ready to Apply.
 
 <!-- Add terms lazily as the domain stabilizes. Format: see the domain-modeling agent skill's CONTEXT-FORMAT.md. -->

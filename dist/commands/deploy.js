@@ -2,6 +2,7 @@ import { GLOBAL_PROFILE_ID } from '../profiles/contracts.js';
 import { buildDeployRequest, createDeployPlan, applyDeployPlan, } from '../operations/deploy.js';
 import { validateProjectTargetRoot } from '../core/project-target.js';
 import { renderDeployPlanDocument, renderDeployResultDocument } from '../renderers/deploy.js';
+import { styleText } from '../renderers/color.js';
 import { renderJson } from '../renderers/json.js';
 import { createAdapterDefinitions } from '../adapters/index.js';
 import { askInTerminal, withInterruptsIgnored } from '../cli/prompt.js';
@@ -123,11 +124,19 @@ export async function deployConfigurations(context, dependencies = {}, options =
             verbose: options.verbose,
         });
     }
+    const selectedIds = reviewPlan.status === 'failed'
+        ? []
+        : reviewPlan.changes
+            .filter((change) => change.defaultSelected
+            || (options.pruneManaged === true
+                && (change.change === 'delete' || change.deploymentKind === 'project-managed-prune')))
+            .map((change) => change.id);
     if (!options.yes) {
         if (!process.stdin.isTTY && !dependencies.confirmDeploy) {
             throw new Error('Deploy requires an interactive terminal; use --yes only after reviewing --dry-run.');
         }
-        const confirmed = await (dependencies.confirmDeploy ?? confirmInTerminal)();
+        const confirmed = await (dependencies.confirmDeploy
+            ?? (() => confirmInTerminal(selectedIds.length)))();
         if (confirmed === undefined) {
             process.exitCode = 130;
             console.log('Deploy interrupted; local configuration was not changed.');
@@ -138,13 +147,6 @@ export async function deployConfigurations(context, dependencies = {}, options =
             return;
         }
     }
-    const selectedIds = reviewPlan.status === 'failed'
-        ? []
-        : reviewPlan.changes
-            .filter((change) => change.defaultSelected
-            || (options.pruneManaged === true
-                && (change.change === 'delete' || change.deploymentKind === 'project-managed-prune')))
-            .map((change) => change.id);
     const selection = {
         changeIds: selectedIds,
         confirmedIssueIds: options.yes
@@ -164,7 +166,9 @@ export async function deployConfigurations(context, dependencies = {}, options =
             verbose: options.verbose,
         });
 }
-async function confirmInTerminal() {
-    const outcome = await askInTerminal('Write these changes to this device? [y/N] ');
+async function confirmInTerminal(selectedCount) {
+    const noun = selectedCount === 1 ? 'change' : 'changes';
+    const prompt = styleText(`Apply ${selectedCount} selected ${noun} to this device?`, 'cyan');
+    const outcome = await askInTerminal(`${prompt} [y/N] `);
     return outcome.interrupted ? undefined : /^(y|yes)$/i.test(outcome.answer.trim());
 }

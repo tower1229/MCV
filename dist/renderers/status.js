@@ -25,24 +25,63 @@ function renderStatusSummary(report) {
     ];
 }
 function renderStatusLead(report) {
+    const repositoryDetails = [
+        report.repository.id,
+        `schema ${report.repository.schemaVersion}`,
+        ...(report.repository.git
+            ? [report.repository.git.clean
+                    ? styleText('Git clean', 'green')
+                    : styleText(`${report.repository.git.uncommittedChanges} uncommitted ${plural(report.repository.git.uncommittedChanges, 'change')}`, 'yellow')]
+            : []),
+    ].join(' · ');
     const lines = [
-        `Repository: ${report.repository.path}`,
-        `Repository ID: ${report.repository.id}`,
-        `Repository schema: ${report.repository.schemaVersion}`,
+        styleText('MCV configuration overview', 'cyan'),
+        '',
+        labeled('Repository', styleText(report.repository.path, 'dim')),
+        labeled('Identity', styleText(repositoryDetails, 'dim')),
+        '',
     ];
-    if (report.repository.git) {
-        lines.push(report.repository.git.clean
-            ? `Git: ${styleText('clean', 'green')}`
-            : `Git: ${styleText(String(report.repository.git.uncommittedChanges), 'yellow')} uncommitted ${plural(report.repository.git.uncommittedChanges, 'change')}`);
-    }
     const pending = report.pendingDeployment;
-    lines.push(`Pending deployment: ${pending.total} ${plural(pending.total, 'change')} (${pending.add} add, ${pending.modify} modify, ${pending.delete} delete; ${pending.recommended} recommended, ${pending.optional} optional; ${pending.advancedCleanupExcluded} Advanced Cleanup excluded)`);
+    if (pending.total === 0) {
+        lines.push(styleText('✓ No pending deployment changes', 'green'));
+        if (pending.advancedCleanupExcluded > 0) {
+            lines.push(`  ${styleText(`${pending.advancedCleanupExcluded} Advanced Cleanup ${plural(pending.advancedCleanupExcluded, 'change')} excluded`, 'yellow')}`);
+        }
+        lines.push('');
+        return lines;
+    }
+    lines.push(styleText(`! ${pending.total} pending deployment ${plural(pending.total, 'change')}`, pending.delete > 0 ? 'red' : 'yellow'), `  ${styleText(formatPendingBreakdown(pending), 'cyan')}`);
+    const destructive = [
+        ...(pending.delete > 0 ? [`${pending.delete} ${plural(pending.delete, 'deletion')}`] : []),
+        ...(pending.advancedCleanupExcluded > 0
+            ? [`${pending.advancedCleanupExcluded} Advanced Cleanup excluded`]
+            : []),
+    ];
+    lines.push(destructive.length > 0
+        ? `  ${styleText(destructive.join(' · '), pending.delete > 0 ? 'red' : 'yellow')}`
+        : `  ${styleText('No deletions or Advanced Cleanup', 'green')}`);
+    lines.push('');
     return lines;
 }
 function renderStatusTail(report) {
     const lines = [];
     const local = report.postDeployLocalState;
-    lines.push(`Post-deploy local state: ${local.unchanged} unchanged, ${styleText(String(local.contentDrift), local.contentDrift > 0 ? 'yellow' : 'green')} content Drift, ${styleText(String(local.topologyDrift), local.topologyDrift > 0 ? 'yellow' : 'green')} topology Drift, ${styleText(String(local.drift), local.drift > 0 ? 'yellow' : 'green')} Drift, ${styleText(String(local.missing), local.missing > 0 ? 'red' : 'green')} missing`);
+    const localSummary = [
+        ...(local.drift > 0 ? [`${local.drift} drifted`] : []),
+        ...(local.missing > 0 ? [`${local.missing} missing`] : []),
+        `${local.unchanged} unchanged`,
+    ].join(' · ');
+    const localTone = local.missing > 0 ? 'red' : local.drift > 0 ? 'yellow' : 'green';
+    const localSymbol = local.missing > 0 ? '×' : local.drift > 0 ? '!' : '✓';
+    lines.push(labeled('Device', styleText(`${localSymbol} ${localSummary}`, localTone)));
+    const specificDrift = [
+        ...(local.contentDrift > 0 ? [`${local.contentDrift} content`] : []),
+        ...(local.topologyDrift > 0 ? [`${local.topologyDrift} topology`] : []),
+        ...(local.missing > 0 ? [`${local.missing} missing-file`] : []),
+    ];
+    lines.push(specificDrift.length > 0
+        ? `  ${styleText(`${specificDrift.join(' · ')} drift`, localTone)}`
+        : `  ${styleText('No content, topology, or missing-file drift', 'green')}`);
     for (const entry of local.contentDrifts) {
         lines.push(`  Content Drift: Canonical Skill package ${entry.packageName}`);
     }
@@ -51,27 +90,38 @@ function renderStatusTail(report) {
             ? `  Topology Drift: Canonical Device Skill Store · ${entry.packageName} · ${entry.reason}`
             : `  Topology Drift: ${displaySkillSurface(entry.surface)} · ${entry.packageName} · ${entry.reason}`);
     }
-    lines.push(`Environment: ${report.environment.missingVariables.length} missing ${plural(report.environment.missingVariables.length, 'variable')}`);
+    lines.push('');
+    const missingVariableCount = report.environment.missingVariables.length;
+    lines.push(labeled('Environment', missingVariableCount === 0
+        ? styleText('✓ No missing variables', 'green')
+        : styleText(`× ${missingVariableCount} missing ${plural(missingVariableCount, 'variable')}`, 'red')));
     if (report.environment.missingVariables.length > 0) {
-        lines.push(`Missing variables: ${report.environment.missingVariables.join(', ')}`);
+        lines.push(`  ${report.environment.missingVariables.join(', ')}`);
     }
-    lines.push('IDE support:');
+    const enabledCount = report.environment.ideSupport.filter((ide) => ide.enabled).length;
+    const detectedCount = report.environment.ideSupport.filter((ide) => ide.detected).length;
+    lines.push(labeled('IDEs', styleText(`${enabledCount} enabled · ${detectedCount} detected`, 'dim')));
     for (const ide of report.environment.ideSupport) {
-        lines.push(`  ${ide.name}: ${ide.enabled ? 'enabled' : 'disabled'}, ${ide.detected ? 'detected' : 'not detected'}`);
+        const symbol = ide.enabled && ide.detected ? '✓' : ide.enabled ? '!' : '·';
+        const tone = ide.enabled && ide.detected ? 'green' : ide.enabled ? 'yellow' : 'dim';
+        lines.push(`  ${styleText(`${symbol} ${ide.name} · ${ide.enabled ? 'enabled' : 'disabled'}, ${ide.detected ? 'detected' : 'not detected'}`, tone)}`);
         if (ide.id === 'gemini') {
-            for (const surface of ide.surfaces) {
-                lines.push(`    ${surface.id}: ${surface.detected ? 'present' : 'absent'}`);
-            }
+            const presentSurfaces = ide.surfaces.filter((surface) => surface.detected).map((surface) => surface.id);
+            const absentSurfaces = ide.surfaces.filter((surface) => !surface.detected).map((surface) => surface.id);
+            if (presentSurfaces.length > 0)
+                lines.push(`    ${styleText(presentSurfaces.join(' · '), 'green')}`);
+            if (absentSurfaces.length > 0)
+                lines.push(`    ${styleText(`${absentSurfaces.join(' · ')} absent`, ide.enabled ? 'yellow' : 'dim')}`);
         }
     }
+    lines.push('');
     if (report.lastOperation) {
-        lines.push(`Last operation on this device: ${report.lastOperation.kind} · ${report.lastOperation.success
-            ? styleText('success', 'green')
-            : styleText('failure', 'red')} · ${report.lastOperation.time}`);
+        lines.push(labeled('Last', styleText(`${report.lastOperation.success ? '✓' : '×'} ${report.lastOperation.kind} ${report.lastOperation.success ? 'succeeded' : 'failed'} · ${report.lastOperation.time}`, report.lastOperation.success ? 'green' : 'red')));
     }
     else {
-        lines.push('Last operation: none');
+        lines.push(labeled('Last', styleText('No operations recorded on this device', 'dim')));
     }
+    lines.push('');
     return lines;
 }
 const LINK_SEVERITY_RANK = {
@@ -83,7 +133,7 @@ const LINK_SEVERITY_RANK = {
 const SURFACE_ORDER = ['codex', 'claude-code', 'gemini-cli', 'antigravity'];
 function renderLinkedSkillSummary(facts) {
     if (facts.length === 0)
-        return ['Linked Skills: none'];
+        return [labeled('Skills', styleText('No linked packages', 'dim')), ''];
     const packageSeverities = new Map();
     const packagesBySurface = new Map();
     const ideSurfacesByPackage = new Map();
@@ -111,11 +161,10 @@ function renderLinkedSkillSummary(facts) {
     const needsReview = severities.filter((severity) => severity === 'warning' || severity === 'decisionRequired').length;
     const blocked = severities.filter((severity) => severity === 'error').length;
     const packageCount = packageSeverities.size;
-    const matchVerb = packageCount === 1 ? 'matches' : 'match';
     const reviewVerb = needsReview === 1 ? 'needs' : 'need';
     const lines = healthy === packageCount
-        ? [`Linked Skills: ✓ ${packageCount} ${plural(packageCount, 'package')} ${matchVerb} through existing local links · no action required`]
-        : [`Linked Skills: ${packageCount} ${plural(packageCount, 'package')} · ${healthy} healthy · ${needsReview} ${reviewVerb} review · ${blocked} blocked`];
+        ? [labeled('Skills', styleText(`✓ ${packageCount} linked ${plural(packageCount, 'package')} healthy`, 'green'))]
+        : [labeled('Skills', styleText(`${packageCount} ${plural(packageCount, 'package')} · ${healthy} healthy · ${needsReview} ${reviewVerb} review · ${blocked} blocked`, blocked > 0 ? 'red' : 'yellow'))];
     const coverage = SURFACE_ORDER.flatMap((surface) => {
         const count = packagesBySurface.get(surface)?.size ?? 0;
         return count > 0 ? [`${displaySkillSurface(surface)} ${count}`] : [];
@@ -127,14 +176,15 @@ function renderLinkedSkillSummary(facts) {
     if (shared > 0)
         coverage.push(`${shared} shared`);
     if (coverage.length > 0)
-        lines.push(`  Coverage: ${coverage.join(' · ')}`);
+        lines.push(`  ${styleText('Coverage', 'cyan')}  ${coverage.join(' · ')}`);
     if (facts.some((fact) => fact.ownership === 'external')) {
-        lines.push('  External links are outside MCV ownership and will be preserved.');
+        lines.push(`  ${styleText('External links preserved', 'green')}`);
     }
     lines.push(...sortLinkFacts(facts)
         .filter((fact) => fact.severity !== 'notice')
         .flatMap(renderActionableLinkFact));
-    lines.push('  Details: mcv status --verbose');
+    lines.push(`  ${styleText('Details', 'cyan')}   ${styleText('mcv status --verbose', 'dim')}`);
+    lines.push('');
     return lines;
 }
 function renderLinkedSkillDetails(facts) {
@@ -169,7 +219,12 @@ function renderActionableLinkFact(fact) {
     return [headline];
 }
 function linkFactHeadline(fact) {
-    return `  ${linkFactSymbol(fact)} ${fact.packageNames.join(', ')} · ${linkFactSurface(fact)} · ${linkFactState(fact)}`;
+    const tone = fact.severity === 'notice'
+        ? 'green'
+        : fact.severity === 'error'
+            ? 'red'
+            : 'yellow';
+    return styleText(`  ${linkFactSymbol(fact)} ${fact.packageNames.join(', ')} · ${linkFactSurface(fact)} · ${linkFactState(fact)}`, tone);
 }
 function sortLinkFacts(facts) {
     return [...facts].sort((left, right) => LINK_SEVERITY_RANK[right.severity] - LINK_SEVERITY_RANK[left.severity]
@@ -208,4 +263,16 @@ function linkFactReason(reason) {
 }
 function plural(count, singular) {
     return count === 1 ? singular : `${singular}s`;
+}
+function labeled(label, value) {
+    return `${styleText(label.padEnd(12), 'cyan')}${value}`;
+}
+function formatPendingBreakdown(pending) {
+    return [
+        ...(pending.add > 0 ? [`${pending.add} add`] : []),
+        ...(pending.modify > 0 ? [`${pending.modify} modify`] : []),
+        ...(pending.delete > 0 ? [`${pending.delete} delete`] : []),
+        ...(pending.recommended > 0 ? [`${pending.recommended} recommended`] : []),
+        ...(pending.optional > 0 ? [`${pending.optional} optional`] : []),
+    ].join(' · ');
 }

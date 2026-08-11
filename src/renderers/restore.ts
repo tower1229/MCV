@@ -1,10 +1,11 @@
 import type { RestorePlan, RestoreResult } from '../operations/restore.js';
-import type { HumanDocument } from '../cli/human-output.js';
+import type { PresentationDocument } from '../presentation/contracts.js';
+import { textLines } from '../presentation/builders.js';
 import { renderIssuePlain } from './color.js';
 import { restoreLayoutLabel } from './restore-layout.js';
 import { renderCriticalIssues, summarizeIssues, withoutNextActions } from './human-document.js';
 
-export function renderRestorePlanDocument(plan: RestorePlan): HumanDocument {
+export function renderRestorePlanDocument(plan: RestorePlan): PresentationDocument {
   const restoreCount = plan.changes.filter((change) => change.action === 'restore').length;
   const deleteCount = plan.changes.length - restoreCount;
   const summary = [
@@ -22,8 +23,8 @@ export function renderRestorePlanDocument(plan: RestorePlan): HumanDocument {
   return {
     operation: 'restore',
     title: 'Restore Plan',
-    summary,
-    details: hasReviewDetails ? renderRestorePlanPlain(plan) : [],
+    summary: textLines(summary),
+    details: textLines(hasReviewDetails ? renderRestorePlanPlain(plan) : []),
     nextActions: [
       ...(plan.changes.length > 0 ? ['Review every affected path before confirming Restore.'] : []),
       ...plan.nextActions,
@@ -83,7 +84,7 @@ export function renderRestoreResultPlain(result: RestoreResult): string[] {
   return lines;
 }
 
-export function renderRestoreResultDocument(result: RestoreResult): HumanDocument {
+export function renderRestoreResultDocument(result: RestoreResult): PresentationDocument {
   const full = renderRestoreResultPlain(result);
   const overflowSummary = result.status === 'succeeded'
     ? [`Restored ${result.data?.appliedChangeIds.length ?? 0} change(s) from the latest backup.`]
@@ -96,8 +97,8 @@ export function renderRestoreResultDocument(result: RestoreResult): HumanDocumen
     operation: 'restore',
     title: 'Restore Result',
     summary: [],
-    overflowSummary,
-    details: withoutNextActions(full),
+    overflowSummary: textLines(overflowSummary),
+    details: textLines(withoutNextActions(full)),
     nextActions: result.nextActions,
     detailPolicy: 'overflow',
   };

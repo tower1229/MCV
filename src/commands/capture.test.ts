@@ -90,7 +90,7 @@ describe('mcv capture', () => {
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(output).toContain(`Capture Plan: ${repositoryPath}`);
     expect(output).toContain('Changes: 1');
-    expect(output).toContain('Full review:');
+    expect(output).toContain('Review      ');
     expect(output).not.toContain('must-not-leak');
     const reviewDirectory = path.join(stateRoot, 'mcv', 'reviews');
     const reviewFiles = fs.readdirSync(reviewDirectory);
@@ -110,7 +110,7 @@ describe('mcv capture', () => {
     ]);
 
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
-    expect(output).toContain('Full review:');
+    expect(output).toContain('Review      ');
     expect(output).toContain('must-not-leak');
   });
 

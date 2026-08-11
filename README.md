@@ -156,6 +156,26 @@ mcv restore    一次性 Restore Plan/确认/Apply；--dry-run/--yes/--json/--ve
 mcv mcp        本地 stdio MCP Server（集成入口；含 inspect_inventory / read_assets / update_profiles / deploy_profiles）
 ```
 
+### Agent Host 接入 MCV MCP
+
+`mcv mcp` 仅支持 MCP `2026-07-28` 现代协议。Host 必须通过 `server/discover` 协商该版本；旧式 `initialize` 会被明确拒绝，不会回退到 2025 协议。先确保 `mcv` 已安装、当前设备已绑定 Repository，再按 Host 添加本地 stdio Server：
+
+```bash
+# Codex
+codex mcp add mcv -- mcv mcp
+codex mcp get mcv
+
+# Claude Code（用户级）
+claude mcp add --scope user mcv -- mcv mcp
+claude mcp get mcv
+
+# Gemini CLI（用户级）
+gemini mcp add --scope user mcv mcv mcp
+gemini mcp list
+```
+
+连接成功后，Host 应发现 `inspect_inventory`、`read_assets`、`update_profiles`、`deploy_profiles` 四个工具和 `mcv://guides/profile-classification` Resource。`read_assets` 的完整内容只返回在 `structuredContent` 中，单次完整 Tool Result 限制为 64 KiB；内容较大时使用短 continuation cursor 续读。该 cursor 不携带剩余正文，并在 Asset Catalog 变化后失效。Host、工具日志和模型上下文仍可能获得读取到的明文配置。
+
 人类可读的 Capture、Deploy 和 Restore Plan 默认只在终端保留变更数量、选择状态、删除/拓扑迁移等破坏性标记、Issues 和 Next Action；完整 Diff、路径、hash 与技术详情写入用户本地的短期 Review Artifact，并同时打印标准 `file://` URL 与绝对路径。macOS 使用 `~/Library/Application Support/mcv/reviews/`，Windows 使用 `%LOCALAPPDATA%\mcv\reviews\`，Linux 使用 `${XDG_STATE_HOME:-~/.local/state}/mcv/reviews/`。Artifact 原子写入；POSIX 目录/文件权限为 `0700`/`0600`，Windows 继承每用户 `%LOCALAPPDATA%` 的 ACL。每次创建 Artifact 时会 best-effort 清理超过 24 小时的旧 `.txt` 文件，并在始终保留本次新文件的前提下将目录收敛到 10 个文件、50 MiB 的目标上限；如果本次文件自身超限或旧文件删除失败，目录可能暂时超过目标。如果之后不再运行 MCV，过期文件不会由后台进程主动删除。Artifact 可能包含与原预览相同的明文配置值，不应分享。写入失败时 MCV 会把完整详情回退到终端，绝不会在不可审阅时继续隐藏内容。`--verbose` 在保留 Artifact 的同时把完整详情输出到终端。
 
 Overview/status、discover、Profile list/show、Migration 和失败 Result 仅在详情超过 40 行或 8 KiB 时采用相同策略；短输出保持直接显示。Review Artifact 属于 Local/Runtime 展示副作用，不修改 Repository、部署目标、Managed Receipt、backup、Baseline Snapshot 或 device operation state，也不能重放或充当 Apply 授权。`--json` 和 MCP 始终保留原有完整结构化契约且不创建 Review Artifact。

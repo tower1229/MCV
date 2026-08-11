@@ -1,8 +1,9 @@
 import type { EnvironmentReport } from '../operations/environment.js';
-import type { HumanDocument } from '../cli/human-output.js';
+import type { PresentationDocument } from '../presentation/contracts.js';
+import { textLines } from '../presentation/builders.js';
 import { styleText } from './color.js';
 
-export function renderEnvironmentDocument(report: EnvironmentReport): HumanDocument {
+export function renderEnvironmentDocument(report: EnvironmentReport): PresentationDocument {
   const foundPathCount = report.environments.reduce((total, environment) =>
     total + [...environment.configDirectories, ...environment.configFiles]
       .filter((configPath) => configPath.exists).length, 0);
@@ -12,11 +13,11 @@ export function renderEnvironmentDocument(report: EnvironmentReport): HumanDocum
     operation: 'discover',
     title: 'Environment Report',
     summary: [],
-    overflowSummary: [
+    overflowSummary: textLines([
       `Environment: ${report.environments.filter((environment) => environment.detected).length}/${report.environments.length} IDEs detected.`,
       `Configuration paths: ${foundPathCount} found, ${totalPathCount - foundPathCount} missing.`,
-    ],
-    details: renderEnvironmentPlain(report),
+    ]),
+    details: textLines(renderEnvironmentPlain(report)),
     nextActions: report.nextActions,
     detailPolicy: 'overflow',
   };

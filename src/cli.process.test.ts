@@ -57,7 +57,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       });
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain('Repository:');
+      expect(result.stdout).toContain('Repository  ');
       expect(result.stdout).not.toContain('Usage: mcv [options] [command]');
       expect(result.stderr).toBe('');
 
@@ -636,9 +636,9 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       expect(plainStatusResult.status).toBe(0);
       expect(overviewResult.stdout).toBe(plainStatusResult.stdout);
       expect(plainStatusResult.stdout).toContain(
-        'Linked Skills: ✓ 1 package matches through existing local links · no action required',
+        'Skills      ✓ 1 linked package healthy',
       );
-      expect(plainStatusResult.stdout).toContain('Coverage: Claude Code 1');
+      expect(plainStatusResult.stdout).toContain('Coverage  Claude Code 1');
       expect(plainStatusResult.stdout).not.toContain('✓ review · Claude Code · Already matches');
       expect(plainStatusResult.stderr).toBe('');
 

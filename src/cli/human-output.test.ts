@@ -35,8 +35,8 @@ describe('human output presentation', () => {
 
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(output).toContain('Capture Plan: 1 change found.');
-    expect(output).toContain('Full review:');
-    expect(output).toContain('file://');
+    expect(output).toContain('Review      ');
+    expect(output).toContain(presentation.reviewPath);
     expect(output).toContain('Next: Review the complete diff.');
     expect(output).not.toContain('+ apiToken: plaintext');
     expect(presentation.reviewPath).toBeDefined();
@@ -80,7 +80,7 @@ describe('human output presentation', () => {
     const presentation = presentHumanDocument(context, large);
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(output).toContain('Environment: large report.');
-    expect(output).toContain('Full review:');
+    expect(output).toContain('Review      ');
     expect(output).not.toContain('detail 40');
     expect(fs.readFileSync(presentation.reviewPath!, 'utf8')).toContain('detail 40');
   });
@@ -99,7 +99,7 @@ describe('human output presentation', () => {
     const presentation = presentHumanDocument(context, large);
     const output = vi.mocked(console.log).mock.calls.flat().join('\n');
     expect(output).toContain('Status: concise.');
-    expect(output).toContain('Full review:');
+    expect(output).toContain('Review      ');
     expect(output).not.toContain('detail 40');
     expect(fs.readFileSync(presentation.reviewPath!, 'utf8')).toContain('detail 40');
 
