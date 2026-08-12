@@ -1,23 +1,23 @@
 import * as path from 'path';
 import { parseAssetId } from '../assets/ids.js';
-import { toCanonicalDeploySource } from '../assets/selected-repository-view.js';
+import { toManagedDeploySource } from '../assets/selected-repository-view.js';
 import { atomicWriteFile } from '../utils/files.js';
 import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObject } from '../utils/structured-config.js';
-import { hasExecutable, projectRulesManagedFile } from './adapter-utils.js';
-import { CodexCanonicalTransformer } from './codex-canonical-transformer.js';
+import { hasExecutable, projectInstructionsManagedFile } from './adapter-utils.js';
+import { CodexManagedTransformer } from './codex-canonical-transformer.js';
 import { CodexNativeFileHandler, projectCodexNativeUserSettings } from './codex-native-file-handler.js';
 import { CODEX_MANAGED_PATHS } from './overlay-policies.js';
 export class CodexAdapter {
     nativeFileHandler;
-    canonicalTransformer;
+    managedTransformer;
     skillSurfaces = [{
             id: 'codex',
             destinationRoot: (context) => path.join(context.homeDir, '.agents', 'skills'),
             supportsManagedDirectoryLinks: (platform) => platform === 'darwin',
         }];
-    constructor(nativeFileHandler = new CodexNativeFileHandler(), canonicalTransformer = new CodexCanonicalTransformer()) {
+    constructor(nativeFileHandler = new CodexNativeFileHandler(), managedTransformer = new CodexManagedTransformer()) {
         this.nativeFileHandler = nativeFileHandler;
-        this.canonicalTransformer = canonicalTransformer;
+        this.managedTransformer = managedTransformer;
     }
     async detect(context) {
         const configDirectories = this.nativeFileHandler.discoverDirectories(context);
@@ -35,21 +35,21 @@ export class CodexAdapter {
         return this.nativeFileHandler.discoverFiles(context);
     }
     async capture(files, context) {
-        return this.canonicalTransformer.transform(await this.nativeFileHandler.capture(files, context), context);
+        return this.managedTransformer.transform(await this.nativeFileHandler.capture(files, context), context);
     }
     async project(source, request, context) {
         const write = (file) => atomicWriteFile(file.targetPath, file.content);
         if (request.scope === 'project') {
-            return { files: projectRulesManagedFile(request.targetRoot, 'AGENTS.md', source), write };
+            return { files: projectInstructionsManagedFile(request.targetRoot, 'codex', 'AGENTS.md', source), write };
         }
-        const canonicalSource = toCanonicalDeploySource(source);
-        const [nativeFiles, canonicalFiles] = await Promise.all([
+        const managedSource = toManagedDeploySource(source, 'codex');
+        const [nativeFiles, managedFiles] = await Promise.all([
             Promise.resolve(this.projectNativeAssets(source.nativeAssets, context)),
-            this.canonicalTransformer.deploy(canonicalSource, context),
+            this.managedTransformer.deploy(managedSource, context),
         ]);
         const configPath = path.join(context.env.CODEX_HOME || path.join(context.homeDir, '.codex'), 'config.toml');
         return {
-            files: this.mergeConfig(nativeFiles, canonicalFiles, configPath),
+            files: this.mergeConfig(nativeFiles, managedFiles, configPath),
             write,
         };
     }
@@ -65,10 +65,10 @@ export class CodexAdapter {
         }
         return files;
     }
-    mergeConfig(nativeFiles, canonicalFiles, configPath) {
+    mergeConfig(nativeFiles, managedFiles, configPath) {
         const native = nativeFiles.find((file) => file.targetPath === configPath);
-        const managed = canonicalFiles.find((file) => file.targetPath === configPath);
-        const other = [...nativeFiles, ...canonicalFiles].filter((file) => file.targetPath !== configPath);
+        const managed = managedFiles.find((file) => file.targetPath === configPath);
+        const other = [...nativeFiles, ...managedFiles].filter((file) => file.targetPath !== configPath);
         if (!native && !managed)
             return other;
         const existingFile = this.nativeFileHandler.readDeployTarget(configPath);

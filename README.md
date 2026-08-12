@@ -27,7 +27,7 @@ npx @tower1229/mcv --help
 
 ## 支持范围
 
-| IDE | 规则 | Skills | MCP / 原生配置 |
+| IDE | IDE Instructions | Skills | MCP / 原生配置 |
 | --- | --- | --- | --- |
 | Codex | `$CODEX_HOME/AGENTS.md` | `~/.agents/skills/`（旧 `$CODEX_HOME/skills` 仅收集兼容） | `$CODEX_HOME/config.toml` |
 | Claude Code | `~/.claude/CLAUDE.md` | `~/.claude/skills/` | `~/.claude/settings.json`、`~/.claude.json` |
@@ -37,7 +37,8 @@ Gemini 对用户仍是一个目标，Adapter 内部把 Gemini CLI 与 Antigravit
 
 MCV 仓库中的配置分为：
 
-- `common/`：跨 IDE 的 Canonical Rules、Skills 和 MCP Registry。
+- `ide/<ide>/instructions.md`：各 IDE 独立的全局与项目 Instructions，不做继承、拼合或跨 IDE 去重。
+- `common/`：跨 IDE 的 Skills 和 MCP Registry。
 - `ide/<ide>/native/`：仅对特定 IDE 有意义的 Native 配置。
 - `ide/<ide-or-surface>/mcp-overrides.yaml`：timeout、disabled、headers 等 Surface 独有 MCP 字段。
 - Local/Runtime：Adapter 未声明为可转移配置的缓存、日志、会话和设备状态，不进入仓库。是否包含密钥不是归类依据。
@@ -60,7 +61,7 @@ mcv init --dry-run
 mcv init --yes
 ```
 
-`mcv init` 默认打印 Init Plan；确认后使用 `--yes` 创建 schema v4 的 `mcv.yaml`、`profiles.yaml`（含内置 global Profile）并绑定当前设备。显式使用 `--dry-run`、`--yes` 或 `--json` 时保持一次性协议。MCV 不执行任何 Git 操作。
+`mcv init` 默认打印 Init Plan；确认后使用 `--yes` 创建 schema v5 的 `mcv.yaml`、`profiles.yaml`（含内置 global Profile）并绑定当前设备。显式使用 `--dry-run`、`--yes` 或 `--json` 时保持一次性协议。MCV 不执行任何 Git 操作。
 
 ### 2. 查看可发现的配置
 
@@ -83,7 +84,7 @@ Capture 在终端打印按 IDE 与 File、Skill、MCP 分组的决策摘要，�
 - 用户已选择的 `${env:VARIABLE_NAME}` 引用保持引用，明文值保持明文；
 - 把 HOME 和已声明变量对应的绝对路径替换为便携变量；
 - 结构化合并 JSON、YAML 和 TOML，保留未识别的 Native 字段；
-- 多 IDE Rules 自动按 Markdown 块去重合并，并保留 Repository 已有规则；同名但内容不同的 Skill 自动选择完整包内最新修改时间较新的副本。
+- 每个启用 IDE 的 Instructions 独立产生增、改、删候选；disabled target 不读取，也不产生删除候选。同名但内容不同的 Skill 仍自动选择完整包内最新修改时间较新的副本。
 - 多个 IDE Skill 投影若解析到同一物理包，Capture 只产生一个 Canonical 候选与一份完整预览，并标明贡献的 Surface；设备上的投影链接属于拓扑，不会作为可移植 Skill 包内容写入仓库，包内符号链接仍会拒绝。
 - MCP 自动合并不重名 Server；同名 MCP 的核心定义冲突等无法安全自动处理的候选仍要求选择权威来源，留空只跳过该项并显示 warning。
 - Skill 以完整目录包收集，保留 scripts、references、examples、assets 和二进制资源。
@@ -133,7 +134,7 @@ mcv restore --dry-run
 mcv restore
 ```
 
-- 裸 `mcv` 与 `status` 从同一份只读 Overview Report 汇总 Repository、限定在 MCV Repository 路径内的可选 Git 状态、Pending Deployment Change、相对 Baseline Snapshot 的 unchanged/Drift/missing、IDE/Surface、实际配置缺失变量和本设备最近操作。Pending 对同一 Surface 的多文件 Skill projection 按 package 聚合，Canonical materialization 不重复计数，默认未选拓扑迁移进入 `optional`，Advanced Cleanup 只进入 `advancedCleanupExcluded`。Environment 只解释 manifest、MCP 和 Native structured configuration；Rules、Skills、references 和普通 Markdown 中的示例变量不检查。`status --json` 完全省略 `changes`，完整候选由 `deploy --dry-run --json` 提供。JSON Deploy operation 使用 schema v3；其他 JSON operation 使用其各自 schema。消费方必须检查 `schemaVersion` 并拒绝未知版本，不得假定字段集合固定。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
+- 裸 `mcv` 与 `status` 从同一份只读 Overview Report 汇总 Repository、限定在 MCV Repository 路径内的可选 Git 状态、Pending Deployment Change、相对 Baseline Snapshot 的 unchanged/Drift/missing、IDE/Surface、实际配置缺失变量和本设备最近操作。Pending 对同一 Surface 的多文件 Skill projection 按 package 聚合，Canonical Skill materialization 不重复计数，默认未选拓扑迁移进入 `optional`，Advanced Cleanup 只进入 `advancedCleanupExcluded`。Environment 只解释 manifest、MCP 和 Native structured configuration；Instructions、Skills、references 和普通 Markdown 中的示例变量不检查。`status --json` 完全省略 `changes`，完整候选由 `deploy --dry-run --json` 提供。JSON operation 使用 schema v4。消费方必须检查 `schemaVersion` 并拒绝未知版本，不得假定字段集合固定。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
 - `restore --dry-run` 默认选择当前项目（`--target` 或 `process.cwd()`）最近一次完整且内容可验证的 project-scope Deploy backup；`--global` 选择最近一次全局 Deploy backup。展示备份时间、将恢复或删除的路径，并区分 ordinary file、managed-link projection、copy projection 与 physical package；内容或拓扑（链接重定向、目录/链接互换等）在部署后发生变化时，以独立的 Restore Conflict 阻止覆盖。
 - `restore` 默认在终端确认完整 Plan；自动化场景可在审阅后使用 `restore --yes`，并可组合 `--json` 取得结构化 Result。`--target` 与 `--global` 互斥。为避免无监督删除，包含删除的 Plan 必须交互确认，`--yes` 会在写入前阻断。Apply 会重验 operation ID、完整 selection、backup 来源、当前节点类型、链接目标和物理身份；事务开始时先创建并验证当前状态 backup（含目录与符号链接拓扑）。事务前按 Ctrl+C 以 130 退出；写入、删除或本机状态提交失败时仅回滚已尝试路径，backup/commit/rollback 期间忽略普通取消；不完整回滚会保留并报告 recovery backup。成功 Restore 会清除 Baseline Snapshot、managed inventory 与 managed Skill layout，需重新 Deploy 或 Capture 建立事实基线。
 

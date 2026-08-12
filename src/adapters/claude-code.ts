@@ -2,18 +2,18 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { parseAssetId } from '../assets/ids.js';
 import type { DeployRequest } from '../assets/deploy-request.js';
-import { toCanonicalDeploySource, type SelectedRepositoryView } from '../assets/selected-repository-view.js';
+import { toManagedDeploySource, type SelectedRepositoryView } from '../assets/selected-repository-view.js';
 import { atomicWriteFile } from '../utils/files.js';
 import {
   mergeStructuredOverlay,
   parseStructuredObject,
   stringifyStructuredObject,
 } from '../utils/structured-config.js';
-import { projectRulesManagedFile } from './adapter-utils.js';
+import { projectInstructionsManagedFile } from './adapter-utils.js';
 import { ClaudeCodeNativeFileHandler, projectClaudeCodeNativeAsset } from './claude-code-native-file-handler.js';
-import { ClaudeCodeCanonicalTransformer } from './claude-code-canonical-transformer.js';
+import { ClaudeCodeManagedTransformer } from './claude-code-canonical-transformer.js';
 import type {
-  CanonicalTransformer,
+  ManagedTransformer,
   CaptureResult,
   DeployFile,
   DeployOperation,
@@ -37,7 +37,7 @@ export class ClaudeCodeAdapter implements IdeAdapter {
 
   constructor(
     private readonly nativeFileHandler: NativeFileHandler = new ClaudeCodeNativeFileHandler(),
-    private readonly canonicalTransformer: CanonicalTransformer = new ClaudeCodeCanonicalTransformer(),
+    private readonly managedTransformer: ManagedTransformer = new ClaudeCodeManagedTransformer(),
   ) {}
 
   async detect(context: DeviceContext): Promise<DetectedIde> {
@@ -64,7 +64,7 @@ export class ClaudeCodeAdapter implements IdeAdapter {
     context: DeviceContext,
   ): Promise<CaptureResult> {
     const nativeCapture = await this.nativeFileHandler.capture(files, context);
-    return this.canonicalTransformer.transform(nativeCapture, context);
+    return this.managedTransformer.transform(nativeCapture, context);
   }
 
   async project(
@@ -74,16 +74,16 @@ export class ClaudeCodeAdapter implements IdeAdapter {
   ): Promise<DeployOperation> {
     const write = (file: DeployFile) => atomicWriteFile(file.targetPath, file.content);
     if (request.scope === 'project') {
-      return { files: projectRulesManagedFile(request.targetRoot, 'CLAUDE.md', source), write };
+      return { files: projectInstructionsManagedFile(request.targetRoot, 'claude-code', 'CLAUDE.md', source), write };
     }
 
-    const canonicalSource = toCanonicalDeploySource(source);
-    const [nativeFiles, canonicalFiles] = await Promise.all([
+    const managedSource = toManagedDeploySource(source, 'claude-code');
+    const [nativeFiles, managedFiles] = await Promise.all([
       Promise.resolve(this.projectNativeAssets(source.nativeAssets, context)),
-      this.canonicalTransformer.deploy(canonicalSource, context),
+      this.managedTransformer.deploy(managedSource, context),
     ]);
     return {
-      files: this.mergeDeploymentFiles(nativeFiles, canonicalFiles, context),
+      files: this.mergeDeploymentFiles(nativeFiles, managedFiles, context),
       write,
     };
   }
@@ -104,20 +104,20 @@ export class ClaudeCodeAdapter implements IdeAdapter {
 
   private mergeDeploymentFiles(
     nativeFiles: DeployOperation['files'],
-    canonicalFiles: DeployOperation['files'],
+    managedFiles: DeployOperation['files'],
     context: DeviceContext,
   ): DeployOperation['files'] {
     const mergedPaths = [
       path.join(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'settings.json'),
       path.join(context.homeDir, '.claude.json'),
     ];
-    const otherFiles = [...nativeFiles, ...canonicalFiles].filter(
+    const otherFiles = [...nativeFiles, ...managedFiles].filter(
       (file) => !mergedPaths.includes(file.targetPath),
     );
     const mergedFiles = mergedPaths.flatMap((targetPath) => {
       const nativeFile = nativeFiles.find((file) => file.targetPath === targetPath);
-      const canonicalFile = canonicalFiles.find((file) => file.targetPath === targetPath);
-      if (!nativeFile && !canonicalFile) return [];
+      const managedFile = managedFiles.find((file) => file.targetPath === targetPath);
+      if (!nativeFile && !managedFile) return [];
       const existingFile = this.nativeFileHandler.readDeployTarget(targetPath);
       const existing = existingFile
         ? parseStructuredObject(existingFile.content.toString(), 'json', targetPath)
@@ -125,8 +125,8 @@ export class ClaudeCodeAdapter implements IdeAdapter {
       const native = nativeFile
         ? parseStructuredObject(nativeFile.content.toString(), 'json', targetPath)
         : {};
-      const canonical = canonicalFile
-        ? parseStructuredObject(canonicalFile.content.toString(), 'json', targetPath)
+      const canonical = managedFile
+        ? parseStructuredObject(managedFile.content.toString(), 'json', targetPath)
         : undefined;
       return [{
         targetPath,

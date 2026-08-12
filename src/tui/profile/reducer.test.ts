@@ -10,10 +10,10 @@ import {
 
 const catalog: AssetCatalogItem[] = [
   {
-    id: 'rule:canonical',
-    type: 'rule',
-    displayName: 'Canonical Rules',
-    sourcePaths: ['common/AGENTS.md'],
+    id: 'instruction:codex',
+    type: 'instruction',
+    displayName: 'Codex Instructions',
+    sourcePaths: ['ide/codex/instructions.md'],
     contentHash: 'r',
     sizeBytes: 1,
     activation: 'always',
@@ -53,7 +53,7 @@ function readyState(overrides: Partial<ProfileEditorState> = {}): ProfileEditorS
       profilesRevision: 'profiles-rev-1',
       catalogRevision: 'catalog-rev-1',
       profiles: {
-        global: { title: 'Global', assets: ['rule:canonical'] },
+        global: { title: 'Global', assets: ['instruction:codex'] },
         dev: { title: 'Dev', assets: ['skill:debug'] },
       },
       catalog,
@@ -73,7 +73,7 @@ describe('profileEditorReducer', () => {
       profilesRevision: 'profiles-rev-1',
       catalogRevision: 'catalog-rev-1',
       profiles: {
-        global: { assets: ['rule:canonical'] },
+        global: { assets: ['instruction:codex'] },
         dev: { assets: ['skill:debug'] },
       },
       catalog,
@@ -127,7 +127,7 @@ describe('profileEditorReducer', () => {
       profilesRevision: 'profiles-rev-2',
       catalogRevision: 'catalog-rev-1',
       profiles: {
-        global: { title: 'Global', assets: ['rule:canonical'] },
+        global: { title: 'Global', assets: ['instruction:codex'] },
         dev: { title: 'Dev', assets: ['skill:debug', 'mcp:context7'] },
       },
     });
@@ -202,7 +202,7 @@ describe('profileEditorReducer', () => {
       compatibilityFilter: 'gemini',
     });
     expect(filteredCatalogAssets(geminiOnly).map((asset) => asset.id)).toEqual([
-      'rule:canonical',
+      'instruction:codex',
       'mcp:context7',
     ]);
   });

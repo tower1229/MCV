@@ -79,14 +79,14 @@ describe('inspectStatus', () => {
     const report = await inspectStatus(context);
 
     expect(report).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'status',
       status: 'reported',
       ready: true,
       repositoryPath,
       repository: {
         id: 'repository-id',
-        schemaVersion: 4,
+        schemaVersion: 5,
       },
       pendingDeployment: { add: 1, modify: 1, delete: 0, total: 2 },
       postDeployLocalState: {
@@ -446,7 +446,7 @@ function seedManagedSkillRepository(
   context: DeviceContext,
 ): void {
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 4',
+    'schemaVersion: 5',
     'repositoryId: repository-id',
     'initializedAt: 2026-07-21T00:00:00.000Z',
     'targets:',
@@ -469,7 +469,8 @@ function seedManagedSkillRepository(
   ].join('\n'));
   fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'review'), { recursive: true });
   fs.mkdirSync(path.join(homeDir, '.claude'), { recursive: true });
-  fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Repository rules\n');
+  fs.mkdirSync(path.join(repositoryPath, 'ide', 'claude-code'), { recursive: true });
+  fs.writeFileSync(path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md'), '# Repository instructions\n');
   fs.writeFileSync(path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md'), '# Review\n');
   seedGlobalProfileWithCatalog(repositoryPath);
   writeState(context, {
@@ -481,7 +482,7 @@ function seedManagedSkillRepository(
 
 function createRepository(repositoryPath: string, codexEnabled = true): void {
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 4',
+    'schemaVersion: 5',
     'repositoryId: repository-id',
     'initializedAt: 2026-07-21T00:00:00.000Z',
     'targets:',
@@ -502,8 +503,8 @@ function createRepository(repositoryPath: string, codexEnabled = true): void {
     '  useSymlinks: false',
     '',
   ].join('\n'));
-  fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
-  fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Repository rules\n');
+  fs.mkdirSync(path.join(repositoryPath, 'ide', 'codex'), { recursive: true });
+  fs.writeFileSync(path.join(repositoryPath, 'ide', 'codex', 'instructions.md'), '# Repository instructions\n');
   seedGlobalProfileWithCatalog(repositoryPath);
 }
 

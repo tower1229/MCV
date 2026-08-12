@@ -1,15 +1,15 @@
 import * as path from 'path';
 import { parseAssetId } from '../assets/ids.js';
 import type { DeployRequest } from '../assets/deploy-request.js';
-import { toCanonicalDeploySource, type SelectedRepositoryView } from '../assets/selected-repository-view.js';
+import { toManagedDeploySource, type SelectedRepositoryView } from '../assets/selected-repository-view.js';
 import { atomicWriteFile } from '../utils/files.js';
 import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObject } from '../utils/structured-config.js';
-import { hasExecutable, projectRulesManagedFile } from './adapter-utils.js';
-import { GeminiCanonicalTransformer } from './gemini-canonical-transformer.js';
+import { hasExecutable, projectInstructionsManagedFile } from './adapter-utils.js';
+import { GeminiManagedTransformer } from './gemini-canonical-transformer.js';
 import { GeminiNativeFileHandler, projectGeminiNativeAsset } from './gemini-native-file-handler.js';
 import { GEMINI_MANAGED_PATHS } from './overlay-policies.js';
 import type {
-  CanonicalTransformer,
+  ManagedTransformer,
   CaptureResult,
   DeployFile,
   DeployOperation,
@@ -37,7 +37,7 @@ export class GeminiAdapter implements IdeAdapter {
 
   constructor(
     private readonly nativeFileHandler: NativeFileHandler = new GeminiNativeFileHandler(),
-    private readonly canonicalTransformer: CanonicalTransformer = new GeminiCanonicalTransformer(),
+    private readonly managedTransformer: ManagedTransformer = new GeminiManagedTransformer(),
   ) {}
 
   async detect(context: DeviceContext): Promise<DetectedIde> {
@@ -57,7 +57,7 @@ export class GeminiAdapter implements IdeAdapter {
   }
 
   async capture(files: DetectedConfigFile[], context: DeviceContext): Promise<CaptureResult> {
-    return this.canonicalTransformer.transform(
+    return this.managedTransformer.transform(
       await this.nativeFileHandler.capture(files, context),
       context,
     );
@@ -70,19 +70,19 @@ export class GeminiAdapter implements IdeAdapter {
   ): Promise<DeployOperation> {
     const write = (file: DeployFile) => atomicWriteFile(file.targetPath, file.content);
     if (request.scope === 'project') {
-      return { files: projectRulesManagedFile(request.targetRoot, 'GEMINI.md', source), write };
+      return { files: projectInstructionsManagedFile(request.targetRoot, 'gemini', 'GEMINI.md', source), write };
     }
 
-    const canonicalSource = toCanonicalDeploySource(source);
-    const [nativeFiles, canonicalFiles] = await Promise.all([
+    const managedSource = toManagedDeploySource(source, 'gemini');
+    const [nativeFiles, managedFiles] = await Promise.all([
       Promise.resolve(this.projectNativeAssets(source.nativeAssets, context)),
-      this.canonicalTransformer.deploy(canonicalSource, context),
+      this.managedTransformer.deploy(managedSource, context),
     ]);
     const settingsPath = path.join(context.homeDir, '.gemini', 'settings.json');
     const antigravityMcpPath = path.join(context.homeDir, '.gemini', 'config', 'mcp_config.json');
     return {
       files: this.mergeSettings(
-        this.mergeSettings(nativeFiles, canonicalFiles, settingsPath),
+        this.mergeSettings(nativeFiles, managedFiles, settingsPath),
         [],
         antigravityMcpPath,
       ),
@@ -106,13 +106,13 @@ export class GeminiAdapter implements IdeAdapter {
 
   private mergeSettings(
     nativeFiles: DeployFile[],
-    canonicalFiles: DeployFile[],
+    managedFiles: DeployFile[],
     settingsPath: string,
   ): DeployFile[] {
     const native = nativeFiles.find((file) => file.targetPath === settingsPath);
-    const managed = canonicalFiles.find((file) => file.targetPath === settingsPath)
+    const managed = managedFiles.find((file) => file.targetPath === settingsPath)
       ?? nativeFiles.slice().reverse().find((file) => file.targetPath === settingsPath);
-    const other = [...nativeFiles, ...canonicalFiles].filter((file) => file.targetPath !== settingsPath);
+    const other = [...nativeFiles, ...managedFiles].filter((file) => file.targetPath !== settingsPath);
     if (!native && !managed) return other;
     const existingFile = this.nativeFileHandler.readDeployTarget(settingsPath);
     const existing = existingFile

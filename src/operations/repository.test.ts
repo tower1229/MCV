@@ -2,9 +2,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
+import * as crypto from 'crypto';
 import { execFileSync } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DeviceContext } from '../adapters/types.js';
+import { writeProfilesDocument } from '../profiles/store.js';
 import { readState, writeState } from '../utils/state.js';
 import {
   applyInitPlan,
@@ -48,7 +50,7 @@ describe('Repository operations', () => {
     const result = applyBindPlan(context, createBindPlan(context));
 
     expect(result).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'bind',
       status: 'succeeded',
       repositoryPath,
@@ -57,7 +59,7 @@ describe('Repository operations', () => {
       nextActions: [],
       data: {
         repositoryId: 'repository-current-id',
-        repositorySchemaVersion: 4,
+        repositorySchemaVersion: 5,
         previousRepositoryPath: null,
       },
     });
@@ -172,7 +174,7 @@ describe('Repository operations', () => {
     const result = applyUnbindPlan(context, createUnbindPlan(context));
 
     expect(result).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'unbind',
       status: 'succeeded',
       repositoryPath,
@@ -203,13 +205,13 @@ describe('Repository operations', () => {
     const report = inspectRepository(context);
 
     expect(report).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'repository',
       status: 'reported',
       ready: true,
       repositoryPath,
       repositoryId: 'repository-inspect-id',
-      repositorySchemaVersion: 4,
+      repositorySchemaVersion: 5,
       valid: true,
       changes: [],
       issues: [],
@@ -423,7 +425,7 @@ describe('Repository operations', () => {
     const repositoryPath = path.join(testRoot, 'repository-future-schema');
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), yaml.stringify({
-      schemaVersion: 5,
+      schemaVersion: 6,
       repositoryId: 'repository-future-schema-id',
     }));
     writeState(context, {
@@ -450,7 +452,7 @@ describe('Repository operations', () => {
     const plan = createInitPlan(context, repositoryPath);
 
     expect(plan).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'init',
       status: 'planned',
       readyToApply: true,
@@ -480,7 +482,7 @@ describe('Repository operations', () => {
       repositoryPath,
       data: {
         repositoryId: expect.any(String),
-        repositorySchemaVersion: 4,
+        repositorySchemaVersion: 5,
       },
     });
     expect(() => readManifestForTest(repositoryPath)).not.toThrow();
@@ -527,7 +529,7 @@ describe('Repository operations', () => {
     const plan = createMigrationPlan(context, repositoryPath);
 
     expect(plan).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'migrate',
       status: 'planned',
       readyToApply: true,
@@ -536,7 +538,7 @@ describe('Repository operations', () => {
       preconditions: { repository: expect.any(String), stateTarget: expect.any(String) },
       changes: expect.arrayContaining([
         expect.objectContaining({ id: 'repository-backup', kind: 'backup' }),
-        expect.objectContaining({ id: 'schema-version', kind: 'modify', before: 1, after: 4 }),
+        expect.objectContaining({ id: 'schema-version', kind: 'modify', before: 1, after: 5 }),
         expect.objectContaining({ id: 'gemini-settings-layout', kind: 'move' }),
         expect.objectContaining({ id: 'mcp-registry', kind: 'modify' }),
       ]),
@@ -553,14 +555,14 @@ describe('Repository operations', () => {
       data: {
         repositoryId: 'migration-plan-id',
         previousSchemaVersion: 1,
-        repositorySchemaVersion: 4,
+        repositorySchemaVersion: 5,
         backupPath: expect.any(String),
         backupVerified: true,
       },
     });
     if (result.status !== 'succeeded' || !result.data) throw new Error('expected migration success');
     expect(fs.readFileSync(path.join(result.data.backupPath, 'mcv.yaml'), 'utf8')).toBe(manifestBefore);
-    expect(readManifestForTest(repositoryPath).schemaVersion).toBe(4);
+    expect(readManifestForTest(repositoryPath).schemaVersion).toBe(5);
     expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8'))).toEqual({
       schemaVersion: 1,
       profiles: {
@@ -595,7 +597,7 @@ describe('Repository operations', () => {
       status: 'planned',
       readyToApply: true,
       changes: expect.arrayContaining([
-        expect.objectContaining({ id: 'schema-version', before: 2, after: 4 }),
+        expect.objectContaining({ id: 'schema-version', before: 2, after: 5 }),
       ]),
     });
     expect(yaml.parse(fs.readFileSync(manifestPath, 'utf8'))).toEqual(original);
@@ -603,11 +605,11 @@ describe('Repository operations', () => {
     const result = applyMigrationPlan(context, plan);
     expect(result).toMatchObject({
       status: 'succeeded',
-      data: { previousSchemaVersion: 2, repositorySchemaVersion: 4, backupVerified: true },
+      data: { previousSchemaVersion: 2, repositorySchemaVersion: 5, backupVerified: true },
     });
     const migrated = yaml.parse(fs.readFileSync(manifestPath, 'utf8'));
     const { security: _retiredSecurity, ...expected } = original;
-    expect(migrated).toEqual({ ...expected, schemaVersion: 4 });
+    expect(migrated).toEqual({ ...expected, schemaVersion: 5 });
     expect(migrated).not.toHaveProperty('security');
     expect(migrated.variables.TOKEN).toBe('plaintext-value');
     expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8'))).toEqual({
@@ -616,7 +618,7 @@ describe('Repository operations', () => {
     });
   });
 
-  it('migrates a v3 Repository into v4 with every Catalog Asset in global and device state schema 3', () => {
+  it('migrates a v3 Repository into v5 with every Catalog Asset in global and device state schema 3', () => {
     const repositoryPath = createV3Repository(testRoot, 'migration-v3');
     const agentsPath = path.join(repositoryPath, 'common', 'AGENTS.md');
     const skillDir = path.join(repositoryPath, 'common', 'skills', 'code-review');
@@ -658,9 +660,11 @@ describe('Repository operations', () => {
           id: 'catalog-scan',
           kind: 'scan',
           assetIds: [
+            'instruction:claude-code',
+            'instruction:codex',
+            'instruction:gemini',
             'mcp:context7',
             'native:codex/user-settings',
-            'rule:canonical',
             'skill:code-review',
           ],
         }),
@@ -669,13 +673,15 @@ describe('Repository operations', () => {
           kind: 'add',
           path: path.join(repositoryPath, 'profiles.yaml'),
           assetIds: [
+            'instruction:claude-code',
+            'instruction:codex',
+            'instruction:gemini',
             'mcp:context7',
             'native:codex/user-settings',
-            'rule:canonical',
             'skill:code-review',
           ],
         }),
-        expect.objectContaining({ id: 'schema-version', before: 3, after: 4 }),
+        expect.objectContaining({ id: 'schema-version', before: 3, after: 5 }),
         expect.objectContaining({ id: 'device-state', kind: 'modify', before: 2, after: 3 }),
       ]),
     });
@@ -688,30 +694,39 @@ describe('Repository operations', () => {
       status: 'succeeded',
       data: {
         previousSchemaVersion: 3,
-        repositorySchemaVersion: 4,
+        repositorySchemaVersion: 5,
         backupVerified: true,
       },
     });
-    expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).schemaVersion).toBe(4);
+    expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).schemaVersion).toBe(5);
     expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8'))).toEqual({
       schemaVersion: 1,
       profiles: {
         global: {
           assets: [
+            'instruction:claude-code',
+            'instruction:codex',
+            'instruction:gemini',
             'mcp:context7',
             'native:codex/user-settings',
-            'rule:canonical',
             'skill:code-review',
           ],
         },
       },
     });
-    expect(fs.readFileSync(agentsPath)).toEqual(contentBefore.agents);
+    expect(fs.existsSync(agentsPath)).toBe(false);
+    for (const target of ['codex', 'claude-code', 'gemini']) {
+      expect(fs.readFileSync(path.join(repositoryPath, 'ide', target, 'instructions.md')))
+        .toEqual(contentBefore.agents);
+      expect(fs.readFileSync(
+        path.join(repositoryPath, 'overrides', 'macos', 'ide', target, 'instructions.md'),
+      )).toEqual(contentBefore.platformOverride);
+    }
     expect(fs.readFileSync(path.join(skillDir, 'SKILL.md'))).toEqual(contentBefore.skill);
     expect(fs.readFileSync(mcpPath)).toEqual(contentBefore.mcp);
     expect(fs.readFileSync(nativePath)).toEqual(contentBefore.native);
     expect(fs.readFileSync(mcpOverridePath)).toEqual(contentBefore.mcpOverride);
-    expect(fs.readFileSync(platformOverridePath)).toEqual(contentBefore.platformOverride);
+    expect(fs.existsSync(platformOverridePath)).toBe(false);
     expect(readState(context)).toEqual({
       schemaVersion: 3,
       deviceId: 'device-id',
@@ -720,6 +735,87 @@ describe('Repository operations', () => {
         [idePath]: { source: repositoryPath, hash: 'deployed-hash', scope: 'global' },
       },
     });
+  });
+
+  it('migrates v4 Instructions, platform overrides, and only referenced Profile assets to v5', () => {
+    const repositoryPath = createV4Repository(testRoot, 'migration-v4');
+    const legacyContent = fs.readFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'));
+    const macosContent = fs.readFileSync(
+      path.join(repositoryPath, 'overrides', 'macos', 'common', 'AGENTS.md'),
+    );
+    const windowsContent = fs.readFileSync(
+      path.join(repositoryPath, 'overrides', 'windows', 'common', 'AGENTS.md'),
+    );
+
+    const plan = createMigrationPlan(context, repositoryPath);
+
+    expect(plan).toMatchObject({
+      status: 'planned',
+      changes: expect.arrayContaining([
+        expect.objectContaining({ id: 'instructions-codex', kind: 'copy' }),
+        expect.objectContaining({ id: 'instructions-claude-code', kind: 'copy' }),
+        expect.objectContaining({ id: 'instructions-gemini', kind: 'copy' }),
+        expect.objectContaining({ id: 'instructions-macos-codex', kind: 'copy' }),
+        expect.objectContaining({ id: 'instructions-windows-gemini', kind: 'copy' }),
+        expect.objectContaining({ id: 'repository-profiles', kind: 'modify' }),
+        expect.objectContaining({ id: 'schema-version', before: 4, after: 5 }),
+      ]),
+    });
+
+    const result = applyMigrationPlan(context, plan);
+
+    expect(result).toMatchObject({
+      status: 'succeeded',
+      data: { previousSchemaVersion: 4, repositorySchemaVersion: 5 },
+    });
+    for (const target of ['codex', 'claude-code', 'gemini']) {
+      expect(fs.readFileSync(path.join(repositoryPath, 'ide', target, 'instructions.md')))
+        .toEqual(legacyContent);
+      expect(fs.readFileSync(
+        path.join(repositoryPath, 'overrides', 'macos', 'ide', target, 'instructions.md'),
+      )).toEqual(macosContent);
+      expect(fs.readFileSync(
+        path.join(repositoryPath, 'overrides', 'windows', 'ide', target, 'instructions.md'),
+      )).toEqual(windowsContent);
+    }
+    expect(fs.existsSync(path.join(repositoryPath, 'common', 'AGENTS.md'))).toBe(false);
+    expect(fs.existsSync(
+      path.join(repositoryPath, 'overrides', 'macos', 'common', 'AGENTS.md'),
+    )).toBe(false);
+    expect(fs.existsSync(
+      path.join(repositoryPath, 'overrides', 'windows', 'common', 'AGENTS.md'),
+    )).toBe(false);
+    expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8')))
+      .toEqual({
+        schemaVersion: 1,
+        profiles: {
+          global: {
+            assets: [
+              'instruction:claude-code',
+              'instruction:codex',
+              'instruction:gemini',
+              'skill:code-review',
+            ],
+          },
+          'skills-only': { assets: ['skill:code-review'] },
+        },
+      });
+  });
+
+  it('blocks v4 migration when any new Instructions target already exists', () => {
+    const repositoryPath = createV4Repository(testRoot, 'migration-v4-conflict');
+    const targetPath = path.join(repositoryPath, 'ide', 'gemini', 'instructions.md');
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, '# Must not be overwritten\n');
+    const before = hashDirectoryForTest(repositoryPath);
+
+    const plan = createMigrationPlan(context, repositoryPath);
+
+    expect(plan).toMatchObject({
+      status: 'failed',
+      error: { code: 'repository.migrationTargetExists' },
+    });
+    expect(hashDirectoryForTest(repositoryPath)).toBe(before);
   });
 
   it('rejects a stale Migration Plan before backup or repository writes', () => {
@@ -813,11 +909,49 @@ function createV3Repository(root: string, name: string): string {
   return repositoryPath;
 }
 
+function createV4Repository(root: string, name: string): string {
+  const repositoryPath = createV3Repository(root, name);
+  const manifest = yaml.parse(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8'));
+  manifest.schemaVersion = 4;
+  manifest.targets.gemini.enabled = false;
+  fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), yaml.stringify(manifest));
+  fs.mkdirSync(path.join(repositoryPath, 'overrides', 'windows', 'common'), { recursive: true });
+  fs.writeFileSync(
+    path.join(repositoryPath, 'overrides', 'windows', 'common', 'AGENTS.md'),
+    '# windows override\n',
+  );
+  writeProfilesDocument(repositoryPath, {
+    schemaVersion: 1,
+    profiles: {
+      global: { assets: ['rule:canonical', 'skill:code-review'] },
+      'skills-only': { assets: ['skill:code-review'] },
+    },
+  });
+  return repositoryPath;
+}
+
+function hashDirectoryForTest(root: string): string {
+  const hash = crypto.createHash('sha256');
+  const visit = (current: string, relative: string): void => {
+    const stat = fs.statSync(current);
+    if (stat.isDirectory()) {
+      for (const entry of fs.readdirSync(current).sort()) {
+        visit(path.join(current, entry), relative ? `${relative}/${entry}` : entry);
+      }
+      return;
+    }
+    hash.update(relative);
+    hash.update(fs.readFileSync(current));
+  };
+  visit(root, '');
+  return hash.digest('hex');
+}
+
 function createRepository(root: string, name: string, repositoryId: string): string {
   const repositoryPath = path.join(root, name);
   fs.mkdirSync(repositoryPath);
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), yaml.stringify({
-    schemaVersion: 4,
+    schemaVersion: 5,
     repositoryId,
     initializedAt: '2026-07-22T00:00:00.000Z',
     targets: {

@@ -38,7 +38,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged Capture TUI in a real PTY'
 
     expect(outcome.code, outcome.output).toBe(0);
     expectRestoredTerminal(outcome.output);
-    expect(fs.existsSync(path.join(repositoryPath, 'common', 'AGENTS.md'))).toBe(true);
+    expect(fs.existsSync(path.join(repositoryPath, 'ide', 'codex', 'instructions.md'))).toBe(true);
   }, 25_000);
 
   it('returns 130 on Ctrl+C and restores the alternate screen', async () => {
@@ -89,7 +89,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged Capture TUI in a real PTY'
     expectRestoredTerminal(outcome.output);
     expect(outcome.output).toMatch(/\u001b\[[0-9;]*m/u);
     expect(outcome.output).toMatch(/[✓!×?]/u);
-    expect(fs.existsSync(path.join(repositoryPath, 'common', 'AGENTS.md'))).toBe(false);
+    expect(fs.existsSync(path.join(repositoryPath, 'ide', 'codex', 'instructions.md'))).toBe(false);
   }, 30_000);
 
   it('--no-tui keeps the same complex Plan out of alternate screen', async () => {
@@ -146,12 +146,15 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged Capture TUI in a real PTY'
 
 function createComplexCaptureFixture(root: string, repositoryId: string): string {
   const repositoryPath = path.join(root, 'repository');
-  fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+  fs.mkdirSync(path.join(repositoryPath, 'ide', 'codex'), { recursive: true });
   fs.mkdirSync(path.join(root, '.codex'), { recursive: true });
   fs.writeFileSync(path.join(root, '.codex', 'config.toml'), 'invalid = [\n');
-  fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# keep until reviewed\n');
+  fs.writeFileSync(
+    path.join(repositoryPath, 'ide', 'codex', 'instructions.md'),
+    '# keep until reviewed\n',
+  );
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 4',
+    'schemaVersion: 5',
     `repositoryId: ${repositoryId}`,
     'initializedAt: 2026-08-10T00:00:00.000Z',
     'targets:',

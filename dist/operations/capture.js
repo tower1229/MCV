@@ -8,6 +8,7 @@ import { createAdapterDefinitions } from '../adapters/index.js';
 import { assetIdForCaptureChange, findReferencingProfiles, } from '../assets/capture-assets.js';
 import { collectSkills, getSkillSources, } from '../core/skills.js';
 import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
+import { instructionDefinition, instructionDefinitionByRepositoryPath, } from '../core/ide-instructions.js';
 import { readProfilesDocument } from '../profiles/store.js';
 import { isRecord, mergeRecords } from '../utils/objects.js';
 import { acquireOperationLock, OperationLockBusyError, releaseOperationLock, repositoryOperationLockResource, } from '../utils/operation-lock.js';
@@ -125,7 +126,7 @@ async function buildCapturePlan(context, repositoryPath, operationId, mutations)
     });
     const changes = [];
     const plannedRepositoryPaths = new Set();
-    addRulesChange(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths, mutations);
+    addInstructionChanges(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths, mutations);
     addMcpChanges(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths, mutations);
     addFileChanges(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths, mutations);
     addSkillChanges(repositoryPath, skills.packages, changes, issues, plannedRepositoryPaths, mutations);
@@ -629,29 +630,19 @@ function blockedCaptureResult(plan, issues) {
             : ['Review and resolve the Capture Plan interactively before applying it.'],
     };
 }
-function addRulesChange(repositoryPath, files, changes, issues, plannedRepositoryPaths, mutations) {
-    const candidates = files.filter((file) => file.repositoryPath === 'common/AGENTS.md');
-    if (candidates.length === 0)
-        return;
-    const targetPath = path.join(repositoryPath, 'common', 'AGENTS.md');
-    const contents = [
-        ...(fs.existsSync(targetPath) ? [fs.readFileSync(targetPath, 'utf8')] : []),
-        ...candidates.flatMap((candidate) => typeof candidate.content === 'string' ? [candidate.content] : []),
-    ];
-    const content = mergeCanonicalRules(contents);
-    const planned = planFile(repositoryPath, {
-        ...candidates[0],
-        ide: 'shared',
-        surface: 'shared',
-        sourcePath: candidates.map((candidate) => candidate.sourcePath).join(', '),
-        content,
-    }, issues);
-    if (!planned || sameOptionalContent(planned.existingContent, planned.finalContent))
-        return;
-    const change = fileChange('shared', 'shared', 'file', 'rules', 'Shared Rules', planned, issues);
-    changes.push(change);
-    mutations.set(change.id, writeMutation(planned.repositoryPath, planned.finalContent, candidates.map((candidate) => candidate.sourcePath)));
-    plannedRepositoryPaths.add(planned.repositoryPath);
+function addInstructionChanges(repositoryPath, files, changes, issues, plannedRepositoryPaths, mutations) {
+    for (const candidate of files.filter((file) => instructionDefinitionByRepositoryPath(file.repositoryPath) !== undefined)) {
+        const planned = planFile(repositoryPath, candidate, issues);
+        if (!planned || sameOptionalContent(planned.existingContent, planned.finalContent))
+            continue;
+        const definition = instructionDefinitionByRepositoryPath(candidate.repositoryPath);
+        if (!definition)
+            continue;
+        const change = fileChange(candidate.ide, candidate.surface, 'file', 'instructions', `${instructionDisplayName(definition.target)} Instructions`, planned, issues);
+        changes.push(change);
+        mutations.set(change.id, writeMutation(planned.repositoryPath, planned.finalContent, [candidate.sourcePath]));
+        plannedRepositoryPaths.add(planned.repositoryPath);
+    }
 }
 function addMcpChanges(repositoryPath, files, changes, issues, plannedRepositoryPaths, mutations) {
     const registryFiles = files.filter((file) => file.repositoryPath === 'common/mcp.yaml' && typeof file.content === 'string');
@@ -776,7 +767,8 @@ function addMcpChanges(repositoryPath, files, changes, issues, plannedRepository
 function addFileChanges(repositoryPath, files, changes, issues, plannedRepositoryPaths, mutations) {
     const groups = new Map();
     for (const file of files) {
-        if (file.repositoryPath === 'common/AGENTS.md' || file.repositoryPath === 'common/mcp.yaml')
+        if (instructionDefinitionByRepositoryPath(file.repositoryPath)
+            || file.repositoryPath === 'common/mcp.yaml')
             continue;
         groups.set(file.repositoryPath, [...(groups.get(file.repositoryPath) ?? []), file]);
     }
@@ -904,10 +896,16 @@ function addSkillChanges(repositoryPath, packages, changes, issues, plannedRepos
     }
 }
 function addRepositoryDeletionChanges(repositoryPath, enabledTargets, sourcedFiles, packages, changes, issues, plannedRepositoryPaths, mutations) {
-    const repositoryRules = path.join(repositoryPath, 'common', 'AGENTS.md');
-    if (fs.existsSync(repositoryRules)
-        && !sourcedFiles.some((file) => file.repositoryPath === 'common/AGENTS.md')) {
-        const change = deletionFileChange(repositoryPath, 'shared', 'shared', 'file', 'rules', 'Shared Rules', 'common/AGENTS.md', issues);
+    for (const targetId of enabledTargets) {
+        const ide = ideName(targetId);
+        if (ide === 'shared')
+            continue;
+        const definition = instructionDefinition(ide);
+        const repositoryInstructions = path.join(repositoryPath, ...definition.repositoryPath.split('/'));
+        if (!fs.existsSync(repositoryInstructions)
+            || sourcedFiles.some((file) => file.repositoryPath === definition.repositoryPath))
+            continue;
+        const change = deletionFileChange(repositoryPath, ide, ide, 'file', 'instructions', `${instructionDisplayName(ide)} Instructions`, definition.repositoryPath, issues);
         changes.push(change);
         mutations.set(change.id, deleteMutation(change.repositoryPaths));
     }
@@ -1075,20 +1073,6 @@ function withoutOverrides(value) {
     delete copy.overrides;
     return copy;
 }
-function mergeCanonicalRules(contents) {
-    const blocks = [];
-    const seen = new Set();
-    for (const content of contents) {
-        for (const block of content.replace(/\r\n?/g, '\n').trim().split(/\n{2,}/)) {
-            const normalized = block.trim();
-            if (!normalized || seen.has(normalized))
-                continue;
-            seen.add(normalized);
-            blocks.push(normalized);
-        }
-    }
-    return `${blocks.join('\n\n')}\n`;
-}
 function skillTopologyMarker(projection) {
     return `skill-topology:${projection.projectionPath}:${hashDeviceTopologyNode(projection.projectionPath)}`;
 }
@@ -1152,6 +1136,13 @@ function stableValue(value) {
 }
 function ideName(targetId) {
     return targetId === 'claudeCode' ? 'claude-code' : targetId;
+}
+function instructionDisplayName(ide) {
+    if (ide === 'codex')
+        return 'Codex';
+    if (ide === 'claude-code')
+        return 'Claude Code';
+    return 'Gemini';
 }
 function surfaceName(repositoryPath, targetId) {
     if (targetId !== 'gemini')

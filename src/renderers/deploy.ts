@@ -242,7 +242,7 @@ function formatSatisfiedSurfaceList(outcomes: CanonicalSkillTarget[]): string {
 }
 
 function displayCapability(capability: string): string {
-  if (capability === 'rules') return 'Shared Rules';
+  if (capability === 'instructions') return 'IDE Instructions';
   if (capability === 'skills') return 'Skills';
   if (capability === 'mcp') return 'MCP';
   return 'IDE-native Configuration';

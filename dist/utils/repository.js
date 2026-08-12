@@ -4,7 +4,7 @@ import * as yaml from 'yaml';
 import { readState } from './state.js';
 import { isRecord } from './objects.js';
 import { Ajv2020 } from 'ajv/dist/2020.js';
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 let manifestValidator;
 export function readManifest(repositoryPath) {
     const manifestPath = path.join(repositoryPath, 'mcv.yaml');

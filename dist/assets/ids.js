@@ -3,8 +3,8 @@ const SLUG = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 const FILE_ID = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
 export function formatAssetId(parts) {
     switch (parts.type) {
-        case 'rule':
-            return 'rule:canonical';
+        case 'instruction':
+            return `instruction:${parts.target}`;
         case 'skill':
             return `skill:${parts.name}`;
         case 'mcp':
@@ -26,8 +26,12 @@ export function parseAssetId(id) {
     if (typeof id !== 'string' || id.length === 0) {
         throw new Error(`Invalid Asset ID: ${JSON.stringify(id)}`);
     }
-    if (id === 'rule:canonical')
-        return { type: 'rule' };
+    if (id.startsWith('instruction:')) {
+        const target = id.slice('instruction:'.length);
+        if (!NATIVE_TARGETS.has(target))
+            throw new Error(`Invalid Asset ID: ${id}`);
+        return { type: 'instruction', target: target };
+    }
     if (id.startsWith('skill:')) {
         const name = id.slice('skill:'.length);
         if (!isSafeSlug(name))

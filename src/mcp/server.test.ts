@@ -123,7 +123,7 @@ describe('MCV MCP server', () => {
             operation: 'upsert',
             id: 'global',
             description: 'Stable cross-project assets',
-            assets: ['rule:canonical', 'mcp:context7'],
+            assets: ['instruction:codex', 'mcp:context7'],
           },
           {
             operation: 'upsert',
@@ -152,7 +152,7 @@ describe('MCV MCP server', () => {
             operation: 'upsert',
             id: 'global',
             description: 'Stable cross-project assets',
-            assets: ['rule:canonical', 'mcp:context7'],
+            assets: ['instruction:codex', 'mcp:context7'],
           },
           {
             operation: 'upsert',
@@ -240,7 +240,7 @@ describe('MCV MCP server', () => {
           {
             operation: 'upsert',
             id: 'global',
-            assets: ['rule:canonical', ...firstHalf.slice(0, 5)],
+            assets: ['instruction:codex', ...firstHalf.slice(0, 5)],
           },
           {
             operation: 'upsert',
@@ -285,12 +285,12 @@ describe('MCV MCP server', () => {
         status: 'ok',
         assets: [
           {
-            id: 'mcp:context7',
-            type: 'mcp',
-            displayName: 'context7',
-            activation: 'tool-surface',
-            unassigned: true,
-            profileIds: [],
+            id: 'instruction:codex',
+            type: 'instruction',
+            displayName: 'Codex Instructions',
+            activation: 'always',
+            unassigned: false,
+            profileIds: ['global'],
           },
         ],
       });
@@ -306,10 +306,10 @@ describe('MCV MCP server', () => {
       });
       expect(second.status).toBe('ok');
       expect(second.assets?.map((asset: { id: string }) => asset.id)).toEqual([
-        'rule:canonical',
+        'mcp:context7',
         'skill:debug',
       ]);
-      expect(second.assets?.find((asset: { id: string }) => asset.id === 'rule:canonical'))
+      expect(first.assets?.find((asset: { id: string }) => asset.id === 'instruction:codex'))
         .toMatchObject({
           profileIds: ['global'],
           unassigned: false,
@@ -517,7 +517,7 @@ describe('MCV MCP server', () => {
 
       const projectRoot = path.join(testRoot, 'project');
       fs.mkdirSync(projectRoot, { recursive: true });
-      fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), '# Local intro\n');
+      fs.writeFileSync(path.join(projectRoot, 'CLAUDE.md'), '# Local intro\n');
       const dry = await callStructured(client, 'deploy_profiles', {
         profiles: ['global'],
         scope: 'project',
@@ -531,7 +531,7 @@ describe('MCV MCP server', () => {
         targetRoot: fs.realpathSync(projectRoot),
       });
       expect(dry.changes?.length).toBeGreaterThan(0);
-      expect(fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8')).toBe('# Local intro\n');
+      expect(fs.readFileSync(path.join(projectRoot, 'CLAUDE.md'), 'utf8')).toBe('# Local intro\n');
 
       const applied = await callStructured(client, 'deploy_profiles', {
         profiles: ['global'],
@@ -545,7 +545,8 @@ describe('MCV MCP server', () => {
         scope: 'project',
       });
       expect(applied.writtenPaths?.length).toBeGreaterThan(0);
-      expect(fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8')).toContain('# rules');
+      expect(fs.readFileSync(path.join(projectRoot, 'CLAUDE.md'), 'utf8'))
+        .toContain('# Claude instructions');
       expect(fs.existsSync(path.join(projectRoot, '.mcv', 'managed.json'))).toBe(true);
     } finally {
       await close();
@@ -788,7 +789,7 @@ function deviceContextFor(testRoot: string, homeDir: string): DeviceContext {
 function enableClaudeDeployFixture(repositoryPath: string, context: DeviceContext): void {
   fs.mkdirSync(path.join(context.homeDir, '.claude'), { recursive: true });
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 4',
+    'schemaVersion: 5',
     'repositoryId: repository-id',
     'initializedAt: 2026-07-19T00:00:00.000Z',
     'targets:',
@@ -807,13 +808,17 @@ function enableClaudeDeployFixture(repositoryPath: string, context: DeviceContex
   ].join('\n'));
   fs.mkdirSync(path.join(repositoryPath, 'ide', 'claude-code', 'native'), { recursive: true });
   fs.writeFileSync(
+    path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md'),
+    '# Claude instructions\n',
+  );
+  fs.writeFileSync(
     path.join(repositoryPath, 'ide', 'claude-code', 'native', 'settings.json'),
     `${JSON.stringify({ theme: 'dark' }, null, 2)}\n`,
   );
   writeProfilesDocument(repositoryPath, {
     ...emptyProfilesDocument(),
     profiles: {
-      global: { title: 'Global', assets: ['rule:canonical'] },
+      global: { title: 'Global', assets: ['instruction:claude-code'] },
     },
   });
   writeState(context, {
@@ -825,8 +830,9 @@ function enableClaudeDeployFixture(repositoryPath: string, context: DeviceContex
 
 function seedRepository(repositoryPath: string): void {
   fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'debug'), { recursive: true });
+  fs.mkdirSync(path.join(repositoryPath, 'ide', 'codex'), { recursive: true });
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 4',
+    'schemaVersion: 5',
     'repositoryId: repository-id',
     'initializedAt: 2026-07-19T00:00:00.000Z',
     'targets:',
@@ -847,7 +853,7 @@ function seedRepository(repositoryPath: string): void {
     '  useSymlinks: false',
     '',
   ].join('\n'));
-  fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# rules\n');
+  fs.writeFileSync(path.join(repositoryPath, 'ide', 'codex', 'instructions.md'), '# rules\n');
   fs.writeFileSync(
     path.join(repositoryPath, 'common', 'skills', 'debug', 'SKILL.md'),
     '---\nname: debug\ndescription: Debug helper\n---\n# Debug\nsecret=plaintext-token\n',
@@ -863,7 +869,7 @@ function seedRepository(repositoryPath: string): void {
   writeProfilesDocument(repositoryPath, {
     ...emptyProfilesDocument(),
     profiles: {
-      global: { title: 'Global', assets: ['rule:canonical'] },
+      global: { title: 'Global', assets: ['instruction:codex'] },
     },
   });
 }

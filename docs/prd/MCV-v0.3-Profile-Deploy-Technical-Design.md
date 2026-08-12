@@ -1,5 +1,7 @@
 # MCV v0.3 Profile 与 Deploy 技术方案
 
+> 历史基线：Repository v5 与按 target 独立的 IDE Instructions 已取代本文中的 Canonical Rules 和旧 schema 契约。现行契约见 ADR 0017 与主 PRD。
+
 > 状态：产品决策已冻结，技术方案已定稿；`0.3.0-beta.1` 按本文与 ADR 0011–0014 实现
 > 目标版本：MCV 0.3
 > 设计日期：2026-08-06

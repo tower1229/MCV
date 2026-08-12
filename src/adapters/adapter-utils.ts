@@ -2,11 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import type { SelectedRepositoryView } from '../assets/selected-repository-view.js';
-import type {
-  CanonicalDeploySource,
-  DeployFile,
-  DeviceContext,
-} from './types.js';
+import type { DeployFile, DeviceContext } from './types.js';
 import { resolvePortableValue } from '../utils/variables.js';
 
 export function hasExecutable(
@@ -36,51 +32,6 @@ export function hasExecutable(
   );
 }
 
-export function readCanonicalSource(
-  repositoryPath: string,
-  context: DeviceContext,
-): CanonicalDeploySource {
-  const commonRoot = path.join(repositoryPath, 'common');
-  const platformDirectory = context.platform === 'win32' ? 'windows' : 'macos';
-  const overrideRoot = path.join(repositoryPath, 'overrides', platformDirectory, 'common');
-  const selectOverride = (name: string): string => {
-    const override = path.join(overrideRoot, name);
-    return fs.existsSync(override) ? override : path.join(commonRoot, name);
-  };
-  const rulesPath = selectOverride('AGENTS.md');
-  const skillsRoot = path.join(commonRoot, 'skills');
-  const mcpPath = selectOverride('mcp.yaml');
-  const source: CanonicalDeploySource = {
-    skills: fs.existsSync(skillsRoot)
-      ? readFilesRecursively(skillsRoot, skillsRoot)
-      : [],
-  };
-  if (fs.existsSync(rulesPath)) source.rules = fs.readFileSync(rulesPath, 'utf8');
-  if (fs.existsSync(mcpPath)) {
-    source.mcp = resolvePortableValue(
-      yaml.parse(fs.readFileSync(mcpPath, 'utf8')) as unknown,
-      context.variables ?? {},
-      context.platform,
-    );
-  }
-  const overridePaths: Record<string, string> = {
-    codex: 'ide/codex/mcp-overrides.yaml',
-    'claude-code': 'ide/claude-code/mcp-overrides.yaml',
-    'gemini-cli': 'ide/gemini/gemini-cli/mcp-overrides.yaml',
-    antigravity: 'ide/gemini/antigravity/mcp-overrides.yaml',
-  };
-  for (const [surface, relativePath] of Object.entries(overridePaths)) {
-    const overridePath = repositoryFileForPlatform(repositoryPath, relativePath, context);
-    if (!fs.existsSync(overridePath)) continue;
-    const parsed = yaml.parse(fs.readFileSync(overridePath, 'utf8')) as unknown;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      source.mcpOverrides ??= {};
-      source.mcpOverrides[surface] = parsed as Record<string, unknown>;
-    }
-  }
-  return source;
-}
-
 export function readDeployTarget(targetPath: string): DeployFile | undefined {
   if (!fs.existsSync(targetPath)) return undefined;
   return { targetPath, content: fs.readFileSync(targetPath) };
@@ -96,30 +47,17 @@ export function repositoryFileForPlatform(
   return fs.existsSync(override) ? override : path.join(repositoryPath, ...relativePath.split('/'));
 }
 
-export function projectRulesManagedFile(
+export function projectInstructionsManagedFile(
   targetRoot: string,
+  target: import('./types.js').IdeId,
   relativePath: 'AGENTS.md' | 'CLAUDE.md' | 'GEMINI.md',
   source: SelectedRepositoryView,
 ): DeployFile[] {
-  if (!source.rules) return [];
-  // Deploy rebuilds Managed Block content (and Drift checks) via projectCanonicalRulesFile.
+  const instructions = source.instructions[target];
+  if (!instructions) return [];
+  // Deploy rebuilds Managed Block content (and Drift checks) in the operation module.
   return [{
     targetPath: path.join(targetRoot, relativePath),
-    content: source.rules.content,
+    content: instructions.content,
   }];
-}
-
-function readFilesRecursively(
-  sourceRoot: string,
-  currentDirectory: string,
-): CanonicalDeploySource['skills'] {
-  return fs.readdirSync(currentDirectory, { withFileTypes: true }).flatMap((entry) => {
-    const sourcePath = path.join(currentDirectory, entry.name);
-    if (entry.isDirectory()) return readFilesRecursively(sourceRoot, sourcePath);
-    if (!entry.isFile()) return [];
-    return [{
-      relativePath: path.relative(sourceRoot, sourcePath),
-      content: fs.readFileSync(sourcePath),
-    }];
-  });
 }

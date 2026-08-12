@@ -39,7 +39,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
     const repositoryPath = path.join(isolatedRoot, 'repository');
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: cli-overview-test',
       'initializedAt: 2026-08-10T00:00:00.000Z',
       'targets: { codex: { enabled: true } }',
@@ -100,7 +100,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
     const repositoryPath = path.join(isolatedRoot, 'repository');
     fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: process-human-matrix',
       'initializedAt: 2026-08-11T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -162,7 +162,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
     expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'discover',
       status: 'reported',
       ready: true,
@@ -223,7 +223,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 3,
+        schemaVersion: 4,
         operation: 'repository',
         status: 'reported',
         ready: false,
@@ -257,7 +257,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 3,
+        schemaVersion: 4,
         operation: 'bind',
         status: 'failed',
         repositoryPath: invalidRepository,
@@ -278,7 +278,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
         : path.join(isolatedRoot, '.config', 'mcv', 'config.json');
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: process-binding-id',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -465,7 +465,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 3,
+        schemaVersion: 4,
         operation: 'init',
         status: 'planned',
         readyToApply: true,
@@ -504,17 +504,17 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 3,
+        schemaVersion: 4,
         operation: 'migrate',
         status: 'succeeded',
         repositoryPath: resolvedRepositoryPath,
         data: expect.objectContaining({
           previousSchemaVersion: 1,
-          repositorySchemaVersion: 4,
+          repositorySchemaVersion: 5,
           backupVerified: true,
         }),
       }));
-      expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).toContain('schemaVersion: 4');
+      expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).toContain('schemaVersion: 5');
     } finally {
       fs.rmSync(isolatedRoot, { recursive: true, force: true });
     }
@@ -528,7 +528,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
     const resolvedRepositoryPath = fs.realpathSync(repositoryPath);
     fs.mkdirSync(claudeRoot);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: process-capture-id',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -564,7 +564,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       ).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 3,
+        schemaVersion: 4,
         operation: 'capture',
         status: 'planned',
         repositoryPath: resolvedRepositoryPath,
@@ -607,9 +607,9 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
   it('prints exactly one read-only Deploy Plan JSON document', () => {
     const isolatedRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcv-cli-deploy-')));
     const repositoryPath = path.join(isolatedRoot, 'repository');
-    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+    fs.mkdirSync(path.join(repositoryPath, 'ide', 'claude-code'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: process-deploy-id',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -620,7 +620,10 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       'variables: {}',
       '',
     ].join('\n'));
-    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Process rules\n');
+    fs.writeFileSync(
+      path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md'),
+      '# Process instructions\n',
+    );
     seedGlobalProfileWithCatalog(repositoryPath);
     try {
       const result = spawnSync(
@@ -636,14 +639,14 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 3,
+        schemaVersion: 4,
         operation: 'deploy',
         status: 'planned',
         repositoryPath,
         changes: [expect.objectContaining({
           id: expect.stringMatching(/^deploy-[a-f0-9]{16}$/),
           ide: 'claude-code',
-          capability: 'rules',
+          capability: 'instructions',
           strategy: 'replace-entire-file',
         })],
       }));
@@ -667,7 +670,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       }));
       expect(applyResult.stdout).not.toMatch(/\u001b\[/);
       expect(fs.readFileSync(path.join(isolatedRoot, '.claude', 'CLAUDE.md'), 'utf8'))
-        .toBe('# Process rules\n');
+        .toBe('# Process instructions\n');
     } finally {
       fs.rmSync(isolatedRoot, { recursive: true, force: true });
     }
@@ -684,7 +687,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
     fs.mkdirSync(path.dirname(externalSkill), { recursive: true });
     fs.mkdirSync(path.dirname(linkedRoot), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: process-linked-skill-id',
       'initializedAt: 2026-07-29T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -739,7 +742,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       });
       expect(jsonStatusResult.status).toBe(0);
       expect(JSON.parse(jsonStatusResult.stdout)).toMatchObject({
-        schemaVersion: 3,
+        schemaVersion: 4,
         operation: 'status',
         linkFacts: [expect.objectContaining({
           packageNames: ['review'],
@@ -814,7 +817,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       const projection = path.join(isolatedRoot, '.claude', 'skills', 'review');
       fs.mkdirSync(path.dirname(sourceSkill), { recursive: true });
       fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-        'schemaVersion: 4',
+        'schemaVersion: 5',
         'repositoryId: process-managed-skill-id',
         'initializedAt: 2026-07-30T00:00:00.000Z',
         'capture: { preserveUnknownNativeFields: true }',
@@ -915,7 +918,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
     fs.mkdirSync(path.join(backupDirectory, 'files'), { recursive: true });
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: restore-interrupt-id',
       'initializedAt: 2026-07-27T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -925,7 +928,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       '',
     ].join('\n'));
     fs.writeFileSync(path.join(stateRoot, 'config.json'), `${JSON.stringify({
-      schemaVersion: 3,
+      schemaVersion: 4,
       repositoryPath,
       defaultRepositoryId: 'restore-interrupt-id',
     }, null, 2)}\n`);
@@ -955,7 +958,7 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toBe('');
       expect(JSON.parse(result.stdout)).toEqual(expect.objectContaining({
-        schemaVersion: 3,
+        schemaVersion: 4,
         operation: 'restore',
         status: 'planned',
         readyToApply: true,

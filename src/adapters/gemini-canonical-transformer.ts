@@ -3,9 +3,10 @@ import * as yaml from 'yaml';
 import { isRecord } from '../utils/objects.js';
 import { GEMINI_MCP_PATH } from './overlay-policies.js';
 import { normalizeMcpServers, toNativeMcpServers } from '../core/mcp.js';
+import { instructionDefinition } from '../core/ide-instructions.js';
 import type {
-  CanonicalDeploySource,
-  CanonicalTransformer,
+  ManagedDeploySource,
+  ManagedTransformer,
   CaptureFile,
   CaptureResult,
   DeployFile,
@@ -13,14 +14,14 @@ import type {
   NativeCaptureResult,
 } from './types.js';
 
-export class GeminiCanonicalTransformer implements CanonicalTransformer {
+export class GeminiManagedTransformer implements ManagedTransformer {
   transform(capture: NativeCaptureResult, _context: DeviceContext): CaptureResult {
     const files: CaptureFile[] = [...capture.files];
     const instructions = capture.managedFiles.find((file) => file.id === 'user-instructions');
     if (instructions) {
       files.push({
         sourcePath: instructions.sourcePath,
-        repositoryPath: 'common/AGENTS.md',
+        repositoryPath: instructionDefinition('gemini').repositoryPath,
         content: instructions.content,
         ownership: 'managed',
       });
@@ -46,14 +47,14 @@ export class GeminiCanonicalTransformer implements CanonicalTransformer {
   }
 
   async deploy(
-    source: CanonicalDeploySource,
+    source: ManagedDeploySource,
     context: DeviceContext,
   ): Promise<DeployFile[]> {
     const files: DeployFile[] = [];
-    if (source.rules !== undefined) {
+    if (source.instructions !== undefined) {
       files.push({
-        targetPath: path.join(context.homeDir, '.gemini', 'GEMINI.md'),
-        content: source.rules,
+        targetPath: instructionDefinition('gemini').globalTargetPath(context),
+        content: source.instructions.content,
       });
     }
     for (const skill of source.skills) {

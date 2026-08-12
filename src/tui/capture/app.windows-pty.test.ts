@@ -131,7 +131,7 @@ describe.skipIf(process.platform !== 'win32')('packaged Capture TUI in Windows C
     const repositoryPath = createFixture(testRoot, 'capture-conpty-render-failure');
     fs.writeFileSync(path.join(repositoryPath, 'render-failure.mjs'), [
       'const { runCaptureReviewTui } = await import(process.env.MCV_CAPTURE_APP_URL);',
-      'const plan = { schemaVersion: 3, operation: "capture", status: "planned", readyToApply: true, operationId: "failure", preconditions: {}, repositoryPath: process.cwd(), changes: [], issues: [], nextActions: [], summary: { parameterizedPathCount: 0, excludedFileCount: 0 } };',
+      'const plan = { schemaVersion: 4, operation: "capture", status: "planned", readyToApply: true, operationId: "failure", preconditions: {}, repositoryPath: process.cwd(), changes: [], issues: [], nextActions: [], summary: { parameterizedPathCount: 0, excludedFileCount: 0 } };',
       'try {',
       '  await runCaptureReviewTui({ homeDir: process.env.USERPROFILE, platform: "win32", env: process.env }, plan, {}, { render: () => { throw new Error("forced render failure"); } });',
       '} catch (error) {',
@@ -210,7 +210,7 @@ function createFixture(root: string, repositoryId: string): string {
   fs.writeFileSync(path.join(root, '.codex', 'config.toml'), 'invalid = [\n');
   fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# keep until reviewed\n');
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 4',
+    'schemaVersion: 5',
     `repositoryId: ${repositoryId}`,
     'initializedAt: 2026-08-10T00:00:00.000Z',
     'targets:',
@@ -236,7 +236,7 @@ function writeBinding(root: string, repositoryPath: string, repositoryId: string
   const statePath = path.join(root, 'mcv', 'config.json');
   fs.mkdirSync(path.dirname(statePath), { recursive: true });
   fs.writeFileSync(statePath, `${JSON.stringify({
-    schemaVersion: 3,
+    schemaVersion: 4,
     repositoryPath,
     defaultRepositoryId: repositoryId,
   }, null, 2)}\n`);

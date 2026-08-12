@@ -10,12 +10,13 @@ describe('Asset Catalog', () => {
     for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('derives one Asset per Canonical rules, Skill, MCP server, and declared Native unit', () => {
+  it('derives one Asset per IDE Instructions, Skill, MCP server, and declared Native unit', () => {
     const repositoryPath = createRepository();
     fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'code-review'), { recursive: true });
+    fs.mkdirSync(path.join(repositoryPath, 'ide', 'codex'), { recursive: true });
     fs.writeFileSync(
-      path.join(repositoryPath, 'common', 'AGENTS.md'),
-      '# Rules\n',
+      path.join(repositoryPath, 'ide', 'codex', 'instructions.md'),
+      '# Codex Instructions\n',
     );
     fs.writeFileSync(
       path.join(repositoryPath, 'common', 'skills', 'code-review', 'SKILL.md'),
@@ -31,7 +32,6 @@ describe('Asset Catalog', () => {
     );
     fs.mkdirSync(path.join(repositoryPath, 'ide', 'codex', 'native'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'ide', 'codex', 'native', 'config.toml'), 'model = "gpt"\n');
-    fs.mkdirSync(path.join(repositoryPath, 'ide', 'codex'), { recursive: true });
     fs.writeFileSync(
       path.join(repositoryPath, 'ide', 'codex', 'mcp-overrides.yaml'),
       yaml.stringify({ context7: { timeout: 30 } }),
@@ -40,9 +40,9 @@ describe('Asset Catalog', () => {
     const catalog = deriveAssetCatalog(repositoryPath);
     const ids = catalog.assets.map((asset) => asset.id);
     expect(ids).toEqual([
+      'instruction:codex',
       'mcp:context7',
       'native:codex/user-settings',
-      'rule:canonical',
       'skill:code-review',
     ]);
 
@@ -68,12 +68,14 @@ describe('Asset Catalog', () => {
       sourcePaths: ['common/mcp.yaml', 'ide/codex/mcp-overrides.yaml'],
     });
 
-    const rules = catalog.assets.find((asset) => asset.id === 'rule:canonical');
-    expect(rules).toMatchObject({
-      type: 'rule',
-      displayName: 'Canonical Rules',
+    const instructions = catalog.assets.find((asset) => asset.id === 'instruction:codex');
+    expect(instructions).toMatchObject({
+      type: 'instruction',
+      displayName: 'Codex Instructions',
       activation: 'always',
-      sourcePaths: ['common/AGENTS.md'],
+      supportedScopes: ['project', 'global'],
+      supportedTargets: ['codex'],
+      sourcePaths: ['ide/codex/instructions.md'],
     });
 
     const native = catalog.assets.find((asset) => asset.id === 'native:codex/user-settings');
@@ -89,23 +91,24 @@ describe('Asset Catalog', () => {
 
   it('attaches platform overrides to the base Asset and never catalogs them separately', () => {
     const repositoryPath = createRepository();
-    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# base\n');
-    fs.mkdirSync(path.join(repositoryPath, 'overrides', 'macos', 'common'), { recursive: true });
+    fs.mkdirSync(path.join(repositoryPath, 'ide', 'codex'), { recursive: true });
+    fs.writeFileSync(path.join(repositoryPath, 'ide', 'codex', 'instructions.md'), '# base\n');
+    fs.mkdirSync(path.join(repositoryPath, 'overrides', 'macos', 'ide', 'codex'), { recursive: true });
     fs.writeFileSync(
-      path.join(repositoryPath, 'overrides', 'macos', 'common', 'AGENTS.md'),
+      path.join(repositoryPath, 'overrides', 'macos', 'ide', 'codex', 'instructions.md'),
       '# macos\n',
     );
 
     const before = deriveAssetCatalog(repositoryPath);
-    expect(before.assets.map((asset) => asset.id)).toEqual(['rule:canonical']);
+    expect(before.assets.map((asset) => asset.id)).toEqual(['instruction:codex']);
     expect(before.assets[0]?.sourcePaths).toEqual([
-      'common/AGENTS.md',
-      'overrides/macos/common/AGENTS.md',
+      'ide/codex/instructions.md',
+      'overrides/macos/ide/codex/instructions.md',
     ]);
     expect(before.assets.some((asset) => asset.id.includes('override'))).toBe(false);
 
     fs.writeFileSync(
-      path.join(repositoryPath, 'overrides', 'macos', 'common', 'AGENTS.md'),
+      path.join(repositoryPath, 'overrides', 'macos', 'ide', 'codex', 'instructions.md'),
       '# macos changed\n',
     );
     expect(deriveAssetCatalog(repositoryPath).revision).not.toBe(before.revision);
@@ -113,14 +116,15 @@ describe('Asset Catalog', () => {
 
   it('computes a stable Catalog Revision that changes when Asset content or set changes', () => {
     const repositoryPath = createRepository();
-    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Rules\n');
+    fs.mkdirSync(path.join(repositoryPath, 'ide', 'codex'), { recursive: true });
+    fs.writeFileSync(path.join(repositoryPath, 'ide', 'codex', 'instructions.md'), '# Rules\n');
     const first = deriveAssetCatalog(repositoryPath);
     const second = deriveAssetCatalog(repositoryPath);
     expect(first.revision).toBe(second.revision);
     expect(first.revision).toMatch(/^[a-f0-9]{64}$/);
     expect(computeCatalogRevision(first.assets)).toBe(first.revision);
 
-    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Changed\n');
+    fs.writeFileSync(path.join(repositoryPath, 'ide', 'codex', 'instructions.md'), '# Changed\n');
     const afterContent = deriveAssetCatalog(repositoryPath);
     expect(afterContent.revision).not.toBe(first.revision);
 

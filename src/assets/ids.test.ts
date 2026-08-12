@@ -8,7 +8,7 @@ import {
 
 describe('Asset IDs', () => {
   it('formats deterministic IDs for each Asset type', () => {
-    expect(formatAssetId({ type: 'rule' })).toBe('rule:canonical');
+    expect(formatAssetId({ type: 'instruction', target: 'codex' })).toBe('instruction:codex');
     expect(formatAssetId({ type: 'skill', name: 'code-review' })).toBe('skill:code-review');
     expect(formatAssetId({ type: 'mcp', name: 'context7' })).toBe('mcp:context7');
     expect(formatAssetId({ type: 'native', target: 'codex', fileId: 'user-settings' }))
@@ -19,7 +19,7 @@ describe('Asset IDs', () => {
 
   it('parses valid Asset IDs back into typed parts', () => {
     const cases: Array<{ id: string; parts: AssetIdParts }> = [
-      { id: 'rule:canonical', parts: { type: 'rule' } },
+      { id: 'instruction:claude-code', parts: { type: 'instruction', target: 'claude-code' } },
       { id: 'skill:debug', parts: { type: 'skill', name: 'debug' } },
       { id: 'mcp:filesystem', parts: { type: 'mcp', name: 'filesystem' } },
       {
@@ -36,7 +36,8 @@ describe('Asset IDs', () => {
   it('rejects invalid paths, empty segments, and unknown prefixes', () => {
     const invalid = [
       '',
-      'rule:other',
+      'rule:canonical',
+      'instruction:other',
       'skill:',
       'skill:../escape',
       'skill:foo/bar',

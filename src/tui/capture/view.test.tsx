@@ -44,7 +44,7 @@ describe('Capture TUI view', () => {
 
 function plan(): CapturePlan {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     operation: 'capture',
     status: 'planned',
     readyToApply: false,
@@ -55,7 +55,7 @@ function plan(): CapturePlan {
       {
         id: 'add', ide: 'shared', surface: 'shared', itemType: 'file', capability: 'native',
         name: 'rules', change: 'add', defaultSelected: true,
-        repositoryPaths: ['common/AGENTS.md'], previews: [],
+        repositoryPaths: ['ide/codex/instructions.md'], previews: [],
       },
       {
         id: 'delete', ide: 'shared', surface: 'shared', itemType: 'file', capability: 'native',

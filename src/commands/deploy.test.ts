@@ -26,7 +26,7 @@ describe('mcv deploy', () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 4',
+        'schemaVersion: 5',
         'repositoryId: test',
         'initializedAt: test',
         'capture: { preserveUnknownNativeFields: true }',
@@ -103,8 +103,10 @@ describe('mcv deploy', () => {
   });
 
   it('prints a concise Deploy review with a local artifact or one complete JSON document', async () => {
-    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
-    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Rules\n');
+    fs.writeFileSync(
+      path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md'),
+      '# Rules\n',
+    );
 
     await deployWithGlobalProfile(['--dry-run'], deviceContext('win32'));
     const plain = vi.mocked(console.log).mock.calls.map(([line]) => String(line)).join('\n');
@@ -123,7 +125,7 @@ describe('mcv deploy', () => {
     expect(vi.mocked(console.log)).toHaveBeenCalledOnce();
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0][0]))).toEqual(
       expect.objectContaining({
-        schemaVersion: 3,
+        schemaVersion: 4,
         operation: 'deploy',
         status: 'planned',
         repositoryPath,
@@ -133,7 +135,7 @@ describe('mcv deploy', () => {
         catalogRevision: expect.any(String),
         assetIds: expect.any(Array),
         changes: expect.arrayContaining([
-          expect.objectContaining({ capability: 'rules', strategy: 'replace-entire-file' }),
+          expect.objectContaining({ capability: 'instructions', strategy: 'replace-entire-file' }),
         ]),
       }),
     );
@@ -257,10 +259,9 @@ describe('mcv deploy', () => {
     expect(findSymbolicLinkAncestor(path.join(link, 'nested', 'file.txt'))).toBe(link);
   });
 
-  it('deploys canonical rules as Claude Code instructions', async () => {
+  it('deploys Claude Code Instructions to the Claude global file', async () => {
     const rules = '# Personal rules\n\nAlways run tests.\n';
-    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
-    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), rules);
+    fs.writeFileSync(path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md'), rules);
 
     await deployWithGlobalProfile([], deviceContext('win32'), { confirmDeploy: async () => true });
 
@@ -291,7 +292,7 @@ describe('mcv deploy', () => {
   it('prunes only exact duplicate Codex skills from the legacy directory', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 4\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 5\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
     );
     const canonicalSkill = path.join(repositoryPath, 'common', 'skills', 'grill-me');
     fs.mkdirSync(path.join(canonicalSkill, 'references'), { recursive: true });
@@ -466,13 +467,15 @@ describe('mcv deploy', () => {
   });
 
   it('deletes only prior managed inventory when prune is explicitly confirmed', async () => {
-    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
-    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Managed rules\n');
+    fs.writeFileSync(
+      path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md'),
+      '# Managed instructions\n',
+    );
     const run = (...args: string[]) => deployWithGlobalProfile(args, deviceContext('win32'), { confirmDeploy: async () => true });
     await run();
     const targetPath = path.join(homeDir, '.claude', 'CLAUDE.md');
     expect(fs.existsSync(targetPath)).toBe(true);
-    fs.rmSync(path.join(repositoryPath, 'common', 'AGENTS.md'));
+    fs.rmSync(path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md'));
     await run('--prune-managed');
     expect(fs.existsSync(targetPath)).toBe(false);
     await restoreLatestBackup(
@@ -487,7 +490,7 @@ describe('mcv deploy', () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 4',
+        'schemaVersion: 5',
         'repositoryId: test',
         'initializedAt: test',
         'capture: { preserveUnknownNativeFields: true }',
@@ -557,7 +560,7 @@ describe('mcv deploy', () => {
   it('deploys Gemini merged settings without replacing unknown local fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 4\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 5\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
     );
     const nativeRoot = path.join(repositoryPath, 'ide', 'gemini', 'native', 'gemini-cli');
     fs.mkdirSync(nativeRoot, { recursive: true });
@@ -592,16 +595,16 @@ describe('mcv deploy', () => {
     });
   });
 
-  it('deploys Codex canonical content and preserves unknown TOML fields', async () => {
+  it('deploys Codex Instructions and preserves unknown TOML fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 4\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 5\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
     );
     const nativeRoot = path.join(repositoryPath, 'ide', 'codex', 'native');
     fs.mkdirSync(nativeRoot, { recursive: true });
-    fs.writeFileSync(path.join(nativeRoot, 'config.toml'), 'model = "gpt-5"\n');
     fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
-    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Rules\n');
+    fs.writeFileSync(path.join(nativeRoot, 'config.toml'), 'model = "gpt-5"\n');
+    fs.writeFileSync(path.join(repositoryPath, 'ide', 'codex', 'instructions.md'), '# Rules\n');
     fs.writeFileSync(
       path.join(repositoryPath, 'common', 'mcp.yaml'),
       'servers:\n  shared:\n    command: shared-server\n',
@@ -650,15 +653,17 @@ describe('mcv deploy', () => {
     expect(process.exitCode).toBe(2);
   });
 
-  it('returns schemaVersion 3 and DeployContextFields for --global --dry-run --json', async () => {
-    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
-    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Rules\n');
+  it('returns schemaVersion 4 and DeployContextFields for --global --dry-run --json', async () => {
+    fs.writeFileSync(
+      path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md'),
+      '# Rules\n',
+    );
 
     vi.mocked(console.log).mockClear();
     await deployWithGlobalProfile(['--dry-run', '--json'], deviceContext('win32'));
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0][0]))).toEqual(
       expect.objectContaining({
-        schemaVersion: 3,
+        schemaVersion: 4,
         operation: 'deploy',
         scope: 'global',
         targetRoot: homeDir,

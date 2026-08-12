@@ -197,7 +197,7 @@ function linkFact(overrides: Partial<LinkFact> = {}): LinkFact {
 
 function statusReport(linkFacts: LinkFact[]): StatusReport {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     operation: 'status',
     status: 'reported',
     ready: true,

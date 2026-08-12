@@ -5,9 +5,9 @@ import { parameterizeConfig } from '../utils/parameterize.js';
 import { deleteObjectPath, parseJsonc, parseStructuredObject, splitOwnedFields, stringifyStructuredObject } from '../utils/structured-config.js';
 import { resolvePortableValue } from '../utils/variables.js';
 import { mergeRecords } from '../utils/objects.js';
-import { readCanonicalSource, readDeployTarget, repositoryFileForPlatform } from './adapter-utils.js';
+import { readDeployTarget, repositoryFileForPlatform } from './adapter-utils.js';
 import { GEMINI_MANAGED_PATHS } from './overlay-policies.js';
-import type { CanonicalDeploySource, DetectedConfigDirectory, DetectedConfigFile, DeployFile, DeployOperation, DeviceContext, NativeCaptureResult, NativeFileHandler } from './types.js';
+import type { DetectedConfigDirectory, DetectedConfigFile, DeployFile, DeployOperation, DeviceContext, NativeCaptureResult, NativeFileHandler } from './types.js';
 
 const LOCAL_KEYS = new Set([
   '$.installationId', '$.installation_id', '$.recentProjects', '$.windowState', '$.telemetry',
@@ -119,7 +119,6 @@ export class GeminiNativeFileHandler implements NativeFileHandler {
     return { files: deployed, write: (file) => atomicWriteFile(file.targetPath, file.content) };
   }
 
-  async readCanonical(repositoryPath: string, context: DeviceContext): Promise<CanonicalDeploySource> { return readCanonicalSource(repositoryPath, context); }
   readDeployTarget(targetPath: string): DeployFile | undefined { return readDeployTarget(targetPath); }
 
   private hasAnyKnownFile(context: DeviceContext): boolean {

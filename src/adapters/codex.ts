@@ -1,15 +1,15 @@
 import * as path from 'path';
 import { parseAssetId } from '../assets/ids.js';
 import type { DeployRequest } from '../assets/deploy-request.js';
-import { toCanonicalDeploySource, type SelectedRepositoryView } from '../assets/selected-repository-view.js';
+import { toManagedDeploySource, type SelectedRepositoryView } from '../assets/selected-repository-view.js';
 import { atomicWriteFile } from '../utils/files.js';
 import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObject } from '../utils/structured-config.js';
-import { hasExecutable, projectRulesManagedFile } from './adapter-utils.js';
-import { CodexCanonicalTransformer } from './codex-canonical-transformer.js';
+import { hasExecutable, projectInstructionsManagedFile } from './adapter-utils.js';
+import { CodexManagedTransformer } from './codex-canonical-transformer.js';
 import { CodexNativeFileHandler, projectCodexNativeUserSettings } from './codex-native-file-handler.js';
 import { CODEX_MANAGED_PATHS } from './overlay-policies.js';
 import type {
-  CanonicalTransformer,
+  ManagedTransformer,
   CaptureResult,
   DeployFile,
   DeployOperation,
@@ -29,7 +29,7 @@ export class CodexAdapter implements IdeAdapter {
 
   constructor(
     private readonly nativeFileHandler: NativeFileHandler = new CodexNativeFileHandler(),
-    private readonly canonicalTransformer: CanonicalTransformer = new CodexCanonicalTransformer(),
+    private readonly managedTransformer: ManagedTransformer = new CodexManagedTransformer(),
   ) {}
 
   async detect(context: DeviceContext): Promise<DetectedIde> {
@@ -50,7 +50,7 @@ export class CodexAdapter implements IdeAdapter {
   }
 
   async capture(files: DetectedConfigFile[], context: DeviceContext): Promise<CaptureResult> {
-    return this.canonicalTransformer.transform(
+    return this.managedTransformer.transform(
       await this.nativeFileHandler.capture(files, context),
       context,
     );
@@ -63,17 +63,17 @@ export class CodexAdapter implements IdeAdapter {
   ): Promise<DeployOperation> {
     const write = (file: DeployFile) => atomicWriteFile(file.targetPath, file.content);
     if (request.scope === 'project') {
-      return { files: projectRulesManagedFile(request.targetRoot, 'AGENTS.md', source), write };
+      return { files: projectInstructionsManagedFile(request.targetRoot, 'codex', 'AGENTS.md', source), write };
     }
 
-    const canonicalSource = toCanonicalDeploySource(source);
-    const [nativeFiles, canonicalFiles] = await Promise.all([
+    const managedSource = toManagedDeploySource(source, 'codex');
+    const [nativeFiles, managedFiles] = await Promise.all([
       Promise.resolve(this.projectNativeAssets(source.nativeAssets, context)),
-      this.canonicalTransformer.deploy(canonicalSource, context),
+      this.managedTransformer.deploy(managedSource, context),
     ]);
     const configPath = path.join(context.env.CODEX_HOME || path.join(context.homeDir, '.codex'), 'config.toml');
     return {
-      files: this.mergeConfig(nativeFiles, canonicalFiles, configPath),
+      files: this.mergeConfig(nativeFiles, managedFiles, configPath),
       write,
     };
   }
@@ -94,12 +94,12 @@ export class CodexAdapter implements IdeAdapter {
 
   private mergeConfig(
     nativeFiles: DeployFile[],
-    canonicalFiles: DeployFile[],
+    managedFiles: DeployFile[],
     configPath: string,
   ): DeployFile[] {
     const native = nativeFiles.find((file) => file.targetPath === configPath);
-    const managed = canonicalFiles.find((file) => file.targetPath === configPath);
-    const other = [...nativeFiles, ...canonicalFiles].filter((file) => file.targetPath !== configPath);
+    const managed = managedFiles.find((file) => file.targetPath === configPath);
+    const other = [...nativeFiles, ...managedFiles].filter((file) => file.targetPath !== configPath);
     if (!native && !managed) return other;
     const existingFile = this.nativeFileHandler.readDeployTarget(configPath);
     const existing = existingFile

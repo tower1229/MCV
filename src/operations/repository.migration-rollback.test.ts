@@ -26,6 +26,7 @@ vi.mock('../profiles/store.js', async (importOriginal) => {
 });
 
 import { applyMigrationPlan, createMigrationPlan } from './repository.js';
+import { writeProfilesDocument } from '../profiles/store.js';
 
 describe('Repository migration rollback', () => {
   let testRoot: string;
@@ -49,10 +50,11 @@ describe('Repository migration rollback', () => {
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
 
-  it('rolls back a failed v3 migration completely and remains safely re-runnable', () => {
-    const repositoryPath = createV3Repository(testRoot, 'migration-v3-rollback');
+  it('rolls back a failed v4 migration completely and remains safely re-runnable', () => {
+    const repositoryPath = createV4Repository(testRoot, 'migration-v4-rollback');
     const manifestBefore = fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8');
     const agentsBefore = fs.readFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'));
+    const profilesBefore = fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8');
     writeState(context, {
       schemaVersion: 2,
       deviceId: 'device-id',
@@ -70,7 +72,7 @@ describe('Repository migration rollback', () => {
       error: { code: 'repository.migrationFailed' },
     });
     expect(fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8')).toBe(manifestBefore);
-    expect(fs.existsSync(path.join(repositoryPath, 'profiles.yaml'))).toBe(false);
+    expect(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8')).toBe(profilesBefore);
     expect(fs.readFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'))).toEqual(agentsBefore);
     expect(readState(context)).toEqual({
       schemaVersion: 2,
@@ -83,23 +85,23 @@ describe('Repository migration rollback', () => {
     const retry = applyMigrationPlan(context, createMigrationPlan(context, repositoryPath));
     expect(retry).toMatchObject({
       status: 'succeeded',
-      data: { previousSchemaVersion: 3, repositorySchemaVersion: 4 },
+      data: { previousSchemaVersion: 4, repositorySchemaVersion: 5 },
     });
     expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8')).profiles.global.assets).toEqual([
-      'mcp:context7',
-      'native:codex/user-settings',
-      'rule:canonical',
+      'instruction:claude-code',
+      'instruction:codex',
+      'instruction:gemini',
       'skill:code-review',
     ]);
   });
 });
 
-function createV3Repository(root: string, name: string): string {
+function createV4Repository(root: string, name: string): string {
   const repositoryPath = path.join(root, name);
   fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'code-review'), { recursive: true });
   fs.mkdirSync(path.join(repositoryPath, 'ide', 'codex', 'native'), { recursive: true });
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), yaml.stringify({
-    schemaVersion: 3,
+    schemaVersion: 4,
     repositoryId: `${name}-id`,
     initializedAt: '2026-07-22T00:00:00.000Z',
     targets: {
@@ -125,5 +127,11 @@ function createV3Repository(root: string, name: string): string {
     },
   }));
   fs.writeFileSync(path.join(repositoryPath, 'ide', 'codex', 'native', 'config.toml'), 'model = "gpt"\n');
+  writeProfilesDocument(repositoryPath, {
+    schemaVersion: 1,
+    profiles: {
+      global: { assets: ['rule:canonical', 'skill:code-review'] },
+    },
+  });
   return repositoryPath;
 }

@@ -314,7 +314,7 @@ export const FILTER_OPTIONS: Array<{
   value: AssetTypeFilter | CompatibilityFilter;
 }> = [
   { id: 'type:all', label: 'Type: all', kind: 'type', value: 'all' },
-  { id: 'type:rule', label: 'Type: rule', kind: 'type', value: 'rule' },
+  { id: 'type:instruction', label: 'Type: instruction', kind: 'type', value: 'instruction' },
   { id: 'type:skill', label: 'Type: skill', kind: 'type', value: 'skill' },
   { id: 'type:mcp', label: 'Type: mcp', kind: 'type', value: 'mcp' },
   { id: 'type:native', label: 'Type: native', kind: 'type', value: 'native' },

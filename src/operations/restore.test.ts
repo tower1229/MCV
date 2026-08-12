@@ -46,7 +46,7 @@ describe('Restore operations', () => {
     const plan = createRestorePlan(context, { scope: 'global' });
 
     expect(plan).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'restore',
       status: 'planned',
       readyToApply: true,

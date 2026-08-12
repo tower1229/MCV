@@ -7,6 +7,7 @@ import { createAdapterDefinitions } from '../adapters/index.js';
 import { CLAUDE_CODE_MCP_PATH, CODEX_MCP_PATH, GEMINI_MCP_PATH, } from '../adapters/overlay-policies.js';
 import { deployContextFieldsFromRequest, } from '../assets/deploy-request.js';
 import { buildSelectedRepositoryView } from '../assets/selected-repository-view.js';
+import { parseAssetId } from '../assets/ids.js';
 import { GLOBAL_PROFILE_ID } from '../profiles/contracts.js';
 import { resolveProfiles } from '../profiles/resolver.js';
 import { atomicWriteFile, findSymbolicLinkAncestor, hashDirectoryTree, hashFile, } from '../utils/files.js';
@@ -19,7 +20,7 @@ import { parseStructuredObject, stringifyStructuredObject, } from '../utils/stru
 import { resolveVariableDefinitions } from '../utils/variables.js';
 import { findLegacyCodexSkillDuplicates } from '../utils/deploy-skills.js';
 import { assertPathContainedInProjectRoot, validateProjectTargetRoot, } from '../core/project-target.js';
-import { CANONICAL_RULES_ASSET_ID, projectCanonicalRulesFile, } from '../core/project-rules.js';
+import { LEGACY_RULES_ASSET_ID, projectIdeInstructionsFile, } from '../core/project-rules.js';
 import { extractManagedBlock, hashManagedBlockBody, managedReceiptKey, removeManagedBlock, } from '../core/managed-block.js';
 import { projectSkillDestinationRoots, projectSkillPackage, } from '../core/project-skills.js';
 import { hashProjectMcpServerValue, overlayProjectMcpFile, projectMcpDestinationTargets, projectMcpServer, removeProjectMcpServers, } from '../core/project-mcp.js';
@@ -125,6 +126,21 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations, 
     };
     const activeFields = deployContextFieldsFromRequest(activeRequest);
     const manifest = readManifest(repositoryPath);
+    for (const assetId of activeRequest.selection.assetIds) {
+        const parsed = parseAssetId(assetId);
+        if (parsed.type !== 'instruction')
+            continue;
+        const enabled = parsed.target === 'claude-code'
+            ? manifest.targets.claudeCode.enabled
+            : manifest.targets[parsed.target].enabled;
+        if (!enabled) {
+            selectionIssues.push({
+                severity: 'notice',
+                code: 'deploy.instructionTargetDisabled',
+                message: `Asset ${assetId} was skipped because its IDE target is disabled.`,
+            });
+        }
+    }
     const definitions = createAdapterDefinitions().filter(({ targetId }) => manifest.targets[targetId]?.enabled === true);
     if (definitions.length === 0) {
         return {
@@ -210,9 +226,11 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations, 
                     return [];
                 }
                 const relative = path.relative(activeRequest.targetRoot, file.targetPath);
-                const rulesName = asProjectRulesFileName(relative);
-                if (rulesName && selectedView.rules) {
-                    const projection = projectCanonicalRulesFile(activeRequest.targetRoot, rulesName, selectedView.rules.content, receipt);
+                const instructionsName = asProjectInstructionsFileName(relative);
+                const instructionIde = ideName(definition.targetId);
+                const instructions = selectedView.instructions[instructionIde];
+                if (instructionsName && instructions) {
+                    const projection = projectIdeInstructionsFile(activeRequest.targetRoot, instructionsName, instructions.id, instructions.content, receipt);
                     if (projection.drifted) {
                         selectionIssues.push({
                             severity: 'decisionRequired',
@@ -224,21 +242,25 @@ async function buildDeployPlan(context, repositoryPath, operationId, mutations, 
                     }
                     if (projection.unchanged) {
                         receiptEntries.set(projection.receiptKey, {
-                            assetId: CANONICAL_RULES_ASSET_ID,
+                            assetId: instructions.id,
                             hash: projection.bodyHash,
                         });
+                        if (projection.migratedReceiptKey)
+                            prunedReceiptKeys.add(projection.migratedReceiptKey);
                         return [];
                     }
                     receiptEntries.set(projection.receiptKey, {
-                        assetId: CANONICAL_RULES_ASSET_ID,
+                        assetId: instructions.id,
                         hash: projection.bodyHash,
                     });
+                    if (projection.migratedReceiptKey)
+                        prunedReceiptKeys.add(projection.migratedReceiptKey);
                     return [{
                             targetPath: projection.targetPath,
                             content: projection.content,
                             owner: 'ide',
                             ide: ideName(definition.targetId),
-                            capability: 'rules',
+                            capability: 'instructions',
                             strategy: 'replace-entire-file',
                             deploymentKind: 'ordinary-file',
                         }];
@@ -750,7 +772,7 @@ export async function applyDeployPlan(context, plan, selection, options = {}) {
         const receiptChange = plan.changes.find((change) => change.name === 'Managed Receipt'
             && change.targetPath === managedReceiptPath(plan.targetRoot));
         const managedSelected = plan.changes.some((change) => selected.has(change.id)
-            && (asProjectRulesFileName(path.relative(plan.targetRoot, change.targetPath)) !== undefined
+            && (asProjectInstructionsFileName(path.relative(plan.targetRoot, change.targetPath)) !== undefined
                 || change.deploymentKind === 'project-skill-package'
                 || change.deploymentKind === 'project-mcp-overlay'
                 || change.deploymentKind === 'project-managed-prune'));
@@ -1592,7 +1614,7 @@ function preview(targetPath, ide, capability, next, previous, issues) {
     return { targetPath, kind: 'text', bytes: metadata.length, sha256: hashBuffer(metadata), diff };
 }
 function renderSafeDiff(targetPath, ide, capability, previous, next) {
-    if (next.length === 0 || capability === 'rules' || capability === 'skills') {
+    if (next.length === 0 || capability === 'instructions' || capability === 'skills') {
         return renderChangedLines(previous, next);
     }
     const format = structuredFormat(targetPath);
@@ -1690,7 +1712,7 @@ function inferDeploymentSemantics(targetPath, targetId, repositoryPath, context)
         return { capabilities: ['skills'], strategy: 'replace-entire-file' };
     }
     if (base === 'agents.md' || base === 'claude.md' || base === 'gemini.md') {
-        return { capabilities: ['rules'], strategy: 'replace-entire-file' };
+        return { capabilities: ['instructions'], strategy: 'replace-entire-file' };
     }
     if (base === 'keybindings.json') {
         return { capabilities: ['native'], strategy: 'replace-entire-file' };
@@ -1779,8 +1801,8 @@ function verifyManagedProjection(linkPath, expectedTarget) {
     }
 }
 function displayName(targetPath, capability) {
-    if (capability === 'rules')
-        return 'Shared Rules';
+    if (capability === 'instructions')
+        return `${instructionDisplayNameFromPath(targetPath)} Instructions`;
     if (capability === 'skills') {
         const segments = targetPath.replace(/\\/g, '/').split('/');
         const skillIndex = segments.lastIndexOf('skills');
@@ -1790,12 +1812,27 @@ function displayName(targetPath, capability) {
         return 'MCP';
     return path.basename(targetPath);
 }
-function asProjectRulesFileName(relativePath) {
+function asProjectInstructionsFileName(relativePath) {
     const normalized = relativePath.split(path.sep).join('/');
     if (normalized === 'AGENTS.md' || normalized === 'CLAUDE.md' || normalized === 'GEMINI.md') {
         return normalized;
     }
     return undefined;
+}
+function ideForProjectInstructionsFile(fileName) {
+    if (fileName === 'CLAUDE.md')
+        return 'claude-code';
+    if (fileName === 'GEMINI.md')
+        return 'gemini';
+    return 'codex';
+}
+function instructionDisplayNameFromPath(targetPath) {
+    const name = path.basename(targetPath);
+    if (name === 'CLAUDE.md')
+        return 'Claude Code';
+    if (name === 'GEMINI.md')
+        return 'Gemini';
+    return 'Codex';
 }
 function appendManagedReceiptChange(request, repositoryId, receiptEntries, prunedReceiptKeys, changes, mutations, issues) {
     if (request.scope !== 'project')
@@ -1868,20 +1905,23 @@ function appendProjectManagedPrunePlan(targetRoot, receipt, receiptEntries, prun
             continue;
         const parsed = parseManagedReceiptKey(key);
         try {
-            if (parsed.assetId === CANONICAL_RULES_ASSET_ID) {
-                const rulesName = asProjectRulesFileName(parsed.relativePath);
-                if (!rulesName)
+            if (parsed.assetId === LEGACY_RULES_ASSET_ID
+                || parsed.assetId?.startsWith('instruction:')) {
+                const instructionsName = asProjectInstructionsFileName(parsed.relativePath);
+                if (!instructionsName)
                     continue;
-                const targetPath = path.join(targetRoot, rulesName);
+                const targetPath = path.join(targetRoot, instructionsName);
                 assertPathContainedInProjectRoot(targetRoot, targetPath);
                 if (!fs.existsSync(targetPath))
                     continue;
                 const previous = fs.readFileSync(targetPath, 'utf8');
-                const body = extractManagedBlock(previous, CANONICAL_RULES_ASSET_ID);
+                const blockAssetId = parsed.assetId;
+                const body = extractManagedBlock(previous, blockAssetId);
                 if (body === undefined || hashManagedBlockBody(body) !== entry.hash)
                     continue;
-                const nextContent = Buffer.from(removeManagedBlock(previous, CANONICAL_RULES_ASSET_ID), 'utf8');
-                const id = selectionId('project-prune', 'rules', `${targetPath}\0${key}`);
+                const nextContent = Buffer.from(removeManagedBlock(previous, blockAssetId), 'utf8');
+                const instructionIde = ideForProjectInstructionsFile(instructionsName);
+                const id = selectionId('project-prune', 'instructions', `${targetPath}\0${key}`);
                 mutations.set(id, {
                     content: nextContent,
                     receiptKey: key,
@@ -1890,16 +1930,16 @@ function appendProjectManagedPrunePlan(targetRoot, receipt, receiptEntries, prun
                 changes.push({
                     id,
                     owner: 'ide',
-                    ide: 'codex',
-                    capability: 'rules',
-                    name: displayName(targetPath, 'rules'),
+                    ide: instructionIde,
+                    capability: 'instructions',
+                    name: displayName(targetPath, 'instructions'),
                     targetPath,
                     change: 'modify',
                     defaultSelected: false,
                     group: 'advanced',
                     strategy: 'replace-entire-file',
                     deploymentKind: 'project-managed-prune',
-                    preview: preview(targetPath, 'codex', 'rules', nextContent, Buffer.from(previous), issues),
+                    preview: preview(targetPath, instructionIde, 'instructions', nextContent, Buffer.from(previous), issues),
                 });
                 prunedReceiptKeys.add(key);
                 continue;
@@ -2362,7 +2402,7 @@ function applyProjectMcpOverlayDecisions(plan, selection, selected, selectedIds,
 function compareChanges(left, right) {
     const groupOrder = { standard: 0, advanced: 1 };
     const capabilityOrder = {
-        rules: 0, skills: 1, mcp: 2, native: 3,
+        instructions: 0, skills: 1, mcp: 2, native: 3,
     };
     return groupOrder[left.group] - groupOrder[right.group]
         || canonicalSkillTargetKey(left).localeCompare(canonicalSkillTargetKey(right))

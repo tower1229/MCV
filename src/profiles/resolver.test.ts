@@ -15,9 +15,9 @@ describe('resolveProfiles', () => {
   it('unions multiple Profiles and deduplicates by Asset ID regardless of Profile order', () => {
     const repositoryPath = createRepositoryWithAssets();
     seedProfiles(repositoryPath, {
-      global: { assets: ['rule:canonical'] },
+      global: { assets: ['instruction:codex'] },
       dev: { assets: ['skill:a', 'skill:b', 'mcp:context7'] },
-      design: { assets: ['skill:b', 'rule:canonical'] },
+      design: { assets: ['skill:b', 'instruction:codex'] },
     });
 
     const forward = resolveProfiles(repositoryPath, ['dev', 'design'], 'global');
@@ -28,8 +28,8 @@ describe('resolveProfiles', () => {
     if (forward.status !== 'resolved' || reverse.status !== 'resolved') return;
 
     expect(forward.selection.assetIds).toEqual([
+      'instruction:codex',
       'mcp:context7',
-      'rule:canonical',
       'skill:a',
       'skill:b',
     ]);
@@ -44,7 +44,7 @@ describe('resolveProfiles', () => {
   it('fails as an input error when a Profile ID is missing', () => {
     const repositoryPath = createRepositoryWithAssets();
     seedProfiles(repositoryPath, {
-      global: { assets: ['rule:canonical'] },
+      global: { assets: ['instruction:codex'] },
     });
 
     const result = resolveProfiles(repositoryPath, ['missing'], 'global');
@@ -62,7 +62,7 @@ describe('resolveProfiles', () => {
     writeProfilesDocument(repositoryPath, {
       schemaVersion: 1,
       profiles: {
-        global: { assets: ['rule:canonical'] },
+        global: { assets: ['instruction:codex'] },
         broken: { assets: ['skill:gone'] },
       },
     });
@@ -83,7 +83,7 @@ describe('resolveProfiles', () => {
     });
     seedProfiles(repositoryPath, {
       global: {
-        assets: ['rule:canonical', 'skill:a', 'native:codex/user-settings'],
+        assets: ['instruction:codex', 'skill:a', 'native:codex/user-settings'],
       },
     });
 
@@ -91,7 +91,7 @@ describe('resolveProfiles', () => {
     expect(result).toMatchObject({ status: 'resolved' });
     if (result.status !== 'resolved') return;
 
-    expect(result.selection.assetIds).toEqual(['rule:canonical', 'skill:a']);
+    expect(result.selection.assetIds).toEqual(['instruction:codex', 'skill:a']);
     expect(result.issues).toEqual([
       expect.objectContaining({
         severity: 'notice',
@@ -104,7 +104,7 @@ describe('resolveProfiles', () => {
   it('returns a successful empty selection with a notice when every Asset is skipped', () => {
     const repositoryPath = createRepositoryWithAssets({
       includeNative: true,
-      skipCanonical: true,
+      skipInstructions: true,
     });
     seedProfiles(repositoryPath, {
       global: { assets: ['native:codex/user-settings'] },
@@ -130,14 +130,15 @@ describe('resolveProfiles', () => {
 
   function createRepositoryWithAssets(options: {
     includeNative?: boolean;
-    skipCanonical?: boolean;
+    skipInstructions?: boolean;
   } = {}): string {
     const root = fs.mkdtempSync(path.join(process.cwd(), '.mcv-resolver-'));
     roots.push(root);
     fs.mkdirSync(path.join(root, 'common', 'skills', 'a'), { recursive: true });
     fs.mkdirSync(path.join(root, 'common', 'skills', 'b'), { recursive: true });
-    if (!options.skipCanonical) {
-      fs.writeFileSync(path.join(root, 'common', 'AGENTS.md'), '# rules\n');
+    if (!options.skipInstructions) {
+      fs.mkdirSync(path.join(root, 'ide', 'codex'), { recursive: true });
+      fs.writeFileSync(path.join(root, 'ide', 'codex', 'instructions.md'), '# instructions\n');
     }
     fs.writeFileSync(
       path.join(root, 'common', 'skills', 'a', 'SKILL.md'),

@@ -10,7 +10,7 @@ import { renderPresentationDocument } from '../presentation/render.js';
 describe('Capture plan rendering', () => {
   it('identifies contributing Skill projections without duplicating the package change', () => {
     const plan = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'capture',
       status: 'planned',
       readyToApply: true,
@@ -77,7 +77,7 @@ describe('Capture plan rendering', () => {
 describe('Capture result rendering', () => {
   it('reports newly Unassigned Assets and the classification next action', () => {
     const result = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'capture',
       status: 'succeeded',
       repositoryPath: '/repo',

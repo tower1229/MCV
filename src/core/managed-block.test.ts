@@ -9,14 +9,14 @@ import {
   upsertManagedBlock,
 } from './managed-block.js';
 
-const ASSET_ID = 'rule:canonical';
+const ASSET_ID = 'instruction:codex';
 
 describe('Managed Block helpers', () => {
-  it('formats begin/end markers around Canonical Rules body', () => {
+  it('formats begin/end markers around IDE Instructions body', () => {
     expect(formatManagedBlock(ASSET_ID, '# Rules\n')).toBe([
-      '<!-- mcv:begin rule:canonical -->',
+      '<!-- mcv:begin instruction:codex -->',
       '# Rules',
-      '<!-- mcv:end rule:canonical -->',
+      '<!-- mcv:end instruction:codex -->',
     ].join('\n'));
   });
 
@@ -29,9 +29,9 @@ describe('Managed Block helpers', () => {
   it('updates only the Managed Block and preserves surrounding bytes', () => {
     const existing = [
       '# Project local\n',
-      '<!-- mcv:begin rule:canonical -->\n',
+      '<!-- mcv:begin instruction:codex -->\n',
       '# Old\n',
-      '<!-- mcv:end rule:canonical -->\n',
+      '<!-- mcv:end instruction:codex -->\n',
       '## Footnotes\n',
     ].join('');
     const next = upsertManagedBlock(existing, ASSET_ID, '# New\n');
@@ -40,9 +40,9 @@ describe('Managed Block helpers', () => {
     expect(extractManagedBlock(next, ASSET_ID)).toBe('# New\n');
     expect(next).toBe([
       '# Project local\n',
-      '<!-- mcv:begin rule:canonical -->\n',
+      '<!-- mcv:begin instruction:codex -->\n',
       '# New\n',
-      '<!-- mcv:end rule:canonical -->\n',
+      '<!-- mcv:end instruction:codex -->\n',
       '## Footnotes\n',
     ].join(''));
   });
@@ -55,7 +55,7 @@ describe('Managed Block helpers', () => {
   });
 
   it('builds Receipt keys and stable body hashes', () => {
-    expect(managedReceiptKey('AGENTS.md', ASSET_ID)).toBe('AGENTS.md#mcv:rule:canonical');
+    expect(managedReceiptKey('AGENTS.md', ASSET_ID)).toBe('AGENTS.md#mcv:instruction:codex');
     expect(hashManagedBlockBody('# Rules\n')).toBe(
       createHash('sha256').update('# Rules\n', 'utf8').digest('hex'),
     );

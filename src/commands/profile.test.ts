@@ -21,8 +21,9 @@ describe('mcv profile', () => {
     fs.mkdirSync(repositoryPath);
     fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'a'), { recursive: true });
     fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'b'), { recursive: true });
+    fs.mkdirSync(path.join(repositoryPath, 'ide', 'codex'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: repository-id',
       'initializedAt: 2026-07-19T00:00:00.000Z',
       'targets:',
@@ -43,7 +44,10 @@ describe('mcv profile', () => {
       '  useSymlinks: false',
       '',
     ].join('\n'));
-    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# rules\n');
+    fs.writeFileSync(
+      path.join(repositoryPath, 'ide', 'codex', 'instructions.md'),
+      '# instructions\n',
+    );
     fs.writeFileSync(
       path.join(repositoryPath, 'common', 'skills', 'a', 'SKILL.md'),
       '---\nname: a\n---\n',
@@ -59,7 +63,7 @@ describe('mcv profile', () => {
     writeProfilesDocument(repositoryPath, {
       ...emptyProfilesDocument(),
       profiles: {
-        global: { title: 'Global', assets: ['rule:canonical'] },
+        global: { title: 'Global', assets: ['instruction:codex'] },
       },
     });
     writeDeviceState();
@@ -80,7 +84,7 @@ describe('mcv profile', () => {
     expect(console.log).toHaveBeenCalledOnce();
     const report = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(report).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'profile',
       command: 'list',
       status: 'reported',
@@ -110,7 +114,7 @@ describe('mcv profile', () => {
     expect(showOutput).toContain('Profile  global');
     expect(showOutput).toContain('Title  Global');
     expect(showOutput).toContain('Assets  1');
-    expect(showOutput).toContain('rule:canonical');
+    expect(showOutput).toContain('instruction:codex');
     expect(showOutput).toContain('Unassigned  3 assets');
   });
 
@@ -118,7 +122,7 @@ describe('mcv profile', () => {
     writeProfilesDocument(repositoryPath, {
       schemaVersion: 1,
       profiles: Object.fromEntries([
-        ['global', { assets: ['rule:canonical'] }],
+        ['global', { assets: ['instruction:codex'] }],
         ...Array.from({ length: 41 }, (_, index) => [
           `profile-${String(index).padStart(2, '0')}`,
           { assets: [] },
@@ -339,7 +343,7 @@ describe('mcv profile', () => {
   function writeDeviceState(): void {
     fs.mkdirSync(path.join(stateRoot, 'mcv'), { recursive: true });
     fs.writeFileSync(path.join(stateRoot, 'mcv', 'config.json'), JSON.stringify({
-      schemaVersion: 3,
+      schemaVersion: 4,
       defaultRepositoryId: 'repository-id',
       repositoryPath,
     }));

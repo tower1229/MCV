@@ -21,7 +21,7 @@ describe('mcv capture', () => {
     fs.mkdirSync(path.join(homeDir, '.claude'), { recursive: true });
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 4\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  claudeCode:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 5\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  claudeCode:\n    enabled: true\nvariables: {}\n',
     );
     writeProfilesDocument(repositoryPath, {
       schemaVersion: 1,
@@ -61,7 +61,7 @@ describe('mcv capture', () => {
     expect(console.log).toHaveBeenCalledOnce();
     const plan = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(plan).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'capture',
       status: 'planned',
       readyToApply: true,
@@ -126,7 +126,7 @@ describe('mcv capture', () => {
     expect(console.log).toHaveBeenCalledOnce();
     const result = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(result).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'capture',
       status: 'succeeded',
       data: {
@@ -156,7 +156,7 @@ describe('mcv capture', () => {
   });
 
   it('blocks --yes when the Plan contains an unselected deletion', async () => {
-    const repositoryRules = path.join(repositoryPath, 'common', 'AGENTS.md');
+    const repositoryRules = path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md');
     fs.mkdirSync(path.dirname(repositoryRules), { recursive: true });
     fs.writeFileSync(repositoryRules, '# Keep until reviewed\n');
 
@@ -209,7 +209,7 @@ describe('mcv capture', () => {
   });
 
   it('reviews a single deletion in the line flow and keeps it default-off', async () => {
-    const staleRules = path.join(repositoryPath, 'common', 'AGENTS.md');
+    const staleRules = path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md');
     fs.mkdirSync(path.dirname(staleRules), { recursive: true });
     fs.writeFileSync(staleRules, '# Repository-only rules\n');
     const confirmDeletion = vi.fn().mockResolvedValue(false);
@@ -247,7 +247,7 @@ describe('mcv capture', () => {
 
   it('automatically routes two review items to the dedicated TUI', async () => {
     fs.writeFileSync(path.join(homeDir, '.claude', 'settings.json'), '{ malformed }');
-    const staleRules = path.join(repositoryPath, 'common', 'AGENTS.md');
+    const staleRules = path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md');
     fs.mkdirSync(path.dirname(staleRules), { recursive: true });
     fs.writeFileSync(staleRules, '# Repository-only rules\n');
     const runTui = vi.fn().mockResolvedValue({
@@ -288,7 +288,7 @@ describe('mcv capture', () => {
     ).parseAsync(['node', 'mcv', 'capture']);
 
     expect(
-      fs.readFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), 'utf8'),
+      fs.readFileSync(path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md'), 'utf8'),
     ).toBe('# Personal instructions\n');
     expect(
       fs.readFileSync(
@@ -348,7 +348,7 @@ describe('mcv capture', () => {
   it('captures Gemini merged settings while preserving repository-only fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 4\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 5\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  gemini:\n    enabled: true\nvariables: {}\n',
     );
     const geminiRoot = path.join(homeDir, '.gemini');
     fs.mkdirSync(geminiRoot, { recursive: true });
@@ -393,7 +393,7 @@ describe('mcv capture', () => {
   it('structurally merges captured Codex TOML with repository-native fields', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
-      'schemaVersion: 4\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
+      'schemaVersion: 5\nrepositoryId: test\ninitializedAt: test\ncapture: { preserveUnknownNativeFields: true }\ndeploy: { backupBeforeWrite: true, useSymlinks: false }\ntargets:\n  codex:\n    enabled: true\nvariables: {}\n',
     );
     const codexRoot = path.join(homeDir, '.codex');
     fs.mkdirSync(codexRoot, { recursive: true });
@@ -420,7 +420,7 @@ describe('mcv capture', () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 4',
+        'schemaVersion: 5',
         'repositoryId: test',
         'initializedAt: test',
         'capture: { preserveUnknownNativeFields: true }',
@@ -457,11 +457,11 @@ describe('mcv capture', () => {
     ).toContain('# New review');
   });
 
-  it('automatically merges distinct canonical rules from multiple enabled IDEs', async () => {
+  it('captures distinct Instructions from multiple enabled IDEs without merging', async () => {
     fs.writeFileSync(
       path.join(repositoryPath, 'mcv.yaml'),
       [
-        'schemaVersion: 4',
+        'schemaVersion: 5',
         'repositoryId: test',
         'initializedAt: test',
         'capture: { preserveUnknownNativeFields: true }',
@@ -491,11 +491,6 @@ describe('mcv capture', () => {
       path.join(homeDir, '.gemini', 'GEMINI.md'),
       '# Personal rules\n\nUse TypeScript.\n\nDocument risks.\n',
     );
-    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
-    fs.writeFileSync(
-      path.join(repositoryPath, 'common', 'AGENTS.md'),
-      '# Personal rules\n\nPreserve repository knowledge.\n',
-    );
     const selectConflict = vi.fn();
 
     await createProgram(
@@ -504,17 +499,24 @@ describe('mcv capture', () => {
     ).parseAsync(['node', 'mcv', 'capture']);
 
     expect(selectConflict).not.toHaveBeenCalled();
-    expect(
-      fs.readFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), 'utf8'),
-    ).toBe(
-      '# Personal rules\n\nPreserve repository knowledge.\n\nAlways run tests.\n\nUse TypeScript.\n\nPrefer clear names.\n\nDocument risks.\n',
-    );
+    expect(fs.readFileSync(
+      path.join(repositoryPath, 'ide', 'codex', 'instructions.md'),
+      'utf8',
+    )).toBe('# Personal rules\n\nAlways run tests.\n\nUse TypeScript.\n');
+    expect(fs.readFileSync(
+      path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md'),
+      'utf8',
+    )).toBe('# Personal rules\n\nAlways run tests.\n\nPrefer clear names.\n');
+    expect(fs.readFileSync(
+      path.join(repositoryPath, 'ide', 'gemini', 'instructions.md'),
+      'utf8',
+    )).toBe('# Personal rules\n\nUse TypeScript.\n\nDocument risks.\n');
   });
 
-  it('preserves Repository rules when capturing from a single enabled IDE', async () => {
-    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
+  it('replaces only the enabled IDE Instructions when capturing from one IDE', async () => {
+    fs.mkdirSync(path.join(repositoryPath, 'ide', 'claude-code'), { recursive: true });
     fs.writeFileSync(
-      path.join(repositoryPath, 'common', 'AGENTS.md'),
+      path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md'),
       '# Personal rules\n\nPreserve repository knowledge.\n',
     );
     fs.writeFileSync(
@@ -528,9 +530,9 @@ describe('mcv capture', () => {
     ).parseAsync(['node', 'mcv', 'capture']);
 
     expect(
-      fs.readFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), 'utf8'),
+      fs.readFileSync(path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md'), 'utf8'),
     ).toBe(
-      '# Personal rules\n\nPreserve repository knowledge.\n\nCapture local knowledge.\n',
+      '# Personal rules\n\nCapture local knowledge.\n',
     );
   });
 });

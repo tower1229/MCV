@@ -50,7 +50,7 @@ describe('plain Deploy renderer', () => {
       skillChange('antigravity-change', 'antigravity', '/home/.gemini/config/skills/review/SKILL.md'),
     ];
     const plan: DeployPlan = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'deploy',
       status: 'planned',
       readyToApply: true,
@@ -62,7 +62,7 @@ describe('plain Deploy renderer', () => {
       profileIds: ['global'],
       profilesRevision: 'rev-profiles',
       catalogRevision: 'rev-catalog',
-      assetIds: ['rule:canonical'],
+      assetIds: ['instruction:codex'],
       changes,
       linkOutcomes: [],
       linkFacts: [],
@@ -71,7 +71,7 @@ describe('plain Deploy renderer', () => {
       nextActions: [],
     };
     const result: DeployResult = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'deploy',
       status: 'succeeded',
       repositoryPath: '/repository',
@@ -97,7 +97,7 @@ describe('plain Deploy renderer', () => {
 
 function deployPlan(): DeployPlan {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     operation: 'deploy',
     status: 'planned',
     readyToApply: true,

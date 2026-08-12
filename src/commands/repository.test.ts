@@ -43,13 +43,13 @@ describe('mcv Repository routes', () => {
     expect(console.log).toHaveBeenCalledOnce();
     const report = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(report).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'repository',
       status: 'reported',
       ready: true,
       repositoryPath,
       repositoryId: 'repository-command-id',
-      repositorySchemaVersion: 4,
+      repositorySchemaVersion: 5,
       valid: true,
       issues: [],
       nextActions: [],
@@ -70,7 +70,7 @@ describe('mcv Repository routes', () => {
     await createProgram(context()).parseAsync(['node', 'mcv', 'bind', '--dry-run', '--json']);
     const bindPlan = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(bindPlan).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'bind',
       status: 'planned',
       readyToApply: true,
@@ -83,7 +83,7 @@ describe('mcv Repository routes', () => {
     await createProgram(context()).parseAsync(['node', 'mcv', 'bind', '--yes', '--json']);
     const bindResult = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(bindResult).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'bind',
       status: 'succeeded',
       repositoryPath: process.cwd(),
@@ -98,7 +98,7 @@ describe('mcv Repository routes', () => {
     await createProgram(context()).parseAsync(['node', 'mcv', 'unbind', '--dry-run', '--json']);
     const unbindPlan = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(unbindPlan).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'unbind',
       status: 'planned',
       readyToApply: true,
@@ -114,7 +114,7 @@ describe('mcv Repository routes', () => {
     await createProgram(context()).parseAsync(['node', 'mcv', 'unbind', '--yes', '--json']);
     const unbindResult = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(unbindResult).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'unbind',
       status: 'succeeded',
       data: { repositoryId: 'repository-command-id' },
@@ -143,7 +143,7 @@ describe('mcv Repository routes', () => {
       changes: expect.arrayContaining([
         expect.objectContaining({ id: 'repository-backup', kind: 'backup' }),
         expect.objectContaining({ id: 'catalog-scan', kind: 'scan' }),
-        expect.objectContaining({ id: 'schema-version', before: 1, after: 4 }),
+        expect.objectContaining({ id: 'schema-version', before: 1, after: 5 }),
         expect.objectContaining({ id: 'repository-profiles', kind: 'add' }),
       ]),
     });
@@ -156,7 +156,7 @@ describe('mcv Repository routes', () => {
       operation: 'migrate',
       status: 'succeeded',
       repositoryPath: oldRepository,
-      data: { previousSchemaVersion: 1, repositorySchemaVersion: 4, backupVerified: true },
+      data: { previousSchemaVersion: 1, repositorySchemaVersion: 5, backupVerified: true },
     });
   });
 
@@ -180,7 +180,7 @@ function createRepository(root: string, name: string, repositoryId: string): str
   const repositoryPath = path.join(root, name);
   fs.mkdirSync(repositoryPath);
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), yaml.stringify({
-    schemaVersion: 4,
+    schemaVersion: 5,
     repositoryId,
     initializedAt: '2026-07-22T00:00:00.000Z',
     targets: {

@@ -1,15 +1,15 @@
 import * as path from 'path';
 import { parseAssetId } from '../assets/ids.js';
-import { toCanonicalDeploySource } from '../assets/selected-repository-view.js';
+import { toManagedDeploySource } from '../assets/selected-repository-view.js';
 import { atomicWriteFile } from '../utils/files.js';
 import { mergeStructuredOverlay, parseStructuredObject, stringifyStructuredObject } from '../utils/structured-config.js';
-import { hasExecutable, projectRulesManagedFile } from './adapter-utils.js';
-import { GeminiCanonicalTransformer } from './gemini-canonical-transformer.js';
+import { hasExecutable, projectInstructionsManagedFile } from './adapter-utils.js';
+import { GeminiManagedTransformer } from './gemini-canonical-transformer.js';
 import { GeminiNativeFileHandler, projectGeminiNativeAsset } from './gemini-native-file-handler.js';
 import { GEMINI_MANAGED_PATHS } from './overlay-policies.js';
 export class GeminiAdapter {
     nativeFileHandler;
-    canonicalTransformer;
+    managedTransformer;
     skillSurfaces = [
         {
             id: 'gemini-cli',
@@ -22,9 +22,9 @@ export class GeminiAdapter {
             supportsManagedDirectoryLinks: (_platform) => false,
         },
     ];
-    constructor(nativeFileHandler = new GeminiNativeFileHandler(), canonicalTransformer = new GeminiCanonicalTransformer()) {
+    constructor(nativeFileHandler = new GeminiNativeFileHandler(), managedTransformer = new GeminiManagedTransformer()) {
         this.nativeFileHandler = nativeFileHandler;
-        this.canonicalTransformer = canonicalTransformer;
+        this.managedTransformer = managedTransformer;
     }
     async detect(context) {
         const configDirectories = this.nativeFileHandler.discoverDirectories(context);
@@ -41,22 +41,22 @@ export class GeminiAdapter {
         return this.nativeFileHandler.discoverFiles(context);
     }
     async capture(files, context) {
-        return this.canonicalTransformer.transform(await this.nativeFileHandler.capture(files, context), context);
+        return this.managedTransformer.transform(await this.nativeFileHandler.capture(files, context), context);
     }
     async project(source, request, context) {
         const write = (file) => atomicWriteFile(file.targetPath, file.content);
         if (request.scope === 'project') {
-            return { files: projectRulesManagedFile(request.targetRoot, 'GEMINI.md', source), write };
+            return { files: projectInstructionsManagedFile(request.targetRoot, 'gemini', 'GEMINI.md', source), write };
         }
-        const canonicalSource = toCanonicalDeploySource(source);
-        const [nativeFiles, canonicalFiles] = await Promise.all([
+        const managedSource = toManagedDeploySource(source, 'gemini');
+        const [nativeFiles, managedFiles] = await Promise.all([
             Promise.resolve(this.projectNativeAssets(source.nativeAssets, context)),
-            this.canonicalTransformer.deploy(canonicalSource, context),
+            this.managedTransformer.deploy(managedSource, context),
         ]);
         const settingsPath = path.join(context.homeDir, '.gemini', 'settings.json');
         const antigravityMcpPath = path.join(context.homeDir, '.gemini', 'config', 'mcp_config.json');
         return {
-            files: this.mergeSettings(this.mergeSettings(nativeFiles, canonicalFiles, settingsPath), [], antigravityMcpPath),
+            files: this.mergeSettings(this.mergeSettings(nativeFiles, managedFiles, settingsPath), [], antigravityMcpPath),
             write,
         };
     }
@@ -72,11 +72,11 @@ export class GeminiAdapter {
         }
         return files;
     }
-    mergeSettings(nativeFiles, canonicalFiles, settingsPath) {
+    mergeSettings(nativeFiles, managedFiles, settingsPath) {
         const native = nativeFiles.find((file) => file.targetPath === settingsPath);
-        const managed = canonicalFiles.find((file) => file.targetPath === settingsPath)
+        const managed = managedFiles.find((file) => file.targetPath === settingsPath)
             ?? nativeFiles.slice().reverse().find((file) => file.targetPath === settingsPath);
-        const other = [...nativeFiles, ...canonicalFiles].filter((file) => file.targetPath !== settingsPath);
+        const other = [...nativeFiles, ...managedFiles].filter((file) => file.targetPath !== settingsPath);
         if (!native && !managed)
             return other;
         const existingFile = this.nativeFileHandler.readDeployTarget(settingsPath);

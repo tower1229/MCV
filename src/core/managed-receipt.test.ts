@@ -33,8 +33,8 @@ describe('Managed Receipt', () => {
       schemaVersion: 1,
       repositoryId: 'repo-1',
       managed: {
-        'AGENTS.md#mcv:rule:canonical': {
-          assetId: 'rule:canonical',
+        'AGENTS.md#mcv:instruction:codex': {
+          assetId: 'instruction:codex',
           hash: 'a'.repeat(64),
         },
       },

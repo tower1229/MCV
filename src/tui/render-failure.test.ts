@@ -6,7 +6,7 @@ import { runProfileEditor } from './profile/app.js';
 
 const context: DeviceContext = { homeDir: '/tmp/mcv-tui-failure', platform: 'win32', env: {} };
 const capturePlan: CapturePlan = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   operation: 'capture',
   status: 'planned',
   readyToApply: true,
@@ -49,9 +49,9 @@ describe('TUI render-failure restoration', () => {
       ...capturePlan,
       changes: [{
         id: 'control', ide: 'shared' as const, surface: 'codex', itemType: 'file' as const,
-        capability: 'rules' as const, name: 'control', change: 'add' as const,
-        defaultSelected: true, repositoryPaths: ['common/AGENTS.md'],
-        previews: [{ repositoryPath: 'common/AGENTS.md', kind: 'text' as const, bytes: 3, sha256: 'abc', diff: '+ a\u001b' }],
+        capability: 'instructions' as const, name: 'control', change: 'add' as const,
+        defaultSelected: true, repositoryPaths: ['ide/codex/instructions.md'],
+        previews: [{ repositoryPath: 'ide/codex/instructions.md', kind: 'text' as const, bytes: 3, sha256: 'abc', diff: '+ a\u001b' }],
       }],
     };
     const attempt = createCaptureReviewAttempt(context, plan, () => { throw new Error('forbidden control'); });

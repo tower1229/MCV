@@ -80,7 +80,7 @@ describe('project targetRoot validation', () => {
   it('rejects a bound MCV Repository path', () => {
     const repositoryPath = path.join(testRoot, 'repository');
     fs.mkdirSync(repositoryPath, { recursive: true });
-    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), 'schemaVersion: 4\n');
+    fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), 'schemaVersion: 5\n');
     const result = validateProjectTargetRoot(repositoryPath, context, {
       boundRepositoryPath: repositoryPath,
     });

@@ -5,16 +5,18 @@ import { repositoryFileForPlatform } from '../adapters/adapter-utils.js';
 import type { DeviceContext } from '../adapters/types.js';
 import { isRecord } from '../utils/objects.js';
 import { resolvePortableValue } from '../utils/variables.js';
-import type { CanonicalDeploySource } from '../adapters/types.js';
+import type { ManagedDeploySource } from '../adapters/types.js';
+import type { IdeId } from '../adapters/types.js';
+import { IDE_INSTRUCTION_DEFINITIONS } from '../core/ide-instructions.js';
 import { DECLARED_NATIVE_UNITS, nativeAssetId } from './native-units.js';
 import { parseAssetId } from './ids.js';
 import type { AssetSelection } from '../profiles/resolver.js';
 
 export interface SelectedRepositoryView {
-  rules?: {
-    id: 'rule:canonical';
+  instructions: Partial<Record<IdeId, {
+    id: `instruction:${IdeId}`;
     content: string;
-  };
+  }>>;
   skills: Array<{
     id: string;
     name: string;
@@ -25,16 +27,20 @@ export interface SelectedRepositoryView {
   nativeAssets: Map<string, Buffer>;
 }
 
-/** Adapter/transformer bridge: SelectedRepositoryView → existing CanonicalDeploySource shape. */
-export function toCanonicalDeploySource(view: SelectedRepositoryView): CanonicalDeploySource {
-  const source: CanonicalDeploySource = {
+/** Adapter/transformer bridge: SelectedRepositoryView → ManagedDeploySource. */
+export function toManagedDeploySource(
+  view: SelectedRepositoryView,
+  target: IdeId,
+): ManagedDeploySource {
+  const source: ManagedDeploySource = {
     skills: view.skills.flatMap((skill) =>
       skill.files.map((file) => ({
         relativePath: `${skill.name}/${file.relativePath}`,
         content: file.content,
       }))),
   };
-  if (view.rules) source.rules = view.rules.content;
+  const instructions = view.instructions[target];
+  if (instructions) source.instructions = instructions;
   if (Object.keys(view.mcpServers).length > 0) {
     source.mcp = { servers: view.mcpServers };
   }
@@ -58,20 +64,25 @@ export function buildSelectedRepositoryView(
 ): SelectedRepositoryView {
   const selected = new Set(selection.assetIds);
   const view: SelectedRepositoryView = {
+    instructions: {},
     skills: [],
     mcpServers: {},
     mcpOverrides: {},
     nativeAssets: new Map(),
   };
 
-  if (selected.has('rule:canonical')) {
-    const rulesPath = selectOverride(repositoryPath, 'AGENTS.md', context);
-    if (fs.existsSync(rulesPath)) {
-      view.rules = {
-        id: 'rule:canonical',
-        content: fs.readFileSync(rulesPath, 'utf8'),
-      };
-    }
+  for (const definition of IDE_INSTRUCTION_DEFINITIONS) {
+    if (!selected.has(definition.assetId)) continue;
+    const instructionsPath = repositoryFileForPlatform(
+      repositoryPath,
+      definition.repositoryPath,
+      context,
+    );
+    if (!fs.existsSync(instructionsPath)) continue;
+    view.instructions[definition.target] = {
+      id: definition.assetId,
+      content: fs.readFileSync(instructionsPath, 'utf8'),
+    };
   }
 
   for (const assetId of selection.assetIds) {

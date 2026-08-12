@@ -90,7 +90,7 @@ describe('Capture review model', () => {
 
 function plan(): CapturePlan {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     operation: 'capture',
     status: 'planned',
     readyToApply: false,

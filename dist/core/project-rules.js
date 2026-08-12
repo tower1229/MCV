@@ -1,23 +1,40 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { extractManagedBlock, hashManagedBlockBody, managedBlockDrifted, managedReceiptKey, upsertManagedBlock, } from './managed-block.js';
+import { extractManagedBlock, hashManagedBlockBody, managedBlockDrifted, managedReceiptKey, removeManagedBlock, upsertManagedBlock, } from './managed-block.js';
 import { assertPathContainedInProjectRoot } from './project-target.js';
-export const CANONICAL_RULES_ASSET_ID = 'rule:canonical';
-export function projectCanonicalRulesFile(targetRoot, relativePath, rulesBody, receipt) {
+export const LEGACY_RULES_ASSET_ID = 'rule:canonical';
+export function projectIdeInstructionsFile(targetRoot, relativePath, assetId, instructionsBody, receipt) {
     const targetPath = path.join(targetRoot, relativePath);
     assertPathContainedInProjectRoot(targetRoot, targetPath);
     const existing = fs.existsSync(targetPath)
         ? fs.readFileSync(targetPath, 'utf8')
         : undefined;
-    const content = upsertManagedBlock(existing, CANONICAL_RULES_ASSET_ID, rulesBody);
-    const receiptKey = managedReceiptKey(relativePath, CANONICAL_RULES_ASSET_ID);
-    const bodyHash = hashManagedBlockBody(rulesBody);
+    const legacyReceiptKey = managedReceiptKey(relativePath, LEGACY_RULES_ASSET_ID);
+    const legacyBody = existing === undefined
+        ? undefined
+        : extractManagedBlock(existing, LEGACY_RULES_ASSET_ID);
+    const legacyEntry = receipt?.managed[legacyReceiptKey];
+    const legacyVerified = legacyBody !== undefined
+        && legacyEntry?.assetId === LEGACY_RULES_ASSET_ID
+        && legacyEntry.hash === hashManagedBlockBody(legacyBody);
+    const legacyUnverified = legacyBody !== undefined && !legacyVerified;
+    const base = legacyVerified
+        ? removeManagedBlock(existing, LEGACY_RULES_ASSET_ID)
+        : existing;
+    const content = legacyUnverified
+        ? existing
+        : upsertManagedBlock(base, assetId, instructionsBody);
+    const receiptKey = managedReceiptKey(relativePath, assetId);
+    const bodyHash = hashManagedBlockBody(instructionsBody);
     const currentBody = existing === undefined
         ? undefined
-        : extractManagedBlock(existing, CANONICAL_RULES_ASSET_ID);
+        : extractManagedBlock(existing, assetId);
     const unchanged = existing !== undefined && existing === content;
     let drifted = false;
-    if (currentBody !== undefined && managedBlockDrifted(existing, CANONICAL_RULES_ASSET_ID, rulesBody)) {
+    if (legacyUnverified) {
+        drifted = true;
+    }
+    else if (currentBody !== undefined && managedBlockDrifted(existing, assetId, instructionsBody)) {
         const recorded = receipt?.managed[receiptKey];
         if (recorded === undefined) {
             // Conservative mode without Receipt ownership: differing local block is Drift.
@@ -36,5 +53,6 @@ export function projectCanonicalRulesFile(targetRoot, relativePath, rulesBody, r
         bodyHash,
         drifted,
         unchanged,
+        ...(legacyVerified ? { migratedReceiptKey: legacyReceiptKey } : {}),
     };
 }

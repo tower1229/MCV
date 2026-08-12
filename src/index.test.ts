@@ -32,7 +32,7 @@ describe('mcv default path without fullscreen Shell', () => {
     fs.mkdirSync(repositoryPath);
     fs.mkdirSync(homeDir);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), yaml.stringify({
-      schemaVersion: 4,
+      schemaVersion: 5,
       repositoryId: 'index-overview-id',
       initializedAt: '2026-08-07T00:00:00.000Z',
       targets: {

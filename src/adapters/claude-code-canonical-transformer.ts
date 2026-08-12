@@ -2,8 +2,8 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { mergeRecords, isRecord } from '../utils/objects.js';
 import type {
-  CanonicalDeploySource,
-  CanonicalTransformer,
+  ManagedDeploySource,
+  ManagedTransformer,
   CaptureFile,
   CaptureResult,
   DeployFile,
@@ -12,8 +12,9 @@ import type {
 } from './types.js';
 import { CLAUDE_CODE_MCP_PATH } from './overlay-policies.js';
 import { normalizeMcpServers, toNativeMcpServers } from '../core/mcp.js';
+import { instructionDefinition } from '../core/ide-instructions.js';
 
-export class ClaudeCodeCanonicalTransformer implements CanonicalTransformer {
+export class ClaudeCodeManagedTransformer implements ManagedTransformer {
   transform(
     capture: NativeCaptureResult,
     _context: DeviceContext,
@@ -25,7 +26,7 @@ export class ClaudeCodeCanonicalTransformer implements CanonicalTransformer {
     if (instructions) {
       files.push({
         sourcePath: instructions.sourcePath,
-        repositoryPath: 'common/AGENTS.md',
+        repositoryPath: instructionDefinition('claude-code').repositoryPath,
         content: instructions.content,
         ownership: 'managed',
       });
@@ -59,14 +60,14 @@ export class ClaudeCodeCanonicalTransformer implements CanonicalTransformer {
   }
 
   async deploy(
-    source: CanonicalDeploySource,
+    source: ManagedDeploySource,
     context: DeviceContext,
   ): Promise<DeployFile[]> {
     const files: DeployFile[] = [];
-    if (source.rules !== undefined) {
+    if (source.instructions !== undefined) {
       files.push({
-        targetPath: path.join(context.env.CLAUDE_CONFIG_DIR || path.join(context.homeDir, '.claude'), 'CLAUDE.md'),
-        content: source.rules,
+        targetPath: instructionDefinition('claude-code').globalTargetPath(context),
+        content: source.instructions.content,
       });
     }
 

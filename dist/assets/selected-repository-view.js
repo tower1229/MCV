@@ -4,18 +4,20 @@ import * as yaml from 'yaml';
 import { repositoryFileForPlatform } from '../adapters/adapter-utils.js';
 import { isRecord } from '../utils/objects.js';
 import { resolvePortableValue } from '../utils/variables.js';
+import { IDE_INSTRUCTION_DEFINITIONS } from '../core/ide-instructions.js';
 import { DECLARED_NATIVE_UNITS, nativeAssetId } from './native-units.js';
 import { parseAssetId } from './ids.js';
-/** Adapter/transformer bridge: SelectedRepositoryView → existing CanonicalDeploySource shape. */
-export function toCanonicalDeploySource(view) {
+/** Adapter/transformer bridge: SelectedRepositoryView → ManagedDeploySource. */
+export function toManagedDeploySource(view, target) {
     const source = {
         skills: view.skills.flatMap((skill) => skill.files.map((file) => ({
             relativePath: `${skill.name}/${file.relativePath}`,
             content: file.content,
         }))),
     };
-    if (view.rules)
-        source.rules = view.rules.content;
+    const instructions = view.instructions[target];
+    if (instructions)
+        source.instructions = instructions;
     if (Object.keys(view.mcpServers).length > 0) {
         source.mcp = { servers: view.mcpServers };
     }
@@ -33,19 +35,22 @@ const MCP_OVERRIDE_SURFACES = {
 export function buildSelectedRepositoryView(repositoryPath, selection, context) {
     const selected = new Set(selection.assetIds);
     const view = {
+        instructions: {},
         skills: [],
         mcpServers: {},
         mcpOverrides: {},
         nativeAssets: new Map(),
     };
-    if (selected.has('rule:canonical')) {
-        const rulesPath = selectOverride(repositoryPath, 'AGENTS.md', context);
-        if (fs.existsSync(rulesPath)) {
-            view.rules = {
-                id: 'rule:canonical',
-                content: fs.readFileSync(rulesPath, 'utf8'),
-            };
-        }
+    for (const definition of IDE_INSTRUCTION_DEFINITIONS) {
+        if (!selected.has(definition.assetId))
+            continue;
+        const instructionsPath = repositoryFileForPlatform(repositoryPath, definition.repositoryPath, context);
+        if (!fs.existsSync(instructionsPath))
+            continue;
+        view.instructions[definition.target] = {
+            id: definition.assetId,
+            content: fs.readFileSync(instructionsPath, 'utf8'),
+        };
     }
     for (const assetId of selection.assetIds) {
         const parsed = parseAssetId(assetId);

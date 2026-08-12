@@ -21,6 +21,11 @@ import {
   type SkillProjection,
 } from '../core/skills.js';
 import { hashDeviceTopologyNode } from '../core/canonical-skill-device-layout.js';
+import {
+  IDE_INSTRUCTION_DEFINITIONS,
+  instructionDefinition,
+  instructionDefinitionByRepositoryPath,
+} from '../core/ide-instructions.js';
 import { readProfilesDocument } from '../profiles/store.js';
 import { isRecord, mergeRecords } from '../utils/objects.js';
 import {
@@ -271,7 +276,7 @@ async function buildCapturePlan(
 
   const changes: CaptureChange[] = [];
   const plannedRepositoryPaths = new Set<string>();
-  addRulesChange(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths, mutations);
+  addInstructionChanges(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths, mutations);
   addMcpChanges(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths, mutations);
   addFileChanges(repositoryPath, sourcedFiles, changes, issues, plannedRepositoryPaths, mutations);
   addSkillChanges(repositoryPath, skills.packages, changes, issues, plannedRepositoryPaths, mutations);
@@ -874,7 +879,7 @@ function blockedCaptureResult(plan: CapturePlan, issues: Issue[]): CaptureResult
   };
 }
 
-function addRulesChange(
+function addInstructionChanges(
   repositoryPath: string,
   files: SourcedCaptureFile[],
   changes: CaptureChange[],
@@ -882,31 +887,29 @@ function addRulesChange(
   plannedRepositoryPaths: Set<string>,
   mutations: Map<string, CaptureMutation>,
 ): void {
-  const candidates = files.filter((file) => file.repositoryPath === 'common/AGENTS.md');
-  if (candidates.length === 0) return;
-  const targetPath = path.join(repositoryPath, 'common', 'AGENTS.md');
-  const contents = [
-    ...(fs.existsSync(targetPath) ? [fs.readFileSync(targetPath, 'utf8')] : []),
-    ...candidates.flatMap((candidate) =>
-      typeof candidate.content === 'string' ? [candidate.content] : []),
-  ];
-  const content = mergeCanonicalRules(contents);
-  const planned = planFile(repositoryPath, {
-    ...candidates[0],
-    ide: 'shared',
-    surface: 'shared',
-    sourcePath: candidates.map((candidate) => candidate.sourcePath).join(', '),
-    content,
-  }, issues);
-  if (!planned || sameOptionalContent(planned.existingContent, planned.finalContent)) return;
-  const change = fileChange('shared', 'shared', 'file', 'rules', 'Shared Rules', planned, issues);
-  changes.push(change);
-  mutations.set(change.id, writeMutation(
-    planned.repositoryPath,
-    planned.finalContent,
-    candidates.map((candidate) => candidate.sourcePath),
-  ));
-  plannedRepositoryPaths.add(planned.repositoryPath);
+  for (const candidate of files.filter((file) =>
+    instructionDefinitionByRepositoryPath(file.repositoryPath) !== undefined)) {
+    const planned = planFile(repositoryPath, candidate, issues);
+    if (!planned || sameOptionalContent(planned.existingContent, planned.finalContent)) continue;
+    const definition = instructionDefinitionByRepositoryPath(candidate.repositoryPath);
+    if (!definition) continue;
+    const change = fileChange(
+      candidate.ide,
+      candidate.surface,
+      'file',
+      'instructions',
+      `${instructionDisplayName(definition.target)} Instructions`,
+      planned,
+      issues,
+    );
+    changes.push(change);
+    mutations.set(change.id, writeMutation(
+      planned.repositoryPath,
+      planned.finalContent,
+      [candidate.sourcePath],
+    ));
+    plannedRepositoryPaths.add(planned.repositoryPath);
+  }
 }
 
 function addMcpChanges(
@@ -1058,7 +1061,8 @@ function addFileChanges(
 ): void {
   const groups = new Map<string, SourcedCaptureFile[]>();
   for (const file of files) {
-    if (file.repositoryPath === 'common/AGENTS.md' || file.repositoryPath === 'common/mcp.yaml') continue;
+    if (instructionDefinitionByRepositoryPath(file.repositoryPath)
+      || file.repositoryPath === 'common/mcp.yaml') continue;
     groups.set(file.repositoryPath, [...(groups.get(file.repositoryPath) ?? []), file]);
   }
   for (const [repositoryFile, candidates] of groups) {
@@ -1217,19 +1221,24 @@ function addRepositoryDeletionChanges(
   plannedRepositoryPaths: Set<string>,
   mutations: Map<string, CaptureMutation>,
 ): void {
-  const repositoryRules = path.join(repositoryPath, 'common', 'AGENTS.md');
-  if (
-    fs.existsSync(repositoryRules)
-    && !sourcedFiles.some((file) => file.repositoryPath === 'common/AGENTS.md')
-  ) {
+  for (const targetId of enabledTargets) {
+    const ide = ideName(targetId);
+    if (ide === 'shared') continue;
+    const definition = instructionDefinition(ide);
+    const repositoryInstructions = path.join(
+      repositoryPath,
+      ...definition.repositoryPath.split('/'),
+    );
+    if (!fs.existsSync(repositoryInstructions)
+      || sourcedFiles.some((file) => file.repositoryPath === definition.repositoryPath)) continue;
     const change = deletionFileChange(
       repositoryPath,
-      'shared',
-      'shared',
+      ide,
+      ide,
       'file',
-      'rules',
-      'Shared Rules',
-      'common/AGENTS.md',
+      'instructions',
+      `${instructionDisplayName(ide)} Instructions`,
+      definition.repositoryPath,
       issues,
     );
     changes.push(change);
@@ -1441,20 +1450,6 @@ function withoutOverrides(value: Record<string, unknown>): Record<string, unknow
   return copy;
 }
 
-function mergeCanonicalRules(contents: string[]): string {
-  const blocks: string[] = [];
-  const seen = new Set<string>();
-  for (const content of contents) {
-    for (const block of content.replace(/\r\n?/g, '\n').trim().split(/\n{2,}/)) {
-      const normalized = block.trim();
-      if (!normalized || seen.has(normalized)) continue;
-      seen.add(normalized);
-      blocks.push(normalized);
-    }
-  }
-  return `${blocks.join('\n\n')}\n`;
-}
-
 function skillTopologyMarker(projection: SkillProjection): string {
   return `skill-topology:${projection.projectionPath}:${hashDeviceTopologyNode(projection.projectionPath)}`;
 }
@@ -1528,6 +1523,12 @@ function stableValue(value: unknown): string {
 
 function ideName(targetId: TargetId): CaptureChange['ide'] {
   return targetId === 'claudeCode' ? 'claude-code' : targetId;
+}
+
+function instructionDisplayName(ide: Exclude<CaptureChange['ide'], 'shared'>): string {
+  if (ide === 'codex') return 'Codex';
+  if (ide === 'claude-code') return 'Claude Code';
+  return 'Gemini';
 }
 
 function surfaceName(repositoryPath: string, targetId: TargetId): string {

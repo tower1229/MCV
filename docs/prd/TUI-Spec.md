@@ -72,7 +72,7 @@ Profile 维护和复杂 Capture Plan 都需要集中浏览、选择和对比，�
 - `status --plain --json` and `discover --plain --json` are usage errors.
 - Bare `mcv deploy` without a Profile or `--global` is a usage error and writes nothing.
 - JSON stdout contains exactly one document; progress and diagnostics use stderr.
-- Consumers must inspect `schemaVersion` and reject unknown versions. Deploy uses operation schema v3; other operations use their own schema versions.
+- Consumers must inspect `schemaVersion` and reject unknown versions. All current JSON operations use operation schema v4.
 - Exit codes: `0` requested result produced, `1` execution/system failure, `2` usage/input error, `3` non-interactive human-decision block, `130` interruption.
 - UI, help, prompts, errors, progress, and summaries are English. README remains Chinese. Color is automatic, respects `NO_COLOR`, and is never the only state indicator.
 

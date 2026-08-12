@@ -30,7 +30,7 @@ describe('inspectEnvironment', () => {
     });
 
     expect(report).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'discover',
       status: 'reported',
       ready: true,
@@ -53,7 +53,7 @@ describe('inspectEnvironment', () => {
     fs.mkdirSync(path.join(repositoryPath, 'common', 'rules'), { recursive: true });
     fs.mkdirSync(path.join(repositoryPath, 'ide', 'claude-code', 'native'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: repository-id',
       'initializedAt: 2026-08-03T00:00:00.000Z',
       'targets:',

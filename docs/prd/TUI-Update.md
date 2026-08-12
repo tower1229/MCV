@@ -281,7 +281,7 @@ Init Apply 只负责创建合法空数据仓库并绑定当前设备。成功后
 - 没有遗留临时文件；
 - 基线和 managed inventory 写入成功。
 
-Deploy 使用与 Capture 一致的分层选择：按 IDE 筛选，再按 Shared Rules、Skills、MCP 和 IDE-specific Configuration 展开到文件。已安装且仓库中存在配置的 IDE，以及不需要额外决策或 warning confirmation 的变化默认选中；删除候选收纳在折叠的 Advanced Cleanup 区，默认不选中，且不得被 `--yes` 执行。
+Deploy 使用与 Capture 一致的分层选择：按 IDE 筛选，再按 IDE Instructions、Skills、MCP 和 IDE-specific Configuration 展开到文件。已安装且仓库中存在配置的 IDE，以及不需要额外决策或 warning confirmation 的变化默认选中；删除候选收纳在折叠的 Advanced Cleanup 区，默认不选中，且不得被 `--yes` 执行。
 
 每次 Deploy 成功后，在本机状态中记录本次选中的 IDE 和能力范围。下次 Deploy 可选择 “Use this device's previous selection”；已不存在或已不受支持的项自动忽略，新增项按当前保守默认值处理。这只是本机交互便利状态，不命名为 Preset，不写入数据仓库，不在设备间共享。
 

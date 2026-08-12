@@ -87,13 +87,13 @@ describe('GeminiAdapter', () => {
     });
   });
 
-  it('projects Canonical Rules as a Managed Block for project scope', async () => {
+  it('projects IDE Instructions as a Managed Block for project scope', async () => {
     const projectRoot = path.join(homeDir, 'project');
     fs.mkdirSync(projectRoot, { recursive: true });
     const adapter = new GeminiAdapter();
     const context = { homeDir, platform: 'darwin' as const, env: {} };
     const view: SelectedRepositoryView = {
-      rules: { id: 'rule:canonical', content: '# Rules\n' },
+      instructions: { gemini: { id: 'instruction:gemini', content: '# Rules\n' } },
       skills: [],
       mcpServers: {},
       mcpOverrides: {},
@@ -116,6 +116,7 @@ describe('GeminiAdapter', () => {
     const adapter = new GeminiAdapter();
     const context = { homeDir, platform: 'darwin' as const, env: {} };
     const view: SelectedRepositoryView = {
+      instructions: {},
       skills: [],
       mcpServers: {},
       mcpOverrides: {},
@@ -132,7 +133,7 @@ describe('GeminiAdapter', () => {
 });
 
 function emptyView(): SelectedRepositoryView {
-  return { skills: [], mcpServers: {}, mcpOverrides: {}, nativeAssets: new Map() };
+  return { instructions: {}, skills: [], mcpServers: {}, mcpOverrides: {}, nativeAssets: new Map() };
 }
 
 function projectRequest(): DeployRequest {

@@ -6,7 +6,7 @@ import { parameterizeConfig } from '../utils/parameterize.js';
 import { deleteObjectPath } from '../utils/structured-config.js';
 import { resolvePortableValue } from '../utils/variables.js';
 import { CLAUDE_CODE_MANAGED_PATHS } from './overlay-policies.js';
-import { readCanonicalSource, repositoryFileForPlatform } from './adapter-utils.js';
+import { repositoryFileForPlatform } from './adapter-utils.js';
 const JSON_CAPTURE_POLICIES = {
     'user-settings': {
         repositoryPath: 'ide/claude-code/native/settings.json',
@@ -150,27 +150,10 @@ export class ClaudeCodeNativeFileHandler {
             write: (file) => atomicWriteFile(file.targetPath, file.content),
         };
     }
-    async readCanonical(repositoryPath, context) {
-        return readCanonicalSource(repositoryPath, context);
-    }
     readDeployTarget(targetPath) {
         if (!fs.existsSync(targetPath))
             return undefined;
         return { targetPath, content: fs.readFileSync(targetPath) };
-    }
-    readCanonicalSkillFiles(sourceRoot, currentDirectory) {
-        return fs.readdirSync(currentDirectory, { withFileTypes: true }).flatMap((entry) => {
-            const sourcePath = path.join(currentDirectory, entry.name);
-            if (entry.isDirectory()) {
-                return this.readCanonicalSkillFiles(sourceRoot, sourcePath);
-            }
-            if (!entry.isFile())
-                return [];
-            return [{
-                    relativePath: path.relative(sourceRoot, sourcePath),
-                    content: fs.readFileSync(sourcePath),
-                }];
-        });
     }
     readJsonObject(filePath, warnings) {
         try {

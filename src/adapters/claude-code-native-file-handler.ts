@@ -7,7 +7,6 @@ import { deleteObjectPath } from '../utils/structured-config.js';
 import { resolvePortableValue } from '../utils/variables.js';
 import type {
   CaptureFile,
-  CanonicalDeploySource,
   CapturedManagedField,
   CapturedManagedFile,
   DetectedConfigDirectory,
@@ -19,7 +18,7 @@ import type {
   NativeCaptureResult,
 } from './types.js';
 import { CLAUDE_CODE_MANAGED_PATHS } from './overlay-policies.js';
-import { readCanonicalSource, repositoryFileForPlatform } from './adapter-utils.js';
+import { repositoryFileForPlatform } from './adapter-utils.js';
 
 interface JsonCapturePolicy {
   repositoryPath: string;
@@ -184,33 +183,9 @@ export class ClaudeCodeNativeFileHandler implements NativeFileHandler {
     };
   }
 
-  async readCanonical(
-    repositoryPath: string,
-    context: DeviceContext,
-  ): Promise<CanonicalDeploySource> {
-    return readCanonicalSource(repositoryPath, context);
-  }
-
   readDeployTarget(targetPath: string): DeployFile | undefined {
     if (!fs.existsSync(targetPath)) return undefined;
     return { targetPath, content: fs.readFileSync(targetPath) };
-  }
-
-  private readCanonicalSkillFiles(
-    sourceRoot: string,
-    currentDirectory: string,
-  ): CanonicalDeploySource['skills'] {
-    return fs.readdirSync(currentDirectory, { withFileTypes: true }).flatMap((entry) => {
-      const sourcePath = path.join(currentDirectory, entry.name);
-      if (entry.isDirectory()) {
-        return this.readCanonicalSkillFiles(sourceRoot, sourcePath);
-      }
-      if (!entry.isFile()) return [];
-      return [{
-        relativePath: path.relative(sourceRoot, sourcePath),
-        content: fs.readFileSync(sourcePath),
-      }];
-    });
   }
 
   private readJsonObject(

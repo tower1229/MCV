@@ -4,14 +4,15 @@ import { isRecord } from '../utils/objects.js';
 import { stringifyStructuredObject } from '../utils/structured-config.js';
 import { CODEX_MCP_PATH } from './overlay-policies.js';
 import { normalizeMcpServers, toNativeMcpServers } from '../core/mcp.js';
-export class CodexCanonicalTransformer {
+import { instructionDefinition } from '../core/ide-instructions.js';
+export class CodexManagedTransformer {
     transform(capture, _context) {
         const files = [...capture.files];
         const instructions = capture.managedFiles.find((file) => file.id === 'user-instructions');
         if (instructions) {
             files.push({
                 sourcePath: instructions.sourcePath,
-                repositoryPath: 'common/AGENTS.md',
+                repositoryPath: instructionDefinition('codex').repositoryPath,
                 content: instructions.content,
                 ownership: 'managed',
             });
@@ -38,10 +39,10 @@ export class CodexCanonicalTransformer {
     }
     async deploy(source, context) {
         const files = [];
-        if (source.rules !== undefined) {
+        if (source.instructions !== undefined) {
             files.push({
-                targetPath: path.join(context.env.CODEX_HOME || path.join(context.homeDir, '.codex'), 'AGENTS.md'),
-                content: source.rules,
+                targetPath: instructionDefinition('codex').globalTargetPath(context),
+                content: source.instructions.content,
             });
         }
         for (const skill of source.skills) {

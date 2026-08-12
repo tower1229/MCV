@@ -3,14 +3,15 @@ import * as yaml from 'yaml';
 import { isRecord } from '../utils/objects.js';
 import { GEMINI_MCP_PATH } from './overlay-policies.js';
 import { normalizeMcpServers, toNativeMcpServers } from '../core/mcp.js';
-export class GeminiCanonicalTransformer {
+import { instructionDefinition } from '../core/ide-instructions.js';
+export class GeminiManagedTransformer {
     transform(capture, _context) {
         const files = [...capture.files];
         const instructions = capture.managedFiles.find((file) => file.id === 'user-instructions');
         if (instructions) {
             files.push({
                 sourcePath: instructions.sourcePath,
-                repositoryPath: 'common/AGENTS.md',
+                repositoryPath: instructionDefinition('gemini').repositoryPath,
                 content: instructions.content,
                 ownership: 'managed',
             });
@@ -38,10 +39,10 @@ export class GeminiCanonicalTransformer {
     }
     async deploy(source, context) {
         const files = [];
-        if (source.rules !== undefined) {
+        if (source.instructions !== undefined) {
             files.push({
-                targetPath: path.join(context.homeDir, '.gemini', 'GEMINI.md'),
-                content: source.rules,
+                targetPath: instructionDefinition('gemini').globalTargetPath(context),
+                content: source.instructions.content,
             });
         }
         for (const skill of source.skills) {

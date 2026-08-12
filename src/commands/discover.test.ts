@@ -42,7 +42,7 @@ describe('mcv discover', () => {
     const output = vi.mocked(console.log).mock.calls[0]?.[0];
     expect(typeof output).toBe('string');
     expect(JSON.parse(String(output))).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'discover',
       status: 'reported',
       ready: true,

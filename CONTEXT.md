@@ -53,9 +53,9 @@ _Avoid_: "restore drift", "extra confirmation"
 The reverse operation that collects supported device-side configuration changes back into the Repository. Configuration values are preserved faithfully; only known absolute paths are parameterized for portability. The user confirms the exact form that will be written, including any plaintext keys.
 _Avoid_: "sync back", "import"
 
-**Canonical Rules（通用规则）**:
-A single Markdown file (`common/AGENTS.md`) containing the user's cross-IDE development rules. Named `AGENTS.md` to match mainstream AI IDE convention. The CanonicalTransformer renames/places it per IDE target (e.g. `CLAUDE.md` for Claude Code). Multi-file rule sets are deferred to future versions.
-_Avoid_: "rule templates", "rule library"
+**IDE Instructions（IDE 指令）**:
+One target-owned Markdown Asset per IDE: `instruction:codex`, `instruction:claude-code`, or `instruction:gemini`, stored at `ide/<target>/instructions.md`. Capture and Deploy never concatenate, compare, inherit, or synthesize these Assets. Adapters only map their own Asset to the IDE-native global or project filename.
+_Avoid_: "Canonical Rules", "Shared Rules", "common instructions"
 
 **MCP Registry（MCP 注册表）**:
 A Canonical YAML file (`common/mcp.yaml`) that stores the core definitions of MCP servers (name, command, args, env variable references). Surface-specific overrides (e.g. timeout, disabled, headers, or alternate launch commands) live in `ide/<ide-or-surface>/mcp-overrides.yaml` and are merged on top during deploy. Override priority: Surface-level > Canonical base.
@@ -66,7 +66,7 @@ A reusable instruction package stored as a directory containing a `SKILL.md` fil
 _Avoid_: "recipe", "template", "rule pack"
 
 **Asset**:
-The smallest deployable unit a Profile can reference precisely — one Canonical rules file (`rule:canonical`), one Skill package (`skill:<name>`), one MCP server definition (`mcp:<name>`), or one Adapter-declared Native config unit (`native:<target>/<file-id>`). An Asset is a stable logical identity over the existing Repository file structure, not a new physical storage format; Surface overrides and platform overrides travel with their base Asset rather than becoming Assets of their own.
+The smallest deployable unit a Profile can reference precisely — one target-owned IDE Instructions file (`instruction:<target>`), one Skill package (`skill:<name>`), one MCP server definition (`mcp:<name>`), or one Adapter-declared Native config unit (`native:<target>/<file-id>`). An Asset is a stable logical identity over the existing Repository file structure, not a new physical storage format; Surface overrides and platform overrides travel with their base Asset rather than becoming Assets of their own.
 _Avoid_: "component", "package", "module"
 
 **Asset Catalog**:
@@ -90,7 +90,7 @@ Where a Deploy writes: `project` — an explicit target directory, by default ex
 _Avoid_: "install target", "mode", "environment"
 
 **Managed Block（受管理块）**:
-A delimited region (`<!-- mcv:begin ... -->` / `<!-- mcv:end ... -->`) inside a project-level rules file whose content MCV owns and updates, while everything outside the block remains untouched user content. A locally modified block is Drift and is never silently overwritten; pruning removes only unmodified MCV blocks, never surrounding file content.
+A delimited region (`<!-- mcv:begin ... -->` / `<!-- mcv:end ... -->`) inside a project-level IDE Instructions file whose content MCV owns and updates, while everything outside the block remains untouched user content. A locally modified block is Drift and is never silently overwritten; pruning removes only unmodified MCV blocks, never surrounding file content.
 _Avoid_: "managed section", "marker region"
 
 **Revision（Catalog / Profiles）**:
@@ -106,7 +106,7 @@ A minimal record stored inside a project that received a project-scope Deploy (`
 _Avoid_: "project binding", "project registry", "install manifest"
 
 **mcv.yaml（仓库清单）**:
-The single root-level file that identifies a directory as an MCV Repository and holds all repository-level configuration: identity (`repositoryId`, `schemaVersion`, `initializedAt`), target IDE declarations, variable definitions, and capture/deploy settings. Schema v3 has no content-security policy field; schema v4 moves Profile data out of the manifest into a separate root `profiles.yaml`, leaving the manifest to identity and runtime configuration only.
+The single root-level file that identifies a directory as an MCV Repository and holds all repository-level configuration: identity (`repositoryId`, `schemaVersion`, `initializedAt`), target IDE declarations, variable definitions, and capture/deploy settings. Schema v5 stores target-owned IDE Instructions at `ide/<target>/instructions.md`; `common/` contains only shared Skills and MCP data. Profile schema and Managed Receipt schema remain v1.
 _Avoid_: "config file", "settings file"
 
 **Configuration Data Neutrality（配置数据中立）**:

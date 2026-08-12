@@ -11,7 +11,7 @@ export type CanonicalSkillTarget =
   | { owner: 'ide'; ide: CanonicalSkillIde; surface?: SkillSurfaceId };
 
 export type CanonicalSkillLayoutFile = {
-  capability: 'rules' | 'skills' | 'mcp' | 'native';
+  capability: 'instructions' | 'skills' | 'mcp' | 'native';
   targetPath: string;
   content: string | Buffer;
 } & CanonicalSkillTarget;

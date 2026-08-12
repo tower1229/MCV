@@ -74,7 +74,7 @@ export function adapterCapabilityDeclarations() {
     }
     return ['codex', 'claude-code', 'gemini'].map((target) => ({
         target,
-        capabilities: ['rules', 'skills', 'mcp', 'native'],
+        capabilities: ['instructions', 'skills', 'mcp', 'native'],
         nativeFileIds: (byTarget.get(target) ?? []).slice().sort((a, b) => a.localeCompare(b)),
     }));
 }

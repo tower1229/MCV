@@ -36,7 +36,7 @@ describe('Deploy operations', () => {
     fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'review'), { recursive: true });
     fs.mkdirSync(path.join(repositoryPath, 'ide', 'claude-code', 'native'), { recursive: true });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: deploy-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -47,7 +47,10 @@ describe('Deploy operations', () => {
       'variables: {}',
       '',
     ].join('\n'));
-    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Repository rules\n');
+    fs.writeFileSync(
+      path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md'),
+      '# Claude Repository instructions\n',
+    );
     fs.writeFileSync(path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md'), '# Review\n');
     fs.writeFileSync(path.join(repositoryPath, 'common', 'mcp.yaml'), 'servers:\n  docs:\n    command: docs-server\n');
     fs.writeFileSync(
@@ -112,7 +115,7 @@ describe('Deploy operations', () => {
     const second = await globalPlan(context);
 
     expect(first).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'deploy',
       status: 'planned',
       readyToApply: true,
@@ -124,7 +127,7 @@ describe('Deploy operations', () => {
     });
     expect(first.changes).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        ide: 'claude-code', capability: 'rules', change: 'modify',
+        ide: 'claude-code', capability: 'instructions', change: 'modify',
         defaultSelected: true, group: 'standard', strategy: 'replace-entire-file',
       }),
       expect.objectContaining({
@@ -362,7 +365,7 @@ describe('Deploy operations', () => {
     const stateBefore = readState(context);
     const plan = await globalPlan(context);
     const selected = plan.changes.find((change) => change.targetPath === targetPath);
-    if (!selected) throw new Error('expected Shared Rules change');
+    if (!selected) throw new Error('expected IDE Instructions change');
 
     const result = await applyDeployPlan(context, plan, { changeIds: [selected.id] }, {
       copyFile: () => { throw new Error('backup disk full'); },
@@ -380,7 +383,7 @@ describe('Deploy operations', () => {
     const targetPath = path.join(homeDir, '.claude', 'CLAUDE.md');
     const plan = await globalPlan(context);
     const selected = plan.changes.find((change) => change.targetPath === targetPath);
-    if (!selected) throw new Error('expected Shared Rules change');
+    if (!selected) throw new Error('expected IDE Instructions change');
     fs.writeFileSync(targetPath, '# Changed after review\n');
 
     const result = await applyDeployPlan(context, plan, { changeIds: [selected.id] });
@@ -425,7 +428,7 @@ describe('Deploy operations', () => {
     const targetPath = path.join(homeDir, '.claude', 'CLAUDE.md');
     const plan = await globalPlan(context);
     const selected = plan.changes.find((change) => change.targetPath === targetPath);
-    if (!selected) throw new Error('expected Shared Rules change');
+    if (!selected) throw new Error('expected IDE Instructions change');
 
     const result = await applyDeployPlan(context, plan, { changeIds: [selected.id] }, {
       writeFile: (pathToWrite, content) => {
@@ -478,7 +481,7 @@ describe('Deploy operations', () => {
     const targetPath = path.join(homeDir, '.claude', 'CLAUDE.md');
     const plan = await globalPlan(context);
     const selected = plan.changes.find((change) => change.targetPath === targetPath);
-    if (!selected) throw new Error('expected Shared Rules change');
+    if (!selected) throw new Error('expected IDE Instructions change');
 
     const result = await applyDeployPlan(context, plan, { changeIds: [selected.id] }, {
       writeFile: () => { throw new Error('write denied'); },
@@ -1656,7 +1659,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 4',
+        'schemaVersion: 5',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
         'capture: { preserveUnknownNativeFields: true }',
@@ -1704,7 +1707,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 4',
+        'schemaVersion: 5',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
         'capture: { preserveUnknownNativeFields: true }',
@@ -1761,7 +1764,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 4',
+        'schemaVersion: 5',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
         'capture: { preserveUnknownNativeFields: true }',
@@ -2151,7 +2154,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 4',
+        'schemaVersion: 5',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
         'capture: { preserveUnknownNativeFields: true }',
@@ -2220,7 +2223,7 @@ describe('Deploy operations', () => {
     fs.writeFileSync(
       manifestPath,
       [
-        'schemaVersion: 4',
+        'schemaVersion: 5',
         'repositoryId: deploy-operation-test',
         'initializedAt: 2026-07-22T00:00:00.000Z',
         'capture: { preserveUnknownNativeFields: true }',
@@ -2320,11 +2323,29 @@ describe('Deploy operations', () => {
       scope: 'global',
       targetRoot: homeDir,
       profileIds: ['global'],
-      assetIds: expect.arrayContaining(['rule:canonical']),
+      assetIds: expect.arrayContaining(['instruction:claude-code']),
     });
     expect(plan.profilesRevision).toEqual(expect.any(String));
     expect(plan.catalogRevision).toEqual(expect.any(String));
     expect(plan.assetIds.length).toBeGreaterThan(0);
+  });
+
+  it('reports selected Instructions for a disabled target instead of silently dropping them', async () => {
+    fs.mkdirSync(path.join(repositoryPath, 'ide', 'codex'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repositoryPath, 'ide', 'codex', 'instructions.md'),
+      '# Codex-only instructions\n',
+    );
+
+    const plan = await globalPlan(context);
+
+    expect(plan.assetIds).toContain('instruction:codex');
+    expect(plan.issues).toContainEqual(expect.objectContaining({
+      severity: 'notice',
+      code: 'deploy.instructionTargetDisabled',
+      message: expect.stringContaining('instruction:codex'),
+    }));
+    expect(plan.changes.some((change) => change.ide === 'codex')).toBe(false);
   });
 
   it('returns stale when profiles.yaml revision changes after plan', async () => {
@@ -2334,7 +2355,7 @@ describe('Deploy operations', () => {
       profiles: {
         global: {
           title: 'Global',
-          assets: ['rule:canonical', 'skill:review'],
+          assets: ['instruction:claude-code', 'skill:review'],
         },
       },
     });
@@ -2351,7 +2372,10 @@ describe('Deploy operations', () => {
 
   it('returns stale when Catalog revision changes after plan', async () => {
     const plan = await globalPlan(context);
-    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Repository rules changed\n');
+    fs.writeFileSync(
+      path.join(repositoryPath, 'ide', 'claude-code', 'instructions.md'),
+      '# Claude Repository instructions changed\n',
+    );
 
     const result = await applyDeployPlan(context, plan, {
       changeIds: plan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
@@ -2373,7 +2397,7 @@ describe('Deploy operations', () => {
     fs.mkdirSync(projectRoot, { recursive: true });
     // Profile with MCP only — project overlay emits Antigravity unsupported notice when enabled.
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: deploy-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -2414,7 +2438,7 @@ describe('Deploy operations', () => {
     }));
   });
 
-  it('deploys Canonical Rules Managed Blocks and a Managed Receipt for project scope', async () => {
+  it('deploys target-specific IDE Instructions Managed Blocks and a Managed Receipt for project scope', async () => {
     writeState(context, {
       schemaVersion: 2,
       defaultRepositoryId: 'deploy-operation-test',
@@ -2422,7 +2446,7 @@ describe('Deploy operations', () => {
     });
     // Enable all three IDEs for this integration slice.
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: deploy-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -2436,17 +2460,25 @@ describe('Deploy operations', () => {
       'variables: {}',
       '',
     ].join('\n'));
+    for (const [target, content] of [
+      ['codex', '# Codex Repository instructions\n'],
+      ['claude-code', '# Claude Repository instructions\n'],
+      ['gemini', '# Gemini Repository instructions\n'],
+    ] as const) {
+      fs.mkdirSync(path.join(repositoryPath, 'ide', target), { recursive: true });
+      fs.writeFileSync(path.join(repositoryPath, 'ide', target, 'instructions.md'), content);
+    }
     writeProfilesDocument(repositoryPath, {
       schemaVersion: 1,
       profiles: {
         global: {
           title: 'Global',
-          assets: ['rule:canonical'],
+          assets: ['instruction:codex', 'instruction:claude-code', 'instruction:gemini'],
         },
         dev: {
           title: 'Dev',
-          description: 'project rules',
-          assets: ['rule:canonical'],
+          description: 'project instructions',
+          assets: ['instruction:codex', 'instruction:claude-code', 'instruction:gemini'],
         },
       },
     });
@@ -2474,16 +2506,18 @@ describe('Deploy operations', () => {
 
     const agents = fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8');
     expect(agents.startsWith('# Local intro\n')).toBe(true);
-    expect(agents).toContain('<!-- mcv:begin rule:canonical -->');
-    expect(agents).toContain('# Repository rules');
-    expect(fs.readFileSync(path.join(projectRoot, 'CLAUDE.md'), 'utf8')).toContain('<!-- mcv:begin rule:canonical -->');
-    expect(fs.readFileSync(path.join(projectRoot, 'GEMINI.md'), 'utf8')).toContain('<!-- mcv:begin rule:canonical -->');
+    expect(agents).toContain('<!-- mcv:begin instruction:codex -->');
+    expect(agents).toContain('# Codex Repository instructions');
+    expect(fs.readFileSync(path.join(projectRoot, 'CLAUDE.md'), 'utf8'))
+      .toContain('<!-- mcv:begin instruction:claude-code -->');
+    expect(fs.readFileSync(path.join(projectRoot, 'GEMINI.md'), 'utf8'))
+      .toContain('<!-- mcv:begin instruction:gemini -->');
 
     const receipt = JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcv', 'managed.json'), 'utf8'));
     expect(receipt.schemaVersion).toBe(1);
     expect(receipt.repositoryId).toBe('deploy-operation-test');
-    expect(receipt.managed['AGENTS.md#mcv:rule:canonical']).toMatchObject({
-      assetId: 'rule:canonical',
+    expect(receipt.managed['AGENTS.md#mcv:instruction:codex']).toMatchObject({
+      assetId: 'instruction:codex',
       hash: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(JSON.stringify(receipt)).not.toContain(projectRoot);
@@ -2495,7 +2529,10 @@ describe('Deploy operations', () => {
       targetRoot: projectRoot,
     });
     if ('error' in built2) throw new Error(built2.error.message);
-    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), '# Repository rules v2\n');
+    fs.writeFileSync(
+      path.join(repositoryPath, 'ide', 'codex', 'instructions.md'),
+      '# Codex Repository instructions v2\n',
+    );
     const plan2 = await createDeployPlan(context, built2.request);
     const receiptChange = plan2.changes.find((change) =>
       change.targetPath === path.join(projectRoot, '.mcv', 'managed.json'));
@@ -2528,7 +2565,7 @@ describe('Deploy operations', () => {
       profiles: {
         global: {
           title: 'Global',
-          assets: ['rule:canonical'],
+          assets: ['instruction:claude-code'],
         },
       },
     });
@@ -2573,7 +2610,7 @@ describe('Deploy operations', () => {
       repositoryPath,
     });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: deploy-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -2596,7 +2633,7 @@ describe('Deploy operations', () => {
       profiles: {
         global: {
           title: 'Global',
-          assets: ['rule:canonical', 'skill:review', 'mcp:docs'],
+          assets: ['instruction:claude-code', 'skill:review', 'mcp:docs'],
         },
         dev: {
           title: 'Dev',
@@ -2809,7 +2846,7 @@ describe('Deploy operations', () => {
       repositoryPath,
     });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: deploy-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -2983,7 +3020,7 @@ describe('Deploy operations', () => {
       repositoryPath,
     });
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: deploy-operation-test',
       'initializedAt: 2026-07-22T00:00:00.000Z',
       'capture: { preserveUnknownNativeFields: true }',
@@ -2997,6 +3034,11 @@ describe('Deploy operations', () => {
       'variables: {}',
       '',
     ].join('\n'));
+    fs.mkdirSync(path.join(repositoryPath, 'ide', 'codex'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repositoryPath, 'ide', 'codex', 'instructions.md'),
+      '# Codex Repository instructions\n',
+    );
     fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'review'), { recursive: true });
     fs.writeFileSync(
       path.join(repositoryPath, 'common', 'skills', 'review', 'SKILL.md'),
@@ -3007,11 +3049,11 @@ describe('Deploy operations', () => {
       profiles: {
         global: {
           title: 'Global',
-          assets: ['rule:canonical', 'skill:review', 'mcp:docs'],
+          assets: ['instruction:codex', 'skill:review', 'mcp:docs'],
         },
         full: {
           title: 'Full',
-          assets: ['rule:canonical', 'skill:review', 'mcp:docs'],
+          assets: ['instruction:codex', 'skill:review', 'mcp:docs'],
         },
         empty: {
           title: 'Empty',
@@ -3034,7 +3076,8 @@ describe('Deploy operations', () => {
       changeIds: fullPlan.changes.filter((change) => change.defaultSelected).map((change) => change.id),
     });
     expect(fullResult.status).toBe('succeeded');
-    expect(fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8')).toContain('<!-- mcv:begin rule:canonical -->');
+    expect(fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8'))
+      .toContain('<!-- mcv:begin instruction:codex -->');
     expect(fs.existsSync(path.join(projectRoot, '.agents', 'skills', 'review'))).toBe(true);
     expect(JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcp.json'), 'utf8')).mcpServers.docs)
       .toEqual({ command: 'docs-server' });
@@ -3047,7 +3090,8 @@ describe('Deploy operations', () => {
     if ('error' in withoutPrune) throw new Error(withoutPrune.error.message);
     const ordinaryPlan = await createDeployPlan(context, withoutPrune.request);
     expect(ordinaryPlan.changes.some((change) => change.group === 'advanced')).toBe(false);
-    expect(fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8')).toContain('<!-- mcv:begin rule:canonical -->');
+    expect(fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8'))
+      .toContain('<!-- mcv:begin instruction:codex -->');
 
     const withPrune = buildDeployRequest(repositoryPath, {
       profileIds: ['empty'],
@@ -3085,7 +3129,7 @@ describe('Deploy operations', () => {
     const mcp = JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcp.json'), 'utf8'));
     expect(mcp.mcpServers?.docs).toBeUndefined();
     const receipt = JSON.parse(fs.readFileSync(path.join(projectRoot, '.mcv', 'managed.json'), 'utf8'));
-    expect(receipt.managed['AGENTS.md#mcv:rule:canonical']).toBeUndefined();
+    expect(receipt.managed['AGENTS.md#mcv:instruction:codex']).toBeUndefined();
     expect(receipt.managed['.agents/skills/review']).toBeUndefined();
 
     // Drifted owned content is never a deletion candidate.

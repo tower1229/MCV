@@ -4,7 +4,7 @@ import { atomicWriteFile } from '../utils/files.js';
 import { parameterizeConfig } from '../utils/parameterize.js';
 import { deleteObjectPath, parseStructuredObject, splitOwnedFields, stringifyStructuredObject, } from '../utils/structured-config.js';
 import { resolvePortableValue } from '../utils/variables.js';
-import { readCanonicalSource, readDeployTarget, repositoryFileForPlatform } from './adapter-utils.js';
+import { readDeployTarget, repositoryFileForPlatform } from './adapter-utils.js';
 import { CODEX_MANAGED_PATHS } from './overlay-policies.js';
 const LOCAL_PATHS = [
     '$.projects', '$.notify', '$.marketplaces',
@@ -90,9 +90,6 @@ export class CodexNativeFileHandler {
                 files.push(file);
         }
         return { files, write: (file) => atomicWriteFile(file.targetPath, file.content) };
-    }
-    async readCanonical(repositoryPath, context) {
-        return readCanonicalSource(repositoryPath, context);
     }
     readDeployTarget(targetPath) {
         return readDeployTarget(targetPath);

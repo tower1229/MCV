@@ -17,7 +17,7 @@ describe('mcv status', () => {
     stateRoot = path.join(testRoot, 'device');
     fs.mkdirSync(repositoryPath);
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-      'schemaVersion: 4',
+      'schemaVersion: 5',
       'repositoryId: repository-id',
       'initializedAt: 2026-07-19T00:00:00.000Z',
       'targets:',
@@ -123,12 +123,12 @@ describe('mcv status', () => {
     expect(console.log).toHaveBeenCalledOnce();
     const report = JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]));
     expect(report).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'status',
       status: 'reported',
       ready: true,
       repositoryPath,
-      repository: { path: repositoryPath, id: 'repository-id', schemaVersion: 4 },
+      repository: { path: repositoryPath, id: 'repository-id', schemaVersion: 5 },
       pendingDeployment: {
         add: 0,
         modify: 0,
@@ -163,8 +163,11 @@ describe('mcv status', () => {
       manifestPath,
       fs.readFileSync(manifestPath, 'utf8').replace('  codex:\n    enabled: false', '  codex:\n    enabled: true'),
     );
-    fs.mkdirSync(path.join(repositoryPath, 'common'), { recursive: true });
-    fs.writeFileSync(path.join(repositoryPath, 'common', 'AGENTS.md'), `# Rules\n${'detail\n'.repeat(2_000)}`);
+    fs.mkdirSync(path.join(repositoryPath, 'ide', 'codex'), { recursive: true });
+    fs.writeFileSync(
+      path.join(repositoryPath, 'ide', 'codex', 'instructions.md'),
+      `# Rules\n${'detail\n'.repeat(2_000)}`,
+    );
     seedGlobalProfileWithCatalog(repositoryPath);
     writeDeviceState({});
 
@@ -201,7 +204,7 @@ describe('mcv status', () => {
   function writeDeviceState(extra: Record<string, unknown>): void {
     fs.mkdirSync(path.join(stateRoot, 'mcv'), { recursive: true });
     fs.writeFileSync(path.join(stateRoot, 'mcv', 'config.json'), JSON.stringify({
-      schemaVersion: 3,
+      schemaVersion: 4,
       defaultRepositoryId: 'repository-id',
       repositoryPath,
       ...extra,

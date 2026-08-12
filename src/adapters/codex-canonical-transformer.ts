@@ -4,9 +4,10 @@ import { isRecord } from '../utils/objects.js';
 import { stringifyStructuredObject } from '../utils/structured-config.js';
 import { CODEX_MCP_PATH } from './overlay-policies.js';
 import { normalizeMcpServers, toNativeMcpServers } from '../core/mcp.js';
+import { instructionDefinition } from '../core/ide-instructions.js';
 import type {
-  CanonicalDeploySource,
-  CanonicalTransformer,
+  ManagedDeploySource,
+  ManagedTransformer,
   CaptureFile,
   CaptureResult,
   DeployFile,
@@ -14,14 +15,14 @@ import type {
   NativeCaptureResult,
 } from './types.js';
 
-export class CodexCanonicalTransformer implements CanonicalTransformer {
+export class CodexManagedTransformer implements ManagedTransformer {
   transform(capture: NativeCaptureResult, _context: DeviceContext): CaptureResult {
     const files: CaptureFile[] = [...capture.files];
     const instructions = capture.managedFiles.find((file) => file.id === 'user-instructions');
     if (instructions) {
       files.push({
         sourcePath: instructions.sourcePath,
-        repositoryPath: 'common/AGENTS.md',
+        repositoryPath: instructionDefinition('codex').repositoryPath,
         content: instructions.content,
         ownership: 'managed',
       });
@@ -46,14 +47,14 @@ export class CodexCanonicalTransformer implements CanonicalTransformer {
   }
 
   async deploy(
-    source: CanonicalDeploySource,
+    source: ManagedDeploySource,
     context: DeviceContext,
   ): Promise<DeployFile[]> {
     const files: DeployFile[] = [];
-    if (source.rules !== undefined) {
+    if (source.instructions !== undefined) {
       files.push({
-        targetPath: path.join(context.env.CODEX_HOME || path.join(context.homeDir, '.codex'), 'AGENTS.md'),
-        content: source.rules,
+        targetPath: instructionDefinition('codex').globalTargetPath(context),
+        content: source.instructions.content,
       });
     }
     for (const skill of source.skills) {

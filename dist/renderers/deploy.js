@@ -225,8 +225,8 @@ function formatSatisfiedSurfaceList(outcomes) {
     return surfaces.length ? ` (${surfaces.join(', ')})` : '';
 }
 function displayCapability(capability) {
-    if (capability === 'rules')
-        return 'Shared Rules';
+    if (capability === 'instructions')
+        return 'IDE Instructions';
     if (capability === 'skills')
         return 'Skills';
     if (capability === 'mcp')

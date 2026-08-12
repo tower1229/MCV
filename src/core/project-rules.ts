@@ -5,47 +5,66 @@ import {
   hashManagedBlockBody,
   managedBlockDrifted,
   managedReceiptKey,
+  removeManagedBlock,
   upsertManagedBlock,
 } from './managed-block.js';
 import type { ManagedReceipt } from './managed-receipt.js';
 import { assertPathContainedInProjectRoot } from './project-target.js';
 
-export const CANONICAL_RULES_ASSET_ID = 'rule:canonical' as const;
+export const LEGACY_RULES_ASSET_ID = 'rule:canonical' as const;
 
-export type ProjectRulesFileName = 'AGENTS.md' | 'CLAUDE.md' | 'GEMINI.md';
+export type ProjectInstructionsFileName = 'AGENTS.md' | 'CLAUDE.md' | 'GEMINI.md';
 
-export interface ProjectRulesProjection {
+export interface ProjectInstructionsProjection {
   targetPath: string;
-  relativePath: ProjectRulesFileName;
+  relativePath: ProjectInstructionsFileName;
   content: string;
   receiptKey: string;
   bodyHash: string;
   drifted: boolean;
   unchanged: boolean;
+  migratedReceiptKey?: string;
 }
 
-export function projectCanonicalRulesFile(
+export function projectIdeInstructionsFile(
   targetRoot: string,
-  relativePath: ProjectRulesFileName,
-  rulesBody: string,
+  relativePath: ProjectInstructionsFileName,
+  assetId: `instruction:${string}`,
+  instructionsBody: string,
   receipt: ManagedReceipt | undefined,
-): ProjectRulesProjection {
+): ProjectInstructionsProjection {
   const targetPath = path.join(targetRoot, relativePath);
   assertPathContainedInProjectRoot(targetRoot, targetPath);
 
   const existing = fs.existsSync(targetPath)
     ? fs.readFileSync(targetPath, 'utf8')
     : undefined;
-  const content = upsertManagedBlock(existing, CANONICAL_RULES_ASSET_ID, rulesBody);
-  const receiptKey = managedReceiptKey(relativePath, CANONICAL_RULES_ASSET_ID);
-  const bodyHash = hashManagedBlockBody(rulesBody);
+  const legacyReceiptKey = managedReceiptKey(relativePath, LEGACY_RULES_ASSET_ID);
+  const legacyBody = existing === undefined
+    ? undefined
+    : extractManagedBlock(existing, LEGACY_RULES_ASSET_ID);
+  const legacyEntry = receipt?.managed[legacyReceiptKey];
+  const legacyVerified = legacyBody !== undefined
+    && legacyEntry?.assetId === LEGACY_RULES_ASSET_ID
+    && legacyEntry.hash === hashManagedBlockBody(legacyBody);
+  const legacyUnverified = legacyBody !== undefined && !legacyVerified;
+  const base = legacyVerified
+    ? removeManagedBlock(existing as string, LEGACY_RULES_ASSET_ID)
+    : existing;
+  const content = legacyUnverified
+    ? existing as string
+    : upsertManagedBlock(base, assetId, instructionsBody);
+  const receiptKey = managedReceiptKey(relativePath, assetId);
+  const bodyHash = hashManagedBlockBody(instructionsBody);
   const currentBody = existing === undefined
     ? undefined
-    : extractManagedBlock(existing, CANONICAL_RULES_ASSET_ID);
+    : extractManagedBlock(existing, assetId);
   const unchanged = existing !== undefined && existing === content;
 
   let drifted = false;
-  if (currentBody !== undefined && managedBlockDrifted(existing as string, CANONICAL_RULES_ASSET_ID, rulesBody)) {
+  if (legacyUnverified) {
+    drifted = true;
+  } else if (currentBody !== undefined && managedBlockDrifted(existing as string, assetId, instructionsBody)) {
     const recorded = receipt?.managed[receiptKey];
     if (recorded === undefined) {
       // Conservative mode without Receipt ownership: differing local block is Drift.
@@ -64,5 +83,6 @@ export function projectCanonicalRulesFile(
     bodyHash,
     drifted,
     unchanged,
+    ...(legacyVerified ? { migratedReceiptKey: legacyReceiptKey } : {}),
   };
 }

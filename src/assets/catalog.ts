@@ -5,13 +5,14 @@ import * as yaml from 'yaml';
 import { isRecord } from '../utils/objects.js';
 import { hashDirectoryTree } from '../utils/files.js';
 import { formatAssetId, isValidAssetId } from './ids.js';
+import { IDE_INSTRUCTION_DEFINITIONS } from '../core/ide-instructions.js';
 import {
   adapterCapabilityDeclarations,
   DECLARED_NATIVE_UNITS,
   nativeAssetId,
 } from './native-units.js';
 
-export type AssetType = 'rule' | 'skill' | 'mcp' | 'native';
+export type AssetType = 'instruction' | 'skill' | 'mcp' | 'native';
 export type AssetActivation = 'always' | 'on-demand' | 'tool-surface' | 'configuration';
 export type DeployScope = 'project' | 'global';
 export type CatalogTarget = 'codex' | 'claude-code' | 'gemini';
@@ -44,8 +45,7 @@ const MCP_OVERRIDE_PATHS = [
 
 export function deriveAssetCatalog(repositoryPath: string): AssetCatalog {
   const assets: AssetCatalogItem[] = [];
-  const rules = deriveCanonicalRules(repositoryPath);
-  if (rules) assets.push(rules);
+  assets.push(...deriveInstructions(repositoryPath));
   assets.push(...deriveSkills(repositoryPath));
   assets.push(...deriveMcpServers(repositoryPath));
   assets.push(...deriveNativeUnits(repositoryPath));
@@ -75,22 +75,30 @@ export function computeCatalogRevision(assets: readonly AssetCatalogItem[]): str
   return hash.digest('hex');
 }
 
-function deriveCanonicalRules(repositoryPath: string): AssetCatalogItem | undefined {
-  const relativePaths = collectSourcePaths(repositoryPath, ['common/AGENTS.md']);
-  if (relativePaths.length === 0) return undefined;
-  const { contentHash, sizeBytes } = hashRelativePaths(repositoryPath, relativePaths);
-  return {
-    id: formatAssetId({ type: 'rule' }),
-    type: 'rule',
-    displayName: 'Canonical Rules',
-    description: 'Cross-IDE development rules (common/AGENTS.md)',
-    sourcePaths: relativePaths,
-    contentHash,
-    sizeBytes,
-    activation: 'always',
-    supportedScopes: ['project', 'global'],
-    supportedTargets: [...ALL_TARGETS],
-  };
+function deriveInstructions(repositoryPath: string): AssetCatalogItem[] {
+  return IDE_INSTRUCTION_DEFINITIONS.flatMap((definition) => {
+    const relativePaths = collectSourcePaths(repositoryPath, [definition.repositoryPath]);
+    if (relativePaths.length === 0) return [];
+    const { contentHash, sizeBytes } = hashRelativePaths(repositoryPath, relativePaths);
+    return [{
+      id: formatAssetId({ type: 'instruction', target: definition.target }),
+      type: 'instruction' as const,
+      displayName: `${instructionDisplayName(definition.target)} Instructions`,
+      description: `${instructionDisplayName(definition.target)} global and project instructions`,
+      sourcePaths: relativePaths,
+      contentHash,
+      sizeBytes,
+      activation: 'always' as const,
+      supportedScopes: ['project', 'global'] as DeployScope[],
+      supportedTargets: [definition.target],
+    }];
+  });
+}
+
+function instructionDisplayName(target: CatalogTarget): string {
+  if (target === 'codex') return 'Codex';
+  if (target === 'claude-code') return 'Claude Code';
+  return 'Gemini';
 }
 
 function deriveSkills(repositoryPath: string): AssetCatalogItem[] {

@@ -72,19 +72,19 @@ describe('CodexAdapter', () => {
       },
     });
     expect(result.files).toContainEqual(expect.objectContaining({
-      repositoryPath: 'common/AGENTS.md',
+      repositoryPath: 'ide/codex/instructions.md',
       content: '# Rules\n',
     }));
   });
 
-  it('projects Canonical Rules as a Managed Block for project scope', async () => {
+  it('projects IDE Instructions as a Managed Block for project scope', async () => {
     const projectRoot = path.join(homeDir, 'project');
     fs.mkdirSync(projectRoot, { recursive: true });
     fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), '# Local intro\n');
     const adapter = new CodexAdapter();
     const context = { homeDir, platform: 'darwin' as const, env: {} };
     const view: SelectedRepositoryView = {
-      rules: { id: 'rule:canonical', content: '# Rules\n' },
+      instructions: { codex: { id: 'instruction:codex', content: '# Rules\n' } },
       skills: [],
       mcpServers: {},
       mcpOverrides: {},
@@ -106,6 +106,7 @@ describe('CodexAdapter', () => {
     const adapter = new CodexAdapter();
     const context = { homeDir, platform: 'darwin' as const, env: {} };
     const view: SelectedRepositoryView = {
+      instructions: {},
       skills: [],
       mcpServers: {},
       mcpOverrides: {},
@@ -120,7 +121,7 @@ describe('CodexAdapter', () => {
 });
 
 function emptyView(): SelectedRepositoryView {
-  return { skills: [], mcpServers: {}, mcpOverrides: {}, nativeAssets: new Map() };
+  return { instructions: {}, skills: [], mcpServers: {}, mcpOverrides: {}, nativeAssets: new Map() };
 }
 
 function projectRequest(): DeployRequest {

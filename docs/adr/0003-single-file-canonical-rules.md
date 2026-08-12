@@ -1,5 +1,7 @@
 # Single-file Canonical rules named AGENTS.md
 
+Status: Superseded by ADR 0017
+
 Canonical rules are stored as a single Markdown file at `common/AGENTS.md` in the Repository. The CanonicalTransformer renames and places this file as needed for each IDE (e.g. copies as-is for IDEs that support `AGENTS.md`, transforms to `CLAUDE.md` for Claude Code). The current contract does not need multi-file concatenation logic. The name `AGENTS.md` was chosen because it is already the mainstream convention across multiple AI IDEs, minimizing cognitive overhead.
 
 ## Considered Options

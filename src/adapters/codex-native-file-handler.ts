@@ -9,10 +9,9 @@ import {
   stringifyStructuredObject,
 } from '../utils/structured-config.js';
 import { resolvePortableValue } from '../utils/variables.js';
-import { readCanonicalSource, readDeployTarget, repositoryFileForPlatform } from './adapter-utils.js';
+import { readDeployTarget, repositoryFileForPlatform } from './adapter-utils.js';
 import { CODEX_MANAGED_PATHS } from './overlay-policies.js';
 import type {
-  CanonicalDeploySource,
   DetectedConfigDirectory,
   DetectedConfigFile,
   DeployFile,
@@ -119,13 +118,6 @@ export class CodexNativeFileHandler implements NativeFileHandler {
       if (file) files.push(file);
     }
     return { files, write: (file) => atomicWriteFile(file.targetPath, file.content) };
-  }
-
-  async readCanonical(
-    repositoryPath: string,
-    context: DeviceContext,
-  ): Promise<CanonicalDeploySource> {
-    return readCanonicalSource(repositoryPath, context);
   }
 
   readDeployTarget(targetPath: string): DeployFile | undefined {

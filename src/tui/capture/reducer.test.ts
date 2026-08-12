@@ -41,7 +41,7 @@ describe('Capture TUI reducer', () => {
 
 function plan(operationId = 'operation-1'): CapturePlan {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     operation: 'capture',
     status: 'planned',
     readyToApply: false,
@@ -52,7 +52,7 @@ function plan(operationId = 'operation-1'): CapturePlan {
       {
         id: 'add', ide: 'shared', surface: 'shared', itemType: 'file', capability: 'native',
         name: 'rules', change: 'add', defaultSelected: true,
-        repositoryPaths: ['common/AGENTS.md'], previews: [],
+        repositoryPaths: ['ide/codex/instructions.md'], previews: [],
       },
       {
         id: 'choice', ide: 'shared', surface: 'shared', itemType: 'mcp', capability: 'mcp',

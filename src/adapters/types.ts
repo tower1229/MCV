@@ -39,24 +39,20 @@ export interface NativeFileHandler {
     files: DetectedConfigFile[],
     context: DeviceContext,
   ): Promise<NativeCaptureResult>;
-  readCanonical(
-    repositoryPath: string,
-    context: DeviceContext,
-  ): Promise<CanonicalDeploySource>;
   readDeployTarget(targetPath: string): DeployFile | undefined;
   deploy(repositoryPath: string, context: DeviceContext): Promise<DeployOperation>;
 }
 
-export interface CanonicalTransformer {
+export interface ManagedTransformer {
   transform(
     capture: NativeCaptureResult,
     context: DeviceContext,
   ): CaptureResult;
-  deploy(source: CanonicalDeploySource, context: DeviceContext): Promise<DeployFile[]>;
+  deploy(source: ManagedDeploySource, context: DeviceContext): Promise<DeployFile[]>;
 }
 
-export interface CanonicalDeploySource {
-  rules?: string;
+export interface ManagedDeploySource {
+  instructions?: { id: `instruction:${IdeId}`; content: string };
   skills: Array<{ relativePath: string; content: Buffer }>;
   mcp?: unknown;
   mcpOverrides?: Record<string, Record<string, unknown>>;
@@ -73,7 +69,7 @@ export interface IdeAdapter {
   /**
    * Project selected Canonical/Native content for a DeployRequest.
    * Profile semantics never enter Adapters — only the selected view and request.
-   * Project scope projects Canonical Rules as Managed Blocks here; Skills and MCP
+   * Project scope projects IDE Instructions as Managed Blocks here; Skills and MCP
    * key-level writers are planned in Deploy operations.
    */
   project(
@@ -126,7 +122,7 @@ export interface CapturedManagedFile {
   content: string;
 }
 
-export type ConfigurationCapability = 'rules' | 'skills' | 'mcp' | 'native';
+export type ConfigurationCapability = 'instructions' | 'skills' | 'mcp' | 'native';
 export type ConfigurationOwnership = 'generated' | 'native' | 'merged' | 'local';
 export type ChangeKind = 'add' | 'modify' | 'delete' | 'conflict' | 'skip';
 

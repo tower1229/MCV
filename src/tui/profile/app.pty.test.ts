@@ -131,7 +131,7 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged Profile TUI in a real PTY'
   function writeBinding(repositoryPath: string, repositoryId: string): void {
     fs.mkdirSync(path.dirname(statePath()), { recursive: true });
     fs.writeFileSync(statePath(), `${JSON.stringify({
-      schemaVersion: 3,
+      schemaVersion: 4,
       repositoryPath,
       defaultRepositoryId: repositoryId,
     }, null, 2)}\n`);
@@ -178,7 +178,7 @@ function createRepository(testRoot: string, repositoryId: string): string {
   const repositoryPath = path.join(testRoot, 'repository');
   fs.mkdirSync(path.join(repositoryPath, 'common', 'skills', 'debug'), { recursive: true });
   fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
-    'schemaVersion: 4',
+    'schemaVersion: 5',
     `repositoryId: ${repositoryId}`,
     'initializedAt: 2026-07-19T00:00:00.000Z',
     'targets:',
@@ -211,7 +211,7 @@ function createRepository(testRoot: string, repositoryId: string): string {
   writeProfilesDocument(repositoryPath, {
     schemaVersion: 1,
     profiles: {
-      global: { title: 'Global', assets: ['rule:canonical'] },
+      global: { title: 'Global', assets: ['instruction:codex'] },
       dev: { title: 'Dev', assets: ['skill:debug'] },
     },
   });

@@ -3,7 +3,7 @@ export const READ_ASSETS_MAX_RESPONSE_BYTES = 64 * 1024;
 export const READ_ASSETS_MAX_CURSOR_BYTES = 8 * 1024;
 export const AssetSummarySchema = z.object({
     id: z.string(),
-    type: z.enum(['rule', 'skill', 'mcp', 'native']),
+    type: z.enum(['instruction', 'skill', 'mcp', 'native']),
     displayName: z.string(),
     description: z.string().optional(),
     sizeBytes: z.number().int().nonnegative(),
@@ -39,7 +39,7 @@ export const AssetFileContentSchema = z.object({
 });
 export const AssetContentSchema = z.object({
     id: z.string(),
-    type: z.enum(['rule', 'skill', 'mcp', 'native']),
+    type: z.enum(['instruction', 'skill', 'mcp', 'native']),
     files: z.array(AssetFileContentSchema),
 });
 export const ReadAssetsOutputSchema = z.object({

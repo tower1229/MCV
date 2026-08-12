@@ -36,21 +36,21 @@ describe('mcv init', () => {
 
     expect(console.log).toHaveBeenCalledOnce();
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'init',
       status: 'succeeded',
       repositoryPath,
       changes: [],
       issues: [],
       nextActions: [],
-      data: { repositoryId: expect.any(String), repositorySchemaVersion: 4 },
+      data: { repositoryId: expect.any(String), repositorySchemaVersion: 5 },
     });
 
     const manifest = parseYaml(
       fs.readFileSync(path.join(repositoryPath, 'mcv.yaml'), 'utf8'),
     );
     expect(manifest).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 5,
       repositoryId: expect.any(String),
       initializedAt: expect.any(String),
       targets: {
@@ -99,7 +99,7 @@ describe('mcv init', () => {
 
     expect(console.log).toHaveBeenCalledOnce();
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'init',
       status: 'planned',
       readyToApply: true,

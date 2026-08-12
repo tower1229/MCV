@@ -13,14 +13,14 @@ describe('buildSelectedRepositoryView', () => {
     for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('includes only selected Rules, Skills, MCP servers with overrides, and Native assets', () => {
+  it('includes only selected Instructions, Skills, MCP servers with overrides, and Native assets', () => {
     const repositoryPath = createRepository();
     writeProfilesDocument(repositoryPath, {
       schemaVersion: 1,
       profiles: {
         global: {
           assets: [
-            'rule:canonical',
+            'instruction:codex',
             'skill:keep',
             'skill:drop',
             'mcp:context7',
@@ -38,7 +38,7 @@ describe('buildSelectedRepositoryView', () => {
     if (resolved.status !== 'resolved') return;
 
     const view = buildSelectedRepositoryView(repositoryPath, resolved.selection, deviceContext());
-    expect(view.rules).toBeUndefined();
+    expect(view.instructions).toEqual({});
     expect(view.skills.map((skill) => skill.id)).toEqual(['skill:keep']);
     expect(view.skills[0]?.files.map((file) => file.relativePath)).toEqual(['SKILL.md']);
     expect(Object.keys(view.mcpServers).sort()).toEqual(['context7']);
@@ -54,7 +54,7 @@ describe('buildSelectedRepositoryView', () => {
     fs.mkdirSync(path.join(root, 'common', 'skills', 'keep'), { recursive: true });
     fs.mkdirSync(path.join(root, 'common', 'skills', 'drop'), { recursive: true });
     fs.mkdirSync(path.join(root, 'ide', 'codex', 'native'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'common', 'AGENTS.md'), '# rules\n');
+    fs.writeFileSync(path.join(root, 'ide', 'codex', 'instructions.md'), '# instructions\n');
     fs.writeFileSync(path.join(root, 'common', 'skills', 'keep', 'SKILL.md'), '---\nname: keep\n---\n');
     fs.writeFileSync(path.join(root, 'common', 'skills', 'drop', 'SKILL.md'), '---\nname: drop\n---\n');
     fs.writeFileSync(

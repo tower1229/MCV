@@ -78,7 +78,7 @@ export const DECLARED_NATIVE_UNITS: readonly DeclaredNativeUnit[] = [
 
 export interface AdapterCapabilityDeclaration {
   target: IdeId;
-  capabilities: readonly ('rules' | 'skills' | 'mcp' | 'native')[];
+  capabilities: readonly ('instructions' | 'skills' | 'mcp' | 'native')[];
   nativeFileIds: readonly string[];
 }
 
@@ -91,7 +91,7 @@ export function adapterCapabilityDeclarations(): AdapterCapabilityDeclaration[] 
   }
   return (['codex', 'claude-code', 'gemini'] as const).map((target) => ({
     target,
-    capabilities: ['rules', 'skills', 'mcp', 'native'] as const,
+    capabilities: ['instructions', 'skills', 'mcp', 'native'] as const,
     nativeFileIds: (byTarget.get(target) ?? []).slice().sort((a, b) => a.localeCompare(b)),
   }));
 }

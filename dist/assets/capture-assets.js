@@ -1,8 +1,10 @@
 import { formatAssetId } from './ids.js';
 import { DECLARED_NATIVE_UNITS, nativeAssetId } from './native-units.js';
+import { instructionDefinition } from '../core/ide-instructions.js';
 export function assetIdForCaptureChange(change) {
-    if (change.capability === 'rules')
-        return formatAssetId({ type: 'rule' });
+    if (change.capability === 'instructions' && change.ide !== 'shared') {
+        return instructionDefinition(change.ide).assetId;
+    }
     if (change.itemType === 'skill') {
         return formatAssetId({ type: 'skill', name: change.name });
     }

@@ -139,7 +139,7 @@ describe('mcv restore', () => {
 
     expect(console.log).toHaveBeenCalledOnce();
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'restore',
       status: 'planned',
       readyToApply: true,
@@ -164,7 +164,7 @@ describe('mcv restore', () => {
 
     expect(console.log).toHaveBeenCalledOnce();
     expect(JSON.parse(String(vi.mocked(console.log).mock.calls[0]?.[0]))).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       operation: 'restore',
       status: 'succeeded',
       changes: [{

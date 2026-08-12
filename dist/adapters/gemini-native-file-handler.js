@@ -5,7 +5,7 @@ import { parameterizeConfig } from '../utils/parameterize.js';
 import { deleteObjectPath, parseJsonc, parseStructuredObject, splitOwnedFields, stringifyStructuredObject } from '../utils/structured-config.js';
 import { resolvePortableValue } from '../utils/variables.js';
 import { mergeRecords } from '../utils/objects.js';
-import { readCanonicalSource, readDeployTarget, repositoryFileForPlatform } from './adapter-utils.js';
+import { readDeployTarget, repositoryFileForPlatform } from './adapter-utils.js';
 import { GEMINI_MANAGED_PATHS } from './overlay-policies.js';
 const LOCAL_KEYS = new Set([
     '$.installationId', '$.installation_id', '$.recentProjects', '$.windowState', '$.telemetry',
@@ -115,7 +115,6 @@ export class GeminiNativeFileHandler {
         }
         return { files: deployed, write: (file) => atomicWriteFile(file.targetPath, file.content) };
     }
-    async readCanonical(repositoryPath, context) { return readCanonicalSource(repositoryPath, context); }
     readDeployTarget(targetPath) { return readDeployTarget(targetPath); }
     hasAnyKnownFile(context) {
         const root = path.join(context.homeDir, '.gemini');

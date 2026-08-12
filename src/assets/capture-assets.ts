@@ -2,8 +2,10 @@ import type { ConfigurationCapability } from '../adapters/types.js';
 import type { ProfilesDocument } from '../profiles/contracts.js';
 import { formatAssetId } from './ids.js';
 import { DECLARED_NATIVE_UNITS, nativeAssetId } from './native-units.js';
+import { instructionDefinition } from '../core/ide-instructions.js';
 
 export interface CaptureAssetRef {
+  ide: 'shared' | 'codex' | 'claude-code' | 'gemini';
   capability: ConfigurationCapability;
   itemType: 'file' | 'skill' | 'mcp';
   name: string;
@@ -12,7 +14,9 @@ export interface CaptureAssetRef {
 }
 
 export function assetIdForCaptureChange(change: CaptureAssetRef): string | undefined {
-  if (change.capability === 'rules') return formatAssetId({ type: 'rule' });
+  if (change.capability === 'instructions' && change.ide !== 'shared') {
+    return instructionDefinition(change.ide).assetId;
+  }
   if (change.itemType === 'skill') {
     return formatAssetId({ type: 'skill', name: change.name });
   }

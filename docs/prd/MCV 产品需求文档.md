@@ -7,7 +7,7 @@
 **项目属性：** 数字主权生态基础设施
 **目标平台：** macOS、Windows
 **首期目标 IDE：** Codex、Claude Code、Gemini (涵盖 Gemini CLI 和 Antigravity)
-**实现状态（2026-08-10）：** Repository schema v4、Profiles schema v1、operation schema v3、device state v3、Managed Receipt v1；项目为默认 Deploy scope；内置 global Profile；专用 Profile TUI、分级 Capture Review 与本地 MCP Profile 工具；配置数据中立；事务部署与 Overlay 保留；复杂人类可读详情使用短期本地 Review Artifact，并由 `--verbose` 显式输出完整终端详情。0.3 详细设计见 `docs/prd/MCV-v0.3-Profile-Deploy-Technical-Design.md` 与 ADR 0011–0015；当前界面契约见 `docs/prd/TUI-Spec.md`。
+**实现状态（2026-08-11）：** Repository schema v5、Profiles schema v1、operation schema v4、device state v3、Managed Receipt v1；Codex、Claude Code 与 Gemini 使用独立 IDE Instructions Asset；项目为默认 Deploy scope；内置 global Profile；专用 Profile TUI、分级 Capture Review 与本地 MCP Profile 工具；配置数据中立；事务部署与 Overlay 保留；复杂人类可读详情使用短期本地 Review Artifact，并由 `--verbose` 显式输出完整终端详情。0.3 Profile 设计见 `docs/prd/MCV-v0.3-Profile-Deploy-Technical-Design.md`；Instructions 当前决策见 ADR 0017；当前界面契约见 `docs/prd/TUI-Spec.md`。
 
 ---
 
@@ -678,7 +678,9 @@ Repository schema v3 删除 `security` 字段。v2→v3 只升级版本并删除
 
 Repository schema v4 将 Profile 数据移出 `mcv.yaml`，写入根级 `profiles.yaml`（Profiles schema v1），并在迁移时创建内置 `global` Profile。device state 升级到 v3；项目 Deploy 写入 Managed Receipt v1（`<target>/.mcv/managed.json`）。
 
-Operation schema：Deploy 使用 v3；消费 JSON 的脚本必须读取 `schemaVersion` 并拒绝未知版本。v2 起的附加契约仍适用：
+Repository schema v5 将全局指令拆分为 `instruction:codex`、`instruction:claude-code` 与 `instruction:gemini`，分别存储于 `ide/<target>/instructions.md`。v4→v5 将旧 `common/AGENTS.md` 及平台 override 原样复制为三份，原子扩展引用旧 Asset 的 Profile，并在验证后删除旧路径。v5 不读取旧路径，也不提供公共 Instructions 的拼合、继承或 fallback。
+
+Operation schema：当前 JSON operation 使用 v4；消费 JSON 的脚本必须读取 `schemaVersion` 并拒绝未知版本。v2 起的附加契约仍适用：
 
 - Capture summary 不再包含敏感字段计数；Status JSON 不包含 `changes`。
 - 每个 warning 使用唯一稳定的 `confirmationId`，`code` 只表示类别；selection 使用 `confirmedIssueIds`。
@@ -899,7 +901,7 @@ Init Plan 只创建并绑定一个有效的空 Repository。无论是否为 TTY�
 
 - Repository 绝对路径；
 - 将创建的 `mcv.yaml` 与 `profiles.yaml`；
-- Repository schema v4 与 Profiles schema v1；
+- Repository schema v5 与 Profiles schema v1；
 - 当前设备绑定变化；
 - 会阻止 Apply 的路径、权限、现有 Repository 或绑定问题；
 - 成功后显式运行 `mcv discover` 与 `mcv capture` 的 next actions。
@@ -1638,7 +1640,7 @@ MCV 默认遵循：
 `0.3.0-beta.1` 之后的路线尚未承诺版本。先用 beta 验证 Profile Deploy、项目 Managed Receipt、Agent MCP 写入和双平台终端行为，再从以下候选主题中选择一个主目标：
 
 - 可靠性与可诊断性：`doctor`/support bundle、兼容性证据、恢复演练和更清晰的错误行动建议；
-- 配置组织深化：Profile 继承/条件、多文件 Canonical Rules、项目本地资产反向 Capture（须先定义作用域）；
+- 配置组织深化：Profile 继承/条件、IDE Instructions 的显式组合模型、项目本地资产反向 Capture（须先定义作用域）；
 - 支持面扩展：新的 IDE、Surface 或开发工具，必须以实际配置所有权与 loader evidence 为准（含 Antigravity 项目级 loader）；
 - 分发体验：独立二进制、安装升级与发布通道；
 - 外部安全集成：用户自选的加密、访问控制或 Secret Provider，不改变 MCV 的配置数据中立边界。
@@ -1651,13 +1653,13 @@ MCV 默认遵循：
 
 MCV `0.3.0-beta.1` 达到预发布状态，需要满足 0.2 闭环之上的 0.3 条件（详见技术方案 §20），其中包括：
 
-1. 用户可以在自选目录成功初始化 schema v4 数据仓库与内置 global Profile。
+1. 用户可以在自选目录成功初始化 schema v5 数据仓库与内置 global Profile。
 2. 初始化后可以在任意目录调用 MCV。
 3. MCV 始终只操作已绑定仓库，除非用户显式指定其他路径。
 4. 新设备可以绑定克隆后的同一仓库。
 5. 至少三个目标 IDE (Codex, Claude Code, Gemini) 都能被正确检测。
 6. 每个目标 IDE 至少支持原生配置收集和恢复。
-7. 支持的通用规则、Skills 和 MCP 可以跨 IDE 部署；项目 scope 为默认，`--global` 保留设备全局事务安全。
+7. 三个 IDE Instructions 分别部署到对应 IDE；Skills 和 MCP 可以跨 IDE 部署；项目 scope 为默认，`--global` 保留设备全局事务安全。
 8. Capture 不会未经确认修改仓库；新 Asset 默认进入 Unassigned。
 9. 部署不会未经确认覆盖本机配置；裸 `mcv deploy` 以 exit 2 拒绝无目标写入。
 10. 所有覆盖操作都有可恢复备份；项目清理只作用于 Managed Receipt 且未漂移的内容。

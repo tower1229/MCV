@@ -28,7 +28,7 @@ describe('ProfileService', () => {
       schemaVersion: 1,
       profiles: {
         zen: { title: 'Z', assets: ['skill:b', 'skill:a', 'skill:a'] },
-        global: { title: 'Global', assets: ['rule:canonical', 'mcp:context7'] },
+        global: { title: 'Global', assets: ['instruction:codex', 'mcp:context7'] },
         alpha: { description: 'A', assets: ['skill:a'] },
       },
     });
@@ -40,7 +40,7 @@ describe('ProfileService', () => {
       profiles: {
         global: {
           title: 'Global',
-          assets: ['mcp:context7', 'rule:canonical'],
+          assets: ['instruction:codex', 'mcp:context7'],
         },
         alpha: {
           description: 'A',
@@ -60,7 +60,7 @@ describe('ProfileService', () => {
   it('rejects deleting global and only removes the Profile set definition', () => {
     const repositoryPath = createRepositoryWithAssets();
     seedProfiles(repositoryPath, {
-      global: { assets: ['rule:canonical'] },
+      global: { assets: ['instruction:codex'] },
       dev: { assets: ['skill:a'] },
     });
     const service = createProfileService(repositoryPath);
@@ -76,7 +76,7 @@ describe('ProfileService', () => {
       error: { code: 'profile.globalRequired' },
     });
     expect(yaml.parse(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8')).profiles.global)
-      .toEqual({ assets: ['rule:canonical'] });
+      .toEqual({ assets: ['instruction:codex'] });
 
     const deleted = service.delete({
       id: 'dev',
@@ -95,7 +95,7 @@ describe('ProfileService', () => {
   it('creates, updates, and unions Profiles with Asset dedup while validating revisions', () => {
     const repositoryPath = createRepositoryWithAssets();
     seedProfiles(repositoryPath, {
-      global: { assets: ['rule:canonical'] },
+      global: { assets: ['instruction:codex'] },
     });
     const service = createProfileService(repositoryPath);
     let inventory = service.inspect();
@@ -144,8 +144,8 @@ describe('ProfileService', () => {
 
     inventory = service.inspect();
     expect(inventory.profiles.global.assets).toEqual([
+      'instruction:codex',
       'mcp:context7',
-      'rule:canonical',
       'skill:a',
     ]);
     expect(inventory.profiles.dev.assets).toEqual(['skill:a', 'skill:b']);
@@ -155,7 +155,7 @@ describe('ProfileService', () => {
       expectedProfilesRevision: inventory.profilesRevision,
       expectedCatalogRevision: inventory.catalogRevision,
       profiles: {
-        global: { assets: ['rule:canonical'] },
+        global: { assets: ['instruction:codex'] },
         design: { assets: ['skill:b'] },
       },
     });
@@ -166,14 +166,14 @@ describe('ProfileService', () => {
       deleted: ['dev'],
     });
     expect(service.inspect().profiles).toEqual({
-      global: { assets: ['rule:canonical'] },
+      global: { assets: ['instruction:codex'] },
       design: { assets: ['skill:b'] },
     });
   });
 
   it('fails without writing while another process owns the Repository mutation lock', () => {
     const repositoryPath = createRepositoryWithAssets();
-    seedProfiles(repositoryPath, { global: { assets: ['rule:canonical'] } });
+    seedProfiles(repositoryPath, { global: { assets: ['instruction:codex'] } });
     const before = fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'));
     const service = createProfileService(repositoryPath);
     const inventory = service.inspect();
@@ -226,7 +226,7 @@ describe('ProfileService', () => {
   it('applies an atomic upsert/delete mutation batch and refuses deleting global', () => {
     const repositoryPath = createRepositoryWithAssets();
     seedProfiles(repositoryPath, {
-      global: { assets: ['rule:canonical'] },
+      global: { assets: ['instruction:codex'] },
       old: { assets: ['skill:a'] },
     });
     const service = createProfileService(repositoryPath);
@@ -254,7 +254,7 @@ describe('ProfileService', () => {
           operation: 'upsert',
           id: 'global',
           description: 'Stable',
-          assets: ['rule:canonical', 'mcp:context7'],
+          assets: ['instruction:codex', 'mcp:context7'],
         },
         { operation: 'upsert', id: 'dev', assets: ['skill:b'] },
         { operation: 'delete', id: 'old' },
@@ -277,11 +277,11 @@ describe('ProfileService', () => {
 
   it('Profiles Revision is the SHA-256 of normalized profiles.yaml content', () => {
     const document = emptyProfilesDocument();
-    document.profiles.global = { title: 'Global', assets: ['rule:canonical'] };
+    document.profiles.global = { title: 'Global', assets: ['instruction:codex'] };
     const revision = computeProfilesRevision(document);
     expect(revision).toMatch(/^[a-f0-9]{64}$/);
     expect(computeProfilesRevision(document)).toBe(revision);
-    document.profiles.global.assets = ['rule:canonical', 'mcp:context7'];
+    document.profiles.global.assets = ['instruction:codex', 'mcp:context7'];
     expect(computeProfilesRevision(document)).not.toBe(revision);
   });
 
@@ -290,7 +290,8 @@ describe('ProfileService', () => {
     roots.push(root);
     fs.mkdirSync(path.join(root, 'common', 'skills', 'a'), { recursive: true });
     fs.mkdirSync(path.join(root, 'common', 'skills', 'b'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'common', 'AGENTS.md'), '# rules\n');
+    fs.mkdirSync(path.join(root, 'ide', 'codex'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'ide', 'codex', 'instructions.md'), '# instructions\n');
     fs.writeFileSync(
       path.join(root, 'common', 'skills', 'a', 'SKILL.md'),
       '---\nname: a\n---\n',

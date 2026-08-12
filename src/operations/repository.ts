@@ -16,10 +16,12 @@ import {
 } from '../utils/repository.js';
 import {
   emptyProfilesDocument,
+  readProfilesDocument,
   writeProfilesDocument,
 } from '../profiles/store.js';
 import { GLOBAL_PROFILE_ID } from '../profiles/contracts.js';
 import { deriveAssetCatalog } from '../assets/catalog.js';
+import { IDE_INSTRUCTION_DEFINITIONS } from '../core/ide-instructions.js';
 import {
   CURRENT_DEVICE_STATE_SCHEMA_VERSION,
   getStateFilePath,
@@ -113,7 +115,7 @@ export type InitResult = Result<InitData, never> & {
 
 export interface MigrationChange {
   id: string;
-  kind: 'backup' | 'modify' | 'move' | 'add' | 'scan';
+  kind: 'backup' | 'modify' | 'move' | 'copy' | 'delete' | 'add' | 'scan';
   path?: string;
   sourcePath?: string;
   targetPath?: string;
@@ -126,7 +128,7 @@ export type MigrationPlan = Plan<MigrationChange> & { operation: 'migrate' };
 
 export interface MigrationData {
   repositoryId: string;
-  previousSchemaVersion: 1 | 2 | 3;
+  previousSchemaVersion: 1 | 2 | 3 | 4;
   repositorySchemaVersion: typeof CURRENT_SCHEMA_VERSION;
   backupPath: string;
   backupVerified: true;
@@ -517,7 +519,25 @@ export function createMigrationPlan(
     });
   }
 
-  const catalogAssetIds = deriveAssetCatalog(resolvedPath).assets.map((asset) => asset.id);
+  for (const mapping of legacyInstructionMappings(resolvedPath)) {
+    if (fs.existsSync(mapping.sourcePath) && fs.existsSync(mapping.targetPath)) {
+      return failed({
+        code: 'repository.migrationTargetExists',
+        message: `Migration target already exists: ${mapping.targetPath}`,
+        nextActions: ['Move or remove the conflicting target, then generate a new Migration Plan.'],
+      });
+    }
+  }
+
+  const instructionMappings = legacyInstructionMappings(resolvedPath)
+    .filter((mapping) => fs.existsSync(mapping.sourcePath));
+  const migratedInstructionIds = instructionMappings.length === 0
+    ? []
+    : IDE_INSTRUCTION_DEFINITIONS.map((definition) => definition.assetId);
+  const catalogAssetIds = [...new Set([
+    ...deriveAssetCatalog(resolvedPath).assets.map((asset) => asset.id),
+    ...migratedInstructionIds,
+  ])].sort();
   const deviceState = readState(context);
   const changes: MigrationChange[] = [{
     id: 'repository-backup',
@@ -546,9 +566,24 @@ export function createMigrationPlan(
       changes.push({ id: 'mcp-registry', kind: 'modify', path: registryPath });
     }
   }
+  for (const mapping of instructionMappings) {
+    changes.push({
+      id: mapping.id,
+      kind: 'copy',
+      sourcePath: mapping.sourcePath,
+      targetPath: mapping.targetPath,
+    });
+  }
+  for (const sourcePath of [...new Set(instructionMappings.map((mapping) => mapping.sourcePath))]) {
+    changes.push({
+      id: `delete-${createHash('sha256').update(sourcePath).digest('hex').slice(0, 12)}`,
+      kind: 'delete',
+      path: sourcePath,
+    });
+  }
   changes.push({
     id: 'repository-profiles',
-    kind: 'add',
+    kind: raw.schemaVersion === 4 ? 'modify' : 'add',
     path: path.join(resolvedPath, 'profiles.yaml'),
     assetIds: catalogAssetIds,
   });
@@ -636,17 +671,37 @@ export function applyMigrationPlan(
         if (content === undefined) throw new Error('The MCP registry can no longer be normalized.');
         atomicWriteTextFile(change.path, content);
       }
+      if (change.kind === 'copy' && change.sourcePath && change.targetPath) {
+        if (fs.existsSync(change.targetPath)) {
+          throw new Error(`Migration target already exists: ${change.targetPath}`);
+        }
+        fs.mkdirSync(path.dirname(change.targetPath), { recursive: true });
+        fs.copyFileSync(change.sourcePath, change.targetPath, fs.constants.COPYFILE_EXCL);
+        if (!fs.readFileSync(change.targetPath).equals(fs.readFileSync(change.sourcePath))) {
+          throw new Error(`Migration copy verification failed: ${change.targetPath}`);
+        }
+      }
     }
     const layoutChanged = plan.changes.some(
-      (change) => change.kind === 'move' || change.id === 'mcp-registry',
+      (change) => change.kind === 'move' || change.kind === 'copy' || change.id === 'mcp-registry',
     );
     const plannedAssetIds = plan.changes.find((change) => change.id === 'repository-profiles')?.assetIds;
     const catalogAssetIds = layoutChanged || plannedAssetIds === undefined
       ? deriveAssetCatalog(repositoryPath).assets.map((asset) => asset.id)
       : plannedAssetIds;
-    const profilesDocument = emptyProfilesDocument();
-    profilesDocument.profiles[GLOBAL_PROFILE_ID] = { assets: catalogAssetIds };
+    const profilesDocument = sourceSchemaVersion === 4
+      ? migrateLegacyInstructionProfiles(readProfilesDocument(repositoryPath))
+      : emptyProfilesDocument();
+    if (sourceSchemaVersion !== 4) {
+      profilesDocument.profiles[GLOBAL_PROFILE_ID] = { assets: catalogAssetIds };
+    }
     writeProfilesDocument(repositoryPath, profilesDocument);
+    readProfilesDocument(repositoryPath);
+    for (const change of plan.changes) {
+      if (change.kind === 'delete' && change.path && fs.existsSync(change.path)) {
+        fs.unlinkSync(change.path);
+      }
+    }
     atomicWriteTextFile(manifestPath, yaml.stringify(migrated));
     if (plan.changes.some((change) => change.id === 'device-state')) {
       const nextState: McvState = {
@@ -1180,6 +1235,9 @@ function createEmptyManifest(repositoryId: string, initializedAt: string): McvMa
 }
 
 function migrateManifestToCurrent(raw: Record<string, unknown>): McvManifest {
+  if (raw.schemaVersion === 4) {
+    return { ...raw, schemaVersion: CURRENT_SCHEMA_VERSION } as unknown as McvManifest;
+  }
   if (raw.schemaVersion === 3) {
     return { ...raw, schemaVersion: CURRENT_SCHEMA_VERSION } as unknown as McvManifest;
   }
@@ -1224,8 +1282,42 @@ function migrateManifestToCurrent(raw: Record<string, unknown>): McvManifest {
   return migrated;
 }
 
-function isMigratableSchema(schemaVersion: unknown): schemaVersion is 1 | 2 | 3 {
-  return schemaVersion === 1 || schemaVersion === 2 || schemaVersion === 3;
+function isMigratableSchema(schemaVersion: unknown): schemaVersion is 1 | 2 | 3 | 4 {
+  return schemaVersion === 1 || schemaVersion === 2 || schemaVersion === 3 || schemaVersion === 4;
+}
+
+function legacyInstructionMappings(repositoryPath: string): Array<{
+  id: string;
+  sourcePath: string;
+  targetPath: string;
+}> {
+  const layouts = [
+    { prefix: '', source: 'common/AGENTS.md' },
+    { prefix: 'macos-', source: 'overrides/macos/common/AGENTS.md' },
+    { prefix: 'windows-', source: 'overrides/windows/common/AGENTS.md' },
+  ];
+  return layouts.flatMap((layout) => IDE_INSTRUCTION_DEFINITIONS.map((definition) => ({
+    id: `instructions-${layout.prefix}${definition.target}`,
+    sourcePath: path.join(repositoryPath, ...layout.source.split('/')),
+    targetPath: path.join(
+      repositoryPath,
+      ...(layout.prefix
+        ? `overrides/${layout.prefix.slice(0, -1)}/${definition.repositoryPath}`
+        : definition.repositoryPath).split('/'),
+    ),
+  })));
+}
+
+function migrateLegacyInstructionProfiles(
+  document: ReturnType<typeof readProfilesDocument>,
+): ReturnType<typeof readProfilesDocument> {
+  const instructionIds = IDE_INSTRUCTION_DEFINITIONS.map((definition) => definition.assetId);
+  for (const profile of Object.values(document.profiles)) {
+    if (!profile.assets.includes('rule:canonical')) continue;
+    profile.assets = [...new Set(profile.assets.flatMap((assetId) =>
+      assetId === 'rule:canonical' ? instructionIds : [assetId]))].sort();
+  }
+  return document;
 }
 
 function geminiLayoutMappings(repositoryPath: string): Array<{
