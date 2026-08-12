@@ -1,6 +1,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { pathToFileURL } from 'node:url';
 import { assertPlainTextSafe, renderPresentationBlocks, renderPresentationDocument, UnsafePresentationContentError, } from './render.js';
 import { resolveOutputCapability, stylePresentationText } from './theme.js';
 import { status } from './builders.js';
@@ -219,7 +220,7 @@ function printReviewPath(reviewPath) {
     printText(renderPresentationBlocks([{
             kind: 'fact',
             label: 'Review',
-            value: reviewPath,
+            value: pathToFileURL(reviewPath).href,
             role: 'muted',
             valueKind: 'path',
         }], capability));

@@ -13,14 +13,17 @@ function renderBlock(block, capability) {
     switch (block.kind) {
         case 'status':
             return wrapLine(renderStatus(block.role, block.text, capability), capability);
-        case 'fact':
-            return wrapLine(`${stylePresentationText(block.label, 'information', capability)}  ${stylePresentationText(block.value, block.valueKind ? undefined : block.role, capability)}`, capability);
+        case 'fact': {
+            const line = `${stylePresentationText(block.label, 'information', capability)}  ${stylePresentationText(formatCopyableValue(block.value, block.valueKind), block.valueKind ? undefined : block.role, capability)}`;
+            return isCopyableKind(block.valueKind) ? [line] : wrapLine(line, capability);
+        }
         case 'paragraph':
             return wrapLine(renderTextParts(block.content, capability), capability);
         case 'list':
             return block.items.flatMap((item) => {
                 const marker = item.selected === undefined ? '  ' : item.selected ? '[x]' : '[ ]';
-                return wrapLine(`${marker} ${stylePresentationText(item.text, item.kind ? undefined : item.role, capability)}`, capability, marker.length + 1);
+                const line = `${marker} ${stylePresentationText(formatCopyableValue(item.text, item.kind), item.kind ? undefined : item.role, capability)}`;
+                return isCopyableKind(item.kind) ? [line] : wrapLine(line, capability, marker.length + 1);
             });
         case 'literal':
             return block.text.split('\n');
@@ -41,6 +44,19 @@ function renderStatus(role, text, capability) {
 }
 function renderTextParts(content, capability) {
     return content.map((part) => stylePresentationText(part.text, undefined, capability)).join('');
+}
+function isCopyableKind(kind) {
+    return kind === 'path' || kind === 'command' || kind === 'id';
+}
+function formatCopyableValue(value, kind) {
+    if (kind !== 'path' || !isSingleSpacedPath(value))
+        return value;
+    return `"${value}"`;
+}
+function isSingleSpacedPath(value) {
+    if (!/[\s]/u.test(value) || /(?: -> | · | \[)/u.test(value))
+        return false;
+    return /^(?:~|\.{1,2}|\/|[A-Za-z]:[\\/])/u.test(value);
 }
 function wrapLine(line, capability, hangingIndent = 2) {
     const width = capability.columns;

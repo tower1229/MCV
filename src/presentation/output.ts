@@ -1,6 +1,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { pathToFileURL } from 'node:url';
 import type { DeviceContext } from '../adapters/types.js';
 import type {
   PresentationBlock,
@@ -286,7 +287,7 @@ function printReviewPath(reviewPath: string): void {
   printText(renderPresentationBlocks([{
     kind: 'fact',
     label: 'Review',
-    value: reviewPath,
+    value: pathToFileURL(reviewPath).href,
     role: 'muted',
     valueKind: 'path',
   }], capability));

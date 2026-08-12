@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceContext } from '../adapters/types.js';
 import type { PresentationDocument } from './contracts.js';
@@ -102,6 +103,28 @@ describe('Presentation output', () => {
     presentDocument(context, document);
 
     expect(loggedText()).toContain('Next command  mcv status --verbose');
+  });
+
+  it('prints an unwrapped file URL for a spaced native Review directory', () => {
+    context.platform = 'darwin';
+    const originalIsTTY = process.stdout.isTTY;
+    const originalColumns = process.stdout.columns;
+    Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: true });
+    Object.defineProperty(process.stdout, 'columns', { configurable: true, value: 40 });
+
+    try {
+      const result = presentDocument(context, reviewDocument());
+      const reviewDirectory = path.join(context.homeDir, 'Library', 'Application Support', 'mcv', 'reviews');
+      const reviewUrl = pathToFileURL(result.reviewPath!).href;
+      expect(result.reviewPath).toMatch(new RegExp(`^${escapeRegExp(reviewDirectory)}`));
+      expect(reviewUrl).toContain('Application%20Support');
+      expect(reviewUrl).not.toContain('Application Support');
+      expect(loggedText()).toContain(`Review  ${reviewUrl}`);
+      expect(loggedText()).not.toMatch(/Application(?:%20)?\n\s+Support/u);
+    } finally {
+      Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: originalIsTTY });
+      Object.defineProperty(process.stdout, 'columns', { configurable: true, value: originalColumns });
+    }
   });
 
   it('identifies the known operation outcome when primary presentation rendering fails', () => {

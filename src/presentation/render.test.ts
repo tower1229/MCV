@@ -49,4 +49,25 @@ describe('Presentation semantic rendering', () => {
     expect(resolveOutputCapability({ isTTY: true, env: { FORCE_COLOR: '1', TERM: 'dumb' } }).color).toBe(false);
     expect(resolveOutputCapability({ isTTY: true, forcePlain: true, env: { FORCE_COLOR: '1' } }).color).toBe(false);
   });
+
+  it('quotes whitespace paths and never reflows path or command values', () => {
+    const reviewPath = '/Users/me/Library/Application Support/mcv/reviews/status-long-name.txt';
+    const output = renderPresentationBlocks([
+      { kind: 'fact', label: 'Review', value: reviewPath, valueKind: 'path' },
+      { kind: 'fact', label: 'Repository', value: '/Users/me/repo', valueKind: 'path' },
+      { kind: 'fact', label: 'Repository', value: 'not bound', valueKind: 'path' },
+      { kind: 'fact', label: 'restore', value: '/tmp/home/settings.json [Ordinary file]', valueKind: 'path' },
+      { kind: 'fact', label: 'Next command', value: 'mcv status --verbose', valueKind: 'command' },
+      { kind: 'list', items: [{ text: '/Users/me/Library/Application Support/mcv', kind: 'path' }] },
+    ], { color: false, columns: 40 });
+
+    expect(output).toBe([
+      `Review  "${reviewPath}"`,
+      'Repository  /Users/me/repo',
+      'Repository  not bound',
+      'restore  /tmp/home/settings.json [Ordinary file]',
+      'Next command  mcv status --verbose',
+      '   "/Users/me/Library/Application Support/mcv"',
+    ].join('\n'));
+  });
 });
