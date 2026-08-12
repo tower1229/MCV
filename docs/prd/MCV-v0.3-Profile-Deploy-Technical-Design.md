@@ -37,7 +37,7 @@ global 是初始化时自动存在的内置 Profile。它采用与普通 Profile
 5. 不引入 tag、Profile 继承、Profile 组合声明或 Project Binding。
 6. 多个 Profile 在 Deploy 时临时求并集，不保存组合关系。
 7. MCV 不保存跨设备项目路径、项目列表或项目身份映射。
-8. TUI 只用于 Profile 可视化维护；裸 mcv 不再进入全局全屏 Shell。
+8. TUI 用于边界独立的裸命令任务启动器、Profile 可视化维护和复杂 Capture Review；不恢复全局业务 Shell。
 9. Agent 可以直接管理 Profile；MCV 负责约束写入边界、验证和并发控制。
 10. 不引入内置模型，不引入 chezmoi，不自动执行 Git commit、pull 或 push。
 
@@ -763,7 +763,7 @@ mcv deploy
 mcv profile
 ~~~
 
-- 裸 mcv 输出简洁 Overview，不进入 alternate screen。
+- 裸 mcv 在能力足够的交互式 TTY 中打开一次性任务启动器；其他环境输出安全报告。
 - status 保留为兼容别名，但不作为新的日常概念宣传。
 - init、bind、unbind、migrate、restore 等低频能力保留，后续可收进 repo 和 advanced help。
 
@@ -774,7 +774,7 @@ mcv profile
 - Capture 和 Deploy 调用现有一次性 Command 层，输出分组 Plan、Diff 摘要和确认。
 - Read-only 命令直接输出 Report。
 - Result 输出摘要和 next action 后退出。
-- alternate screen、全局路由和 deep-link 语义从默认路径移除。
+- 业务 Plan/Result、跨命令持久状态和 explicit-command deep-link 从默认路径移除；新的主菜单只返回任务意图。
 
 ### 15.3 Profile 专用 TUI
 
@@ -890,14 +890,14 @@ Profile、Asset 和 Deploy Request 类型不得定义在 TUI 或 MCP 层。MCP�
 
 ### 18.4 PTY/ConPTY
 
-只保留 Profile TUI 的真实终端验证：
+保留任务启动器、Profile TUI 和复杂 Capture Review 的真实终端验证：
 
 - alternate screen 恢复；
 - 方向键、Space、Enter、Escape；
 - 搜索输入和中文宽度；
 - macOS PTY 与 Windows ConPTY。
 
-Capture、Deploy 和状态不再需要全局 Shell 路由测试。
+主菜单测试以纯状态模型和 packaged CLI PTY/ConPTY 为长期 seam；Capture、Deploy 和状态仍不复活全局 Shell 路由。
 
 ### 18.5 人类输出与 Review Artifact
 
@@ -930,12 +930,12 @@ Capture、Deploy 和状态不再需要全局 Shell 路由测试。
 
 ### Phase 3：CLI 收缩与专用 TUI
 
-- 裸 mcv 改为 plain Overview。
+- 裸 mcv 在 capable TTY 中改为一次性任务启动器，并保留安全报告回退。
 - Capture/Deploy/Restore 退出全局 Shell；Capture 后续仅按 Plan 复杂度进入独立 Review TUI。
 - Profile 专用 Ink App。
 - 删除不再需要的 Shell route、state 和对应快照。
 
-验收：裸 `mcv`、Deploy、Restore 与 Repository 命令不进入全屏 TUI；只有 Profile 维护和复杂 Capture Review 使用互不导航的独立 TUI。
+验收：只有裸 `mcv` 可进入任务启动器；Deploy、Restore、Repository 显式命令不进入菜单。任务启动器、Profile 维护和复杂 Capture Review 互不跨业务持有状态。
 
 ### Phase 4：Agent 集成
 
@@ -966,7 +966,7 @@ Capture、Deploy 和状态不再需要全局 Shell 路由测试。
 7. 不存在跨设备 Project Binding 或中央项目路径表。
 8. 项目清理只作用于有 Managed Receipt 且未漂移的内容。
 9. 旧 Repository 迁移后不会丢失原本全局部署的资产。
-10. TUI 维护范围只剩 Profile。
+10. TUI 范围限于只读任务启动、Profile 维护和复杂 Capture Review，三者边界独立。
 
 ## 21. 明确延期
 

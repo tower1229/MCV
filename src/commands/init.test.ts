@@ -42,7 +42,10 @@ describe('mcv init', () => {
       repositoryPath,
       changes: [],
       issues: [],
-      nextActions: [],
+      nextActions: [
+        'Run `mcv discover` to inspect detected IDE configuration.',
+        'Run `mcv capture` to collect local configuration into the Repository.',
+      ],
       data: { repositoryId: expect.any(String), repositorySchemaVersion: 5 },
     });
 

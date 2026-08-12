@@ -51,13 +51,16 @@ export function buildDeployRequest(repositoryPath, input) {
     };
 }
 const activeDeployPlans = new WeakMap();
-export async function createDeployPlan(context, request) {
+export async function createDeployPlan(context, request, options = {}) {
+    options.onProgress?.('inspecting-repository');
     const operationId = uuidv4();
     const contextFields = deployContextFieldsFromRequest(request);
     let repositoryPath = null;
     try {
         repositoryPath = resolveBoundRepository(context);
+        options.onProgress?.('scanning-adapters');
         const mutations = new Map();
+        options.onProgress?.('building-plan');
         const plan = await buildDeployPlan(context, repositoryPath, operationId, mutations, request);
         registerDeployPlan(plan, mutations);
         return plan;
@@ -902,7 +905,7 @@ async function applyDeployPlanWhileLocked(context, plan, repositoryPath, selecti
             repositoryPath: plan.repositoryPath,
             changes: [],
             issues: plan.issues.filter((issue) => issue.severity === 'notice'),
-            nextActions: [],
+            nextActions: ['Run `mcv status` to verify the deployed environment.'],
             data: { appliedChangeIds: [], writtenPaths: [], deletedPaths: [] },
             linkOutcomes: plan.linkOutcomes,
             linkFacts: plan.linkFacts,
@@ -916,6 +919,7 @@ async function applyDeployPlanWhileLocked(context, plan, repositoryPath, selecti
     }
     let backupPath;
     try {
+        options.onProgress?.('creating-verified-backup');
         backupPath = createDeployBackup(context, plan, selectedChanges, options.copyFile ?? fs.copyFileSync);
     }
     catch (error) {
@@ -931,6 +935,7 @@ async function applyDeployPlanWhileLocked(context, plan, repositoryPath, selecti
         });
     }
     try {
+        options.onProgress?.('applying-selected-changes');
         assertSelectedPreconditions(context, plan, selectedChanges);
         applyPreparedDeployWrites(prepared, backupPath, options.writeFile ?? ((targetPath, content) => atomicWriteFile(targetPath, content)), options.removeFile ?? ((targetPath) => fs.rmSync(targetPath, { recursive: true, force: true })), options.restoreFile ?? ((targetPath, content) => atomicWriteFile(targetPath, content)), options.createSymbolicLink ?? ((target, linkPath) => fs.symlinkSync(target, linkPath, 'dir')), () => {
             finalizeDeployBackup(backupPath);
@@ -940,6 +945,7 @@ async function applyDeployPlanWhileLocked(context, plan, repositoryPath, selecti
             }
         });
         activeDeployPlans.delete(plan);
+        options.onProgress?.('verifying-result');
         return {
             schemaVersion: OPERATION_SCHEMA_VERSION,
             operation: 'deploy',
@@ -947,7 +953,7 @@ async function applyDeployPlanWhileLocked(context, plan, repositoryPath, selecti
             repositoryPath: plan.repositoryPath,
             changes: selectedChanges,
             issues: [],
-            nextActions: [],
+            nextActions: ['Run `mcv status` to verify the deployed environment.'],
             data: {
                 appliedChangeIds: selectedIds,
                 writtenPaths: prepared.filter((item) => item.change === 'write' || item.change === 'replace-directory')
@@ -967,6 +973,7 @@ async function applyDeployPlanWhileLocked(context, plan, repositoryPath, selecti
         };
     }
     catch (error) {
+        options.onProgress?.('rolling-back');
         activeDeployPlans.delete(plan);
         markDeployBackupFailed(backupPath, error);
         if (error instanceof StaleDeployPlanError) {

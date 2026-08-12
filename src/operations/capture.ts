@@ -37,6 +37,7 @@ import {
 } from '../utils/operation-lock.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
 import { readState } from '../utils/state.js';
+import type { OperationProgressOptions, OperationProgressReporter } from './progress.js';
 import {
   deleteObjectPath,
   parseStructuredObject,
@@ -106,6 +107,7 @@ export interface CaptureApplyOptions {
   nonInteractive?: boolean;
   moveFile?: typeof fs.renameSync;
   restoreFile?: (targetPath: string, content: Buffer) => void;
+  onProgress?: OperationProgressReporter;
 }
 
 export interface CaptureResultData {
@@ -157,12 +159,16 @@ const EMPTY_SUMMARY: CapturePlanSummary = {
 
 export async function createCapturePlan(
   context: DeviceContext,
+  options: OperationProgressOptions = {},
 ): Promise<CapturePlan> {
+  options.onProgress?.('inspecting-repository');
   const operationId = uuidv4();
   let repositoryPath: string | null = null;
   try {
     repositoryPath = resolveBoundRepository(context);
+    options.onProgress?.('scanning-adapters');
     const mutations = new Map<string, CaptureMutation>();
+    options.onProgress?.('building-plan');
     const plan = await buildCapturePlan(context, repositoryPath, operationId, mutations);
     registerCapturePlan(plan, mutations);
     return plan;
@@ -429,6 +435,7 @@ async function applyCapturePlanWhileLocked(
   }
 
   try {
+    options.onProgress?.('applying-selected-changes');
     const applied = applyCaptureTransaction(
       repositoryPath,
       selectedMutations as CaptureMutation[],
@@ -441,6 +448,7 @@ async function applyCapturePlanWhileLocked(
       selectedChanges,
     );
     const newUnassignedCount = newUnassignedAssetIds.length;
+    options.onProgress?.('verifying-result');
     return {
       schemaVersion: OPERATION_SCHEMA_VERSION,
       operation: 'capture',
@@ -451,8 +459,13 @@ async function applyCapturePlanWhileLocked(
       nextActions: newUnassignedCount > 0
         ? [
           `Classify ${newUnassignedCount} new Unassigned Asset(s) with an Agent or \`mcv profile edit <id> --add ...\`, or create a Profile.`,
+          'Run `mcv profile list` to review Profiles.',
+          'Run `mcv deploy [profiles...]` or `mcv deploy --global` to deploy captured configuration.',
         ]
-        : [],
+        : [
+          'Run `mcv profile list` to review Profiles.',
+          'Run `mcv deploy [profiles...]` or `mcv deploy --global` to deploy captured configuration.',
+        ],
       data: {
         appliedChangeIds: selectedIds,
         writtenPaths: applied.writtenPaths,
@@ -462,6 +475,7 @@ async function applyCapturePlanWhileLocked(
       },
     };
   } catch (error) {
+    options.onProgress?.('rolling-back');
     activeCapturePlans.delete(plan);
     if (error instanceof CaptureRollbackError) {
       return failedCaptureResult(plan.repositoryPath, {

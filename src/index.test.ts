@@ -10,17 +10,25 @@ const terminalPrompt = vi.hoisted(() => ({
   off: vi.fn(),
   close: vi.fn(),
 }));
+const mainMenu = vi.hoisted(() => ({
+  runMainMenu: vi.fn(),
+}));
 
 vi.mock('readline/promises', () => ({
   createInterface: vi.fn(() => terminalPrompt),
 }));
+vi.mock('./tui/menu/app.js', () => mainMenu);
 
 import { createProgram } from './index.js';
 
-describe('mcv default path without fullscreen Shell', () => {
+describe('mcv one-shot task launcher routing', () => {
   const originalCwd = process.cwd();
   const originalIsTTY = process.stdin.isTTY;
   const originalStdoutIsTTY = process.stdout.isTTY;
+  const originalColumns = process.stdout.columns;
+  const originalRows = process.stdout.rows;
+  const originalTerm = process.env.TERM;
+  const originalLocale = process.env.LC_ALL;
   let testRoot: string;
   let repositoryPath: string;
   let homeDir: string;
@@ -70,6 +78,10 @@ describe('mcv default path without fullscreen Shell', () => {
     terminalPrompt.once.mockReset();
     terminalPrompt.off.mockReset();
     terminalPrompt.close.mockReset();
+    mainMenu.runMainMenu.mockReset().mockResolvedValue({
+      status: 'selected',
+      action: { type: 'quit', reason: 'cancelled' },
+    });
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
@@ -81,6 +93,12 @@ describe('mcv default path without fullscreen Shell', () => {
       configurable: true,
       value: originalStdoutIsTTY,
     });
+    Object.defineProperty(process.stdout, 'columns', { configurable: true, value: originalColumns });
+    Object.defineProperty(process.stdout, 'rows', { configurable: true, value: originalRows });
+    if (originalTerm === undefined) delete process.env.TERM;
+    else process.env.TERM = originalTerm;
+    if (originalLocale === undefined) delete process.env.LC_ALL;
+    else process.env.LC_ALL = originalLocale;
     vi.restoreAllMocks();
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
@@ -121,7 +139,7 @@ describe('mcv default path without fullscreen Shell', () => {
     await cli.parseAsync(['node', 'mcv']);
 
     expect(output.join('')).not.toContain('Usage: mcv [options] [command]');
-    expect(loggedText()).toContain('Repository  ');
+    expect(loggedText()).toContain('Repository');
     expect(terminalPrompt.question).not.toHaveBeenCalled();
   });
 
@@ -133,25 +151,59 @@ describe('mcv default path without fullscreen Shell', () => {
 
     await createProgram(context()).parseAsync(['node', 'mcv']);
 
-    expect(loggedText()).toContain('Repository  ');
+    expect(loggedText()).toContain('Repository');
     expect(loggedText()).toContain('pending deployment');
     expect(terminalPrompt.question).not.toHaveBeenCalled();
   });
 
-  it('prints a plain-text Overview for bare mcv in a TTY and exits', async () => {
+  it('opens the task launcher for bare mcv in a capable TTY and exits without an Overview', async () => {
+    Object.defineProperty(process.stdout, 'columns', { configurable: true, value: 80 });
+    Object.defineProperty(process.stdout, 'rows', { configurable: true, value: 24 });
+    process.env.TERM = 'xterm-256color';
+    process.env.LC_ALL = 'en_US.UTF-8';
     await createProgram(context()).parseAsync(['node', 'mcv']);
 
-    expect(loggedText()).toContain('Repository  ');
-    expect(loggedText()).toContain(repositoryPath);
-    expect(loggedText()).toContain('pending deployment');
+    expect(mainMenu.runMainMenu).toHaveBeenCalledWith(context(), repositoryPath);
+    expect(loggedText()).not.toContain('Repository  ');
     expect(terminalPrompt.question).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['dumb terminal', { term: 'dumb', columns: 80, rows: 24, locale: 'en_US.UTF-8' }],
+    ['ASCII locale', { term: 'xterm-256color', columns: 80, rows: 24, locale: 'C' }],
+    ['narrow terminal', { term: 'xterm-256color', columns: 59, rows: 18, locale: 'en_US.UTF-8' }],
+    ['short terminal', { term: 'xterm-256color', columns: 60, rows: 17, locale: 'en_US.UTF-8' }],
+  ])('falls back safely for a %s', async (_label, terminal) => {
+    Object.defineProperty(process.stdout, 'columns', { configurable: true, value: terminal.columns });
+    Object.defineProperty(process.stdout, 'rows', { configurable: true, value: terminal.rows });
+    process.env.TERM = terminal.term;
+    process.env.LC_ALL = terminal.locale;
+
+    await createProgram(context()).parseAsync(['node', 'mcv']);
+
+    expect(mainMenu.runMainMenu).not.toHaveBeenCalled();
+    expect(loggedText()).toContain('Repository');
+  });
+
+  it('restores the safe report when menu rendering fails', async () => {
+    Object.defineProperty(process.stdout, 'columns', { configurable: true, value: 80 });
+    Object.defineProperty(process.stdout, 'rows', { configurable: true, value: 24 });
+    process.env.TERM = 'xterm-256color';
+    process.env.LC_ALL = 'en_US.UTF-8';
+    mainMenu.runMainMenu.mockResolvedValue({ status: 'failed', error: new Error('render failed') });
+
+    await createProgram(context()).parseAsync(['node', 'mcv']);
+
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('render failed'));
+    expect(loggedText()).toContain('Repository');
   });
 
   it('prints the same Overview through the status compatibility alias', async () => {
     await createProgram(context()).parseAsync(['node', 'mcv', 'status']);
 
-    expect(loggedText()).toContain('Repository  ');
+    expect(loggedText()).toContain('Repository');
     expect(loggedText()).toContain('pending deployment');
+    expect(mainMenu.runMainMenu).not.toHaveBeenCalled();
     expect(terminalPrompt.question).not.toHaveBeenCalled();
   });
 

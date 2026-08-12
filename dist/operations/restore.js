@@ -12,6 +12,7 @@ const MISSING_HASH = hashText('<missing>');
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const activeRestorePlans = new WeakMap();
 export function createRestorePlan(context, options = {}) {
+    options.onProgress?.('inspecting-repository');
     const operationId = uuidv4();
     const state = readState(context);
     const repositoryPath = state.repositoryPath ?? null;
@@ -20,6 +21,7 @@ export function createRestorePlan(context, options = {}) {
         ? path.resolve(options.targetRoot ?? process.cwd())
         : undefined;
     try {
+        options.onProgress?.('building-plan');
         if (repositoryPath)
             readManifest(repositoryPath);
         const backupRoot = path.join(path.dirname(getStateFilePath(context)), 'backups');
@@ -80,6 +82,7 @@ export function applyRestorePlan(context, plan, selection, options = {}) {
     }
     let currentStateBackupPath;
     try {
+        options.onProgress?.('creating-verified-backup');
         currentStateBackupPath = createCurrentStateBackup(path.dirname(getStateFilePath(context)), plan, options.copyFile ?? fs.copyFileSync);
     }
     catch (error) {
@@ -118,6 +121,7 @@ export function applyRestorePlan(context, plan, selection, options = {}) {
     const writeFile = options.writeFile ?? ((targetPath, content) => atomicWriteFile(targetPath, content));
     const removeFile = options.removeFile ?? ((targetPath) => fs.rmSync(targetPath, { recursive: true, force: true }));
     try {
+        options.onProgress?.('applying-selected-changes');
         for (const change of plan.changes) {
             if (currentFileHash(change.targetPath) !== plan.preconditions[`target:${change.id}`]) {
                 throw new Error(`Restore target changed after the current-state backup: ${change.targetPath}`);
@@ -166,6 +170,7 @@ export function applyRestorePlan(context, plan, selection, options = {}) {
         (options.updateState ?? writeState)(context, nextState);
     }
     catch (error) {
+        options.onProgress?.('rolling-back');
         const rollbackErrors = rollbackRestoreWrites(currentStateBackupPath, plan.changes, attemptedPaths, removeFile, options.restoreFile ?? ((targetPath, content) => atomicWriteFile(targetPath, content)));
         if (stateCommitAttempted) {
             try {
@@ -195,6 +200,7 @@ export function applyRestorePlan(context, plan, selection, options = {}) {
         });
     }
     activeRestorePlans.delete(plan);
+    options.onProgress?.('verifying-result');
     return {
         schemaVersion: OPERATION_SCHEMA_VERSION,
         operation: 'restore',

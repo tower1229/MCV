@@ -40,7 +40,7 @@ function presentDocumentUnsafe(context, document, options) {
     if (artifact.reviewPath)
         printReviewPath(artifact.reviewPath);
     if (artifact.error)
-        printReviewFailure(artifact.error);
+        printReviewFailure(artifact.error, lineCount(plainDetails));
     if (options.verbose || artifact.reviewPath === undefined) {
         printText(artifact.fallback ?? renderTerminalDetails(document));
     }
@@ -58,7 +58,7 @@ function presentProgressiveDocument(context, document, plainDetails, options) {
     const needsReviewFile = exceedsInlineBudget(plainDetails);
     const artifact = needsReviewFile ? tryWriteReviewArtifact(context, document) : {};
     if (artifact.error)
-        printReviewFailure(artifact.error);
+        printReviewFailure(artifact.error, lineCount(plainDetails));
     if (options.verbose || (needsReviewFile && artifact.reviewPath === undefined)) {
         printText(artifact.fallback ?? renderTerminalDetails(document));
     }
@@ -155,6 +155,13 @@ export function presentDiagnostic(message) {
     });
     console.error(renderPresentationBlocks([status('danger', message)], capability));
 }
+export function presentProgress(message) {
+    const capability = resolveOutputCapability({
+        isTTY: Boolean(process.stderr.isTTY),
+        columns: process.stderr.columns,
+    });
+    console.error(renderPresentationBlocks([status('information', message)], capability));
+}
 export function presentBlocks(blocks) {
     const capability = resolveOutputCapability({
         isTTY: Boolean(process.stdout.isTTY),
@@ -186,8 +193,12 @@ export function presentOutcomeBlock(title, block) {
 export function presentReviewReference(reviewPath) {
     printReviewPath(reviewPath);
 }
-function printReviewFailure(error) {
-    presentDiagnostic(`Could not create the local review file; printing full details instead. ${error.message}`);
+function printReviewFailure(error, fallbackLineCount) {
+    presentDiagnostic(`Could not create the local review file: ${error.message} `
+        + `Printing ${fallbackLineCount} lines inline instead. Check the MCV local review directory permissions and retry the command.`);
+}
+function lineCount(text) {
+    return text.length === 0 ? 0 : text.split(/\r?\n/u).length;
 }
 function printNextActions(nextActions) {
     if (nextActions.length === 0)

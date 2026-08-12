@@ -5,15 +5,18 @@ import * as os from 'os';
 import { fileURLToPath } from 'url';
 import { discoverConfigurations } from './commands/discover.js';
 import { captureConfigurations, } from './commands/capture.js';
-import { initRepository } from './commands/init.js';
+import { initRepository, initRepositoryInteractively } from './commands/init.js';
 import { deployConfigurations, } from './commands/deploy.js';
 import { showStatus } from './commands/status.js';
 import { restoreLatestBackup } from './commands/restore.js';
-import { bind, migrate, showRepository, unbind } from './commands/binding.js';
+import { bind, bindInteractively, migrate, migrateInteractively, showRepository, unbind, unbindInteractively, } from './commands/binding.js';
 import { createProfile, deleteProfile, editProfile, listProfiles, showProfile, } from './commands/profile.js';
 import { openProfileEditor, shouldOpenProfileEditor, } from './commands/profile-editor.js';
 import { startMcpServer } from './commands/mcp.js';
 import { presentDiagnostic } from './presentation/output.js';
+import { inspectRepository } from './operations/repository.js';
+import { runMainMenu } from './tui/menu/app.js';
+import { shouldOpenMainMenu, } from './tui/menu/model.js';
 // package.json is the single version source for both npm and the CLI.
 const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 export function createDefaultDeviceContext() {
@@ -249,9 +252,93 @@ export function createProgram(context = createDefaultDeviceContext(), captureDep
         await startMcpServer(context);
     });
     program.action(async () => {
-        await showStatus(context);
+        if (!shouldOpenMainMenu(currentMenuTerminal())) {
+            await presentBareFallback(context);
+            return;
+        }
+        let outcome;
+        try {
+            outcome = await runMainMenu(context, process.cwd());
+        }
+        catch (error) {
+            presentDiagnostic(`MCV task launcher failed: ${error instanceof Error ? error.message : String(error)}`);
+            await presentBareFallback(context);
+            return;
+        }
+        if (outcome.status === 'failed') {
+            presentDiagnostic(`MCV task launcher failed: ${outcome.error.message}`);
+            await presentBareFallback(context);
+            return;
+        }
+        await dispatchMenuAction(outcome.action, context, program, captureDependencies, deployDependencies);
     });
     return program;
+}
+function currentMenuTerminal() {
+    return {
+        stdinIsTTY: Boolean(process.stdin.isTTY),
+        stdoutIsTTY: Boolean(process.stdout.isTTY),
+        term: process.env.TERM,
+        columns: process.stdout.columns,
+        rows: process.stdout.rows,
+        locale: process.env.LC_ALL ?? process.env.LC_CTYPE ?? process.env.LANG,
+    };
+}
+async function presentBareFallback(context) {
+    const repository = inspectRepository(context);
+    if (repository.valid)
+        await showStatus(context);
+    else
+        showRepository(context);
+}
+async function dispatchMenuAction(action, context, program, captureDependencies, deployDependencies) {
+    switch (action.type) {
+        case 'capture':
+            await captureConfigurations(context, captureDependencies);
+            return;
+        case 'profiles':
+            await openProfileEditor(context);
+            return;
+        case 'inspect':
+            if (action.report === 'overview')
+                await showStatus(context);
+            else if (action.report === 'environment')
+                await discoverConfigurations(context);
+            else
+                showRepository(context);
+            return;
+        case 'deploy':
+            await deployConfigurations(context, deployDependencies, {
+                profiles: action.profileIds,
+                ...(action.scope === 'global'
+                    ? { global: true }
+                    : { target: action.targetRoot ?? process.cwd() }),
+            });
+            return;
+        case 'restore':
+            await restoreLatestBackup(context, {}, action.scope === 'global'
+                ? { global: true }
+                : { target: action.targetRoot ?? process.cwd() });
+            return;
+        case 'init':
+            await initRepositoryInteractively(context, action.repositoryPath);
+            return;
+        case 'bind':
+            await bindInteractively(context, action.repositoryPath);
+            return;
+        case 'migrate':
+            await migrateInteractively(context, action.repositoryPath);
+            return;
+        case 'unbind':
+            await unbindInteractively(context);
+            return;
+        case 'help':
+            program.outputHelp();
+            return;
+        case 'quit':
+            if (action.reason === 'interrupted')
+                process.exitCode = 130;
+    }
 }
 function validateCaptureTuiOptions(command, options) {
     const rawArgs = command.parent?.rawArgs ?? [];

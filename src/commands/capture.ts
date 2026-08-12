@@ -34,6 +34,7 @@ import {
   runCaptureReviewTui,
   type CaptureTuiOutcome,
 } from '../tui/capture/app.js';
+import { createTerminalProgressReporter } from './progress.js';
 
 export interface CaptureOptions {
   dryRun?: boolean;
@@ -61,7 +62,8 @@ export async function captureConfigurations(
   dependencies: CaptureDependencies = {},
   options: CaptureOptions = {},
 ): Promise<void> {
-  const capturePlan = await createCapturePlan(context);
+  const onProgress = createTerminalProgressReporter(options.json);
+  const capturePlan = await createCapturePlan(context, { onProgress });
   if (options.dryRun) {
     if (options.json) presentJson(capturePlan);
     else presentDocument(context, renderCapturePlanDocument(capturePlan), {
@@ -217,7 +219,7 @@ export async function captureConfigurations(
       }
     : captureReviewSelection(draft);
   const result = await withInterruptsIgnored(() =>
-    applyCapturePlan(context, capturePlan, selection, { nonInteractive: options.yes }));
+    applyCapturePlan(context, capturePlan, selection, { nonInteractive: options.yes, onProgress }));
   if (result.status === 'succeeded') {
     recordCaptureSuccess(context);
   } else {

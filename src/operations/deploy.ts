@@ -40,6 +40,7 @@ import {
   type OperationLockHandle,
 } from '../utils/operation-lock.js';
 import { readManifest, resolveBoundRepository, type McvManifest } from '../utils/repository.js';
+import type { OperationProgressOptions, OperationProgressReporter } from './progress.js';
 import {
   hashSkillPackageContent,
   resolveSkillPackageStorePath,
@@ -223,6 +224,7 @@ export interface DeployApplyOptions {
   removeFile?: (targetPath: string) => void;
   restoreFile?: (targetPath: string, content: Buffer) => void;
   updateState?: (context: DeviceContext, state: McvState) => void;
+  onProgress?: OperationProgressReporter;
 }
 
 export interface DeployResultData {
@@ -332,13 +334,17 @@ const activeDeployPlans = new WeakMap<DeployPlan, ActiveDeployPlan>();
 export async function createDeployPlan(
   context: DeviceContext,
   request: DeployRequest,
+  options: OperationProgressOptions = {},
 ): Promise<DeployPlan> {
+  options.onProgress?.('inspecting-repository');
   const operationId = uuidv4();
   const contextFields = deployContextFieldsFromRequest(request);
   let repositoryPath: string | null = null;
   try {
     repositoryPath = resolveBoundRepository(context);
+    options.onProgress?.('scanning-adapters');
     const mutations = new Map<string, DeployMutation>();
+    options.onProgress?.('building-plan');
     const plan = await buildDeployPlan(context, repositoryPath, operationId, mutations, request);
     registerDeployPlan(plan, mutations);
     return plan;
@@ -1375,7 +1381,7 @@ async function applyDeployPlanWhileLocked(
       repositoryPath: plan.repositoryPath,
       changes: [],
       issues: plan.issues.filter((issue) => issue.severity === 'notice'),
-      nextActions: [],
+      nextActions: ['Run `mcv status` to verify the deployed environment.'],
       data: { appliedChangeIds: [], writtenPaths: [], deletedPaths: [] },
       linkOutcomes: plan.linkOutcomes,
       linkFacts: plan.linkFacts,
@@ -1389,6 +1395,7 @@ async function applyDeployPlanWhileLocked(
   }
   let backupPath: string | undefined;
   try {
+    options.onProgress?.('creating-verified-backup');
     backupPath = createDeployBackup(
       context,
       plan,
@@ -1409,6 +1416,7 @@ async function applyDeployPlanWhileLocked(
   }
 
   try {
+    options.onProgress?.('applying-selected-changes');
     assertSelectedPreconditions(context, plan, selectedChanges);
     applyPreparedDeployWrites(
       prepared,
@@ -1431,6 +1439,7 @@ async function applyDeployPlanWhileLocked(
       },
     );
     activeDeployPlans.delete(plan);
+    options.onProgress?.('verifying-result');
     return {
       schemaVersion: OPERATION_SCHEMA_VERSION,
       operation: 'deploy',
@@ -1438,7 +1447,7 @@ async function applyDeployPlanWhileLocked(
       repositoryPath: plan.repositoryPath,
       changes: selectedChanges,
       issues: [],
-      nextActions: [],
+      nextActions: ['Run `mcv status` to verify the deployed environment.'],
       data: {
         appliedChangeIds: selectedIds,
         writtenPaths: prepared.filter((item) =>
@@ -1459,6 +1468,7 @@ async function applyDeployPlanWhileLocked(
       assetIds: plan.assetIds,
     };
   } catch (error) {
+    options.onProgress?.('rolling-back');
     activeDeployPlans.delete(plan);
     markDeployBackupFailed(backupPath, error);
     if (error instanceof StaleDeployPlanError) {

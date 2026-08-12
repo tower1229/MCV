@@ -7,6 +7,7 @@ import {
 import { presentJson } from '../renderers/json.js';
 import { renderRestorePlanDocument, renderRestoreResultDocument } from '../renderers/restore.js';
 import { presentDiagnostic, presentDocument, presentOutcome } from '../presentation/output.js';
+import { createTerminalProgressReporter } from './progress.js';
 
 export interface RestoreDependencies {
   confirmRestore?: () => Promise<boolean>;
@@ -26,14 +27,15 @@ export async function restoreLatestBackup(
   dependencies: RestoreDependencies = {},
   options: RestoreOptions = {},
 ): Promise<void> {
+  const onProgress = createTerminalProgressReporter(options.json);
   if (options.global === true && typeof options.target === 'string' && options.target.length > 0) {
     presentDiagnostic('options --target and --global cannot be used together');
     process.exitCode = 2;
     return;
   }
   const reviewPlan = createRestorePlan(context, options.global === true
-    ? { scope: 'global' }
-    : { scope: 'project', targetRoot: options.target ?? process.cwd() });
+    ? { scope: 'global', onProgress }
+    : { scope: 'project', targetRoot: options.target ?? process.cwd(), onProgress });
   if (options.dryRun) {
     if (options.json) presentJson(reviewPlan);
     else presentDocument(context, renderRestorePlanDocument(reviewPlan), {
@@ -99,7 +101,7 @@ export async function restoreLatestBackup(
       context,
       reviewPlan,
       { changeIds: reviewPlan.changes.map((change) => change.id) },
-      { signal: cancellation.signal, nonInteractive: options.yes },
+      { signal: cancellation.signal, nonInteractive: options.yes, onProgress },
     );
     if (result.issues.some((issue) => issue.code === 'restore.cancelled')) process.exitCode = 130;
     else if (result.status !== 'succeeded') process.exitCode = result.status === 'blocked' ? 3 : 1;

@@ -56,7 +56,10 @@ describe('Repository operations', () => {
       repositoryPath,
       changes: [],
       issues: [],
-      nextActions: [],
+      nextActions: [
+        'Run `mcv discover` to inspect detected IDE configuration.',
+        'Run `mcv capture` to collect local configuration into the Repository.',
+      ],
       data: {
         repositoryId: 'repository-current-id',
         repositorySchemaVersion: 5,

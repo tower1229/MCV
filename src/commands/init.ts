@@ -8,6 +8,7 @@ import {
 import { presentJson } from '../renderers/json.js';
 import { renderInitDocument } from '../renderers/repository.js';
 import { presentDocument } from '../presentation/output.js';
+import { askInTerminal } from '../cli/prompt.js';
 
 export interface InitOptions {
   dryRun?: boolean;
@@ -30,6 +31,31 @@ export function initRepository(
     ? blockedInitResult(plan)
     : applyInitPlan(context, plan);
   render(context, result, options);
+  if (result.status === 'failed') process.exitCode = 1;
+  if (result.status === 'blocked') process.exitCode = 3;
+  return result;
+}
+
+export async function initRepositoryInteractively(
+  context: DeviceContext,
+  targetDir: string = process.cwd(),
+): Promise<InitPlan | InitResult> {
+  const plan = createInitPlan(context, targetDir);
+  render(context, plan, {});
+  if (plan.status === 'failed') {
+    process.exitCode = 1;
+    return plan;
+  }
+  const outcome = await askInTerminal(
+    `Init · ${plan.changes.length} changes · Repository: ${plan.repositoryPath ?? targetDir} · Apply? [y/N] `,
+  );
+  if (outcome.interrupted) {
+    process.exitCode = 130;
+    return plan;
+  }
+  if (!/^(y|yes)$/i.test(outcome.answer.trim())) return plan;
+  const result = applyInitPlan(context, plan);
+  render(context, result, {});
   if (result.status === 'failed') process.exitCode = 1;
   if (result.status === 'blocked') process.exitCode = 3;
   return result;

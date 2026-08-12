@@ -45,9 +45,9 @@ MCV 仓库中的配置分为：
 
 ## 快速开始
 
-直接运行 `mcv` 会打印简洁的 plain-text Overview（与 `mcv status` 同一份只读报告）后立即退出；无论 stdout 是否为 TTY 都不会进入 alternate screen，也不会把无参数调用改成 help。日常入口是 `mcv`、`mcv capture`、`mcv deploy` 和 `mcv profile`；`status` 保留为兼容别名，但不作为新的日常概念宣传。低频命令（`init`、`bind`、`unbind`、`migrate`、`restore`、`repo`、`discover`）仍可用。
+在支持 Unicode、至少 `60×18` 且 stdin/stdout 均为 TTY 的终端中，直接运行 `mcv` 会打开一次性“基地车驾驶舱”；选择任务后界面立即卸载，并交给现有 Command/Operation 完成 Plan、确认、Apply 和 Result，任务结束即退出。非 TTY、重定向、`TERM=dumb`、显式 ASCII locale 或尺寸不足时回退一次性安全报告：有效绑定输出 Overview，未绑定或无效绑定输出 Repository Report。`mcv status`、帮助、版本、JSON、MCP 和显式子命令从不进入主菜单。
 
-Deploy、Restore 以及 Repository 生命周期命令走一次性 Command 层；Capture 对简单 Plan 使用增强行式审阅，对至少包含两个交互事项（可解决决策组、warning 或删除候选）的复杂 Plan 在 TTY 中自动打开专用 Review TUI。`mcv capture --tui` / `--no-tui` 可强制选择界面；`--verbose` 保持行式输出。非交互场景继续使用 `--dry-run`、`--yes` 或 `--json`。裸 `mcv` 不进入全屏界面，Profile 维护继续使用独立 TUI。
+Deploy、Restore 以及 Repository 生命周期命令仍走一次性 Command 层；主菜单只返回任务意图和最小 Scope/Profile/路径参数，不持有 Plan、授权或 Result，也不会伪造 `--yes`。Capture 对简单 Plan 使用增强行式审阅，对至少包含两个交互事项的复杂 Plan 在 TTY 中自动打开专用 Review TUI；Profile 维护继续使用独立 TUI。
 
 
 ### 1. 创建私人配置仓库
@@ -134,14 +134,14 @@ mcv restore --dry-run
 mcv restore
 ```
 
-- 裸 `mcv` 与 `status` 从同一份只读 Overview Report 汇总 Repository、限定在 MCV Repository 路径内的可选 Git 状态、Pending Deployment Change、相对 Baseline Snapshot 的 unchanged/Drift/missing、IDE/Surface、实际配置缺失变量和本设备最近操作。Pending 对同一 Surface 的多文件 Skill projection 按 package 聚合，Canonical Skill materialization 不重复计数，默认未选拓扑迁移进入 `optional`，Advanced Cleanup 只进入 `advancedCleanupExcluded`。Environment 只解释 manifest、MCP 和 Native structured configuration；Instructions、Skills、references 和普通 Markdown 中的示例变量不检查。`status --json` 完全省略 `changes`，完整候选由 `deploy --dry-run --json` 提供。JSON operation 使用 schema v4。消费方必须检查 `schemaVersion` 并拒绝未知版本，不得假定字段集合固定。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
+- `mcv status` 与裸命令的安全回退使用同一份只读 Overview Report，汇总 Repository、限定在 Repository 路径内的可选 Git 状态、Pending Deployment Change、分层 Drift/missing、IDE/Surface、缺失变量和最近操作。Pending 对同一 Surface 的多文件 Skill projection 按 package 聚合，Canonical Skill materialization 不重复计数，默认未选拓扑迁移进入 `optional`，Advanced Cleanup 只进入 `advancedCleanupExcluded`。`status --json` 完全省略 `changes`，完整候选由 `deploy --dry-run --json` 提供。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
 - `restore --dry-run` 默认选择当前项目（`--target` 或 `process.cwd()`）最近一次完整且内容可验证的 project-scope Deploy backup；`--global` 选择最近一次全局 Deploy backup。展示备份时间、将恢复或删除的路径，并区分 ordinary file、managed-link projection、copy projection 与 physical package；内容或拓扑（链接重定向、目录/链接互换等）在部署后发生变化时，以独立的 Restore Conflict 阻止覆盖。
 - `restore` 默认在终端确认完整 Plan；自动化场景可在审阅后使用 `restore --yes`，并可组合 `--json` 取得结构化 Result。`--target` 与 `--global` 互斥。为避免无监督删除，包含删除的 Plan 必须交互确认，`--yes` 会在写入前阻断。Apply 会重验 operation ID、完整 selection、backup 来源、当前节点类型、链接目标和物理身份；事务开始时先创建并验证当前状态 backup（含目录与符号链接拓扑）。事务前按 Ctrl+C 以 130 退出；写入、删除或本机状态提交失败时仅回滚已尝试路径，backup/commit/rollback 期间忽略普通取消；不完整回滚会保留并报告 recovery backup。成功 Restore 会清除 Baseline Snapshot、managed inventory 与 managed Skill layout，需重新 Deploy 或 Capture 建立事实基线。
 
 ## 命令
 
 ```text
-mcv            打印简洁 Overview 后退出；TTY 与非 TTY 行为一致
+mcv            能力足够的 TTY 打开一次性任务启动器；否则输出安全报告
 mcv capture    简单 Plan 行式审阅、复杂 Plan 自动 TUI；--tui/--no-tui/--dry-run/--yes/--json/--verbose
 mcv deploy     一次性 Deploy Plan/确认/Apply；默认项目 scope；需 Profile 或 --global；支持 --verbose；裸调用 exit 2
 mcv profile    Profile 维护 TUI（TTY）或 list/show/create/edit/delete 子命令

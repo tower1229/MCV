@@ -15,6 +15,7 @@ import {
   type Plan,
   type Result,
 } from './contracts.js';
+import type { OperationProgressReporter } from './progress.js';
 
 type DeployBackupAction = 'add' | 'modify' | 'delete';
 
@@ -53,6 +54,7 @@ export interface VerifiedDeployBackup {
 export interface RestorePlanOptions {
   scope?: 'project' | 'global';
   targetRoot?: string;
+  onProgress?: OperationProgressReporter;
 }
 
 export type RestoreLayoutKind =
@@ -87,6 +89,7 @@ export interface RestoreApplyOptions {
   removeFile?: (targetPath: string) => void;
   restoreFile?: (targetPath: string, content: Buffer) => void;
   updateState?: (context: DeviceContext, state: McvState) => void;
+  onProgress?: OperationProgressReporter;
 }
 
 export interface RestoreResultData {
@@ -127,6 +130,7 @@ export function createRestorePlan(
   context: DeviceContext,
   options: RestorePlanOptions = {},
 ): RestorePlan {
+  options.onProgress?.('inspecting-repository');
   const operationId = uuidv4();
   const state = readState(context);
   const repositoryPath = state.repositoryPath ?? null;
@@ -135,6 +139,7 @@ export function createRestorePlan(
     ? path.resolve(options.targetRoot ?? process.cwd())
     : undefined;
   try {
+    options.onProgress?.('building-plan');
     if (repositoryPath) readManifest(repositoryPath);
     const backupRoot = path.join(path.dirname(getStateFilePath(context)), 'backups');
     const backup = findLatestVerifiedBackup(backupRoot, { scope, targetRoot });
@@ -214,6 +219,7 @@ export function applyRestorePlan(
 
   let currentStateBackupPath: string;
   try {
+    options.onProgress?.('creating-verified-backup');
     currentStateBackupPath = createCurrentStateBackup(
       path.dirname(getStateFilePath(context)),
       plan,
@@ -257,6 +263,7 @@ export function applyRestorePlan(
   const removeFile = options.removeFile ?? ((targetPath: string) =>
     fs.rmSync(targetPath, { recursive: true, force: true }));
   try {
+    options.onProgress?.('applying-selected-changes');
     for (const change of plan.changes) {
       if (currentFileHash(change.targetPath) !== plan.preconditions[`target:${change.id}`]) {
         throw new Error(`Restore target changed after the current-state backup: ${change.targetPath}`);
@@ -304,6 +311,7 @@ export function applyRestorePlan(
     stateCommitAttempted = true;
     (options.updateState ?? writeState)(context, nextState);
   } catch (error) {
+    options.onProgress?.('rolling-back');
     const rollbackErrors = rollbackRestoreWrites(
       currentStateBackupPath,
       plan.changes,
@@ -337,6 +345,7 @@ export function applyRestorePlan(
   }
 
   activeRestorePlans.delete(plan);
+  options.onProgress?.('verifying-result');
   return {
     schemaVersion: OPERATION_SCHEMA_VERSION,
     operation: 'restore',

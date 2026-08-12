@@ -109,6 +109,18 @@ describe('Capture operations', () => {
     expect(readState(context)).toEqual(stateBefore);
   });
 
+  it('publishes typed plan stages without owning their presentation', async () => {
+    const stages: string[] = [];
+
+    await createCapturePlan(context, { onProgress: (stage) => stages.push(stage) });
+
+    expect(stages).toEqual([
+      'inspecting-repository',
+      'scanning-adapters',
+      'building-plan',
+    ]);
+  });
+
   it('reports a safe diagnostic when Capture Plan generation fails', async () => {
     const sourceContent = 'schemaVersion: [invalid-log-secret-must-not-leak\n';
     fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), sourceContent);
@@ -692,6 +704,8 @@ describe('Capture operations', () => {
       },
       nextActions: [
         'Classify 1 new Unassigned Asset(s) with an Agent or `mcv profile edit <id> --add ...`, or create a Profile.',
+        'Run `mcv profile list` to review Profiles.',
+        'Run `mcv deploy [profiles...]` or `mcv deploy --global` to deploy captured configuration.',
       ],
     });
     expect(fs.readFileSync(
@@ -1019,6 +1033,8 @@ describe('Capture operations', () => {
       },
       nextActions: [
         'Classify 1 new Unassigned Asset(s) with an Agent or `mcv profile edit <id> --add ...`, or create a Profile.',
+        'Run `mcv profile list` to review Profiles.',
+        'Run `mcv deploy [profiles...]` or `mcv deploy --global` to deploy captured configuration.',
       ],
     });
     expect(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8')).toBe(profilesBefore);
@@ -1053,7 +1069,10 @@ describe('Capture operations', () => {
       change.itemType === 'skill' && change.name === 'review' && change.change === 'modify');
     if (!skill) throw new Error('expected skill modify change');
 
-    const result = await applyCapturePlan(context, plan, { changeIds: [skill.id] });
+    const stages: string[] = [];
+    const result = await applyCapturePlan(context, plan, { changeIds: [skill.id] }, {
+      onProgress: (stage) => stages.push(stage),
+    });
 
     expect(result).toMatchObject({
       status: 'succeeded',
@@ -1061,10 +1080,14 @@ describe('Capture operations', () => {
         newUnassignedCount: 0,
         newUnassignedAssetIds: [],
       },
-      nextActions: [],
+      nextActions: [
+        'Run `mcv profile list` to review Profiles.',
+        'Run `mcv deploy [profiles...]` or `mcv deploy --global` to deploy captured configuration.',
+      ],
     });
     expect(fs.readFileSync(path.join(repositoryPath, 'profiles.yaml'), 'utf8')).toBe(profilesBefore);
     expect(fs.readFileSync(path.join(skillRepo, 'SKILL.md'), 'utf8')).toContain('# New');
+    expect(stages).toEqual(['applying-selected-changes', 'verifying-result']);
   });
 });
 

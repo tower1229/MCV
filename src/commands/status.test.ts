@@ -75,7 +75,7 @@ describe('mcv status', () => {
     expect(output).toContain('Overview Report');
     expect(output).toContain(`Repository  ${repositoryPath}`);
     expect(output).toContain('✓ No pending deployment changes');
-    expect(output).toContain('Device  × 1 drifted · 1 missing · 1 unchanged');
+    expect(output).toContain('Device  × 1 Baseline file Drift · 1 missing · 1 unchanged');
     expect(output).toContain('Last  × deploy failed · 2026-07-19T01:00:00.000Z');
   });
 

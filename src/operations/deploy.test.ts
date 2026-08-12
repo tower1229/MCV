@@ -2302,6 +2302,7 @@ describe('Deploy operations', () => {
     expect(result).toMatchObject({
       status: 'succeeded',
       data: { appliedChangeIds: [native.id], writtenPaths: [targetPath], deletedPaths: [] },
+      nextActions: ['Run `mcv status` to verify the deployed environment.'],
     });
     expect(JSON.parse(fs.readFileSync(targetPath, 'utf8'))).toEqual({
       localState: 'must-be-preserved',

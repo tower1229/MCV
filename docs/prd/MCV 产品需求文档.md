@@ -7,7 +7,7 @@
 **项目属性：** 数字主权生态基础设施
 **目标平台：** macOS、Windows
 **首期目标 IDE：** Codex、Claude Code、Gemini (涵盖 Gemini CLI 和 Antigravity)
-**实现状态（2026-08-11）：** Repository schema v5、Profiles schema v1、operation schema v4、device state v3、Managed Receipt v1；Codex、Claude Code 与 Gemini 使用独立 IDE Instructions Asset；项目为默认 Deploy scope；内置 global Profile；专用 Profile TUI、分级 Capture Review 与本地 MCP Profile 工具；配置数据中立；事务部署与 Overlay 保留；复杂人类可读详情使用短期本地 Review Artifact，并由 `--verbose` 显式输出完整终端详情。0.3 Profile 设计见 `docs/prd/MCV-v0.3-Profile-Deploy-Technical-Design.md`；Instructions 当前决策见 ADR 0017；当前界面契约见 `docs/prd/TUI-Spec.md`。
+**实现状态（2026-08-12）：** Repository schema v5、Profiles schema v1、operation schema v4、device state v3、Managed Receipt v1；Codex、Claude Code 与 Gemini 使用独立 IDE Instructions Asset；项目为默认 Deploy scope；内置 global Profile；裸命令一次性任务启动器、专用 Profile TUI、分级 Capture Review 与本地 MCP Profile 工具；配置数据中立；事务部署与 Overlay 保留。主菜单边界见 ADR 0018，当前完整界面契约见 `docs/prd/TUI-Spec.md`。
 
 ---
 
@@ -844,7 +844,7 @@ mcv unbind
 mcv
 ```
 
-打印与 `mcv status` 相同的只读 plain-text Overview 后立即退出。TTY 与非 TTY 行为一致，不进入 alternate screen，也不把裸命令改成 help。
+能力足够的交互式 TTY 打开一次性任务启动器；非 TTY、重定向、低能力或过小终端输出安全报告。有效绑定回退 Overview，未绑定或无效绑定回退 Repository Report。`mcv status` 始终是一次性 Overview。
 
 ```text
 Repository: ...
@@ -878,7 +878,7 @@ mcv restore
 mcv mcp
 ```
 
-Capture、Deploy、Restore 以及 Repository 生命周期命令都使用一次性 Command/Report，不再通过全局菜单或 deep-link 路由。只有 `mcv profile` 和 TTY 中无 mutation flag 的 `mcv profile edit <id>` 使用专用全屏 Ink TUI；`mcv mcp` 是本地 stdio 集成入口，不在日常顶层帮助中展示。
+Capture、Deploy、Restore 以及 Repository 生命周期仍使用一次性 Command/Report。裸命令菜单只选择任务和最小参数，卸载后交给这些既有命令；显式子命令不 deep-link 到菜单。Profile 与复杂 Capture 继续使用各自专用 Ink TUI；`mcv mcp` 是本地 stdio 集成入口。
 
 ---
 
@@ -1180,7 +1180,7 @@ Claude Code   1 local managed change
 - 恢复；
 - 仓库重新绑定。
 
-裸 `mcv` 和业务命令在完成当前 Report、Plan 或 Result 后退出，不恢复全局 Shell。Profile 可视化维护使用专用 TUI；Capture 根据可解决决策组、warning 和删除候选的合计数量，在行式审阅与独立 Capture Review TUI 之间分流。写操作在 TTY 中确认；非交互使用 `--dry-run` 审阅、`--yes` 应用安全默认项或 `--json` 消费结构化契约。
+裸 `mcv` 选择的任务和所有显式业务命令在完成当前 Report、Plan 或 Result 后退出，不恢复主菜单或全局 Shell。Profile 可视化维护使用专用 TUI；Capture 在行式审阅与独立 Capture Review TUI 之间分流。写操作在 TTY 中确认；非交互使用 `--dry-run`、`--yes` 或 `--json`。
 
 ### 22.2 明确使用用户语言
 
@@ -1603,7 +1603,7 @@ MCV 默认遵循：
 - 仓库当前目录初始化；
 - 仓库 ID 与本机绑定；
 - 绑定、重新绑定和解除绑定；
-- 裸 `mcv` plain Overview 与一次性命令协议；
+- 裸 `mcv` 任务启动器、安全报告回退与一次性命令协议；
 - IDE 检测；
 - Codex、Claude Code、Gemini (涵盖 Gemini CLI 和 Antigravity) 的配置清单；
 - 通用规则管理；
@@ -1627,7 +1627,7 @@ MCV 默认遵循：
 - JSON 优先实现字段级 Overlay；
 - TOML 和 YAML 先采用预定义字段合并；
 - 不提供复杂 Capture 历史；
-- 不提供图形界面（Profile 维护和复杂 Capture Review 使用两个独立全屏 TUI；裸 `mcv` 为 plain Overview）；
+- 不提供图形界面（任务启动器、Profile 维护和复杂 Capture Review 是边界互不混合的全屏终端界面）；
 - 不自动操作 Git；
 - 不提供 Profile 继承、组合声明、tag 查询或跨设备 Project Binding；
 - 不安装 IDE；

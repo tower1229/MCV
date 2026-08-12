@@ -37,9 +37,9 @@ jobs:
         run: npx vitest run src/cli.process.test.ts
       - name: Native Windows ConPTY acceptance matrix
         if: runner.os == 'Windows'
-        run: npx vitest run src/tui/capture/app.windows-pty.test.ts src/tui/profile/app.windows-pty.test.ts
+        run: npx vitest run src/tui/menu/app.windows-pty.test.ts src/tui/capture/app.windows-pty.test.ts src/tui/profile/app.windows-pty.test.ts
       - name: Native macOS PTY acceptance matrix
         if: runner.os == 'macOS'
-        run: npx vitest run src/tui/capture/app.pty.test.ts src/tui/profile/app.pty.test.ts
+        run: npx vitest run src/tui/menu/app.pty.test.ts src/tui/capture/app.pty.test.ts src/tui/profile/app.pty.test.ts
       - run: node dist/index.js --help
       - run: npm pack --dry-run

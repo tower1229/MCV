@@ -40,10 +40,24 @@ function statusTail(report) {
     const blocks = [];
     const local = report.postDeployLocalState;
     const localRole = local.missing ? 'danger' : local.drift ? 'attention' : 'success';
-    const localSummary = [...(local.drift ? [`${local.drift} drifted`] : []), ...(local.missing ? [`${local.missing} missing`] : []), `${local.unchanged} unchanged`].join(' · ');
+    const baselineFileDrift = Math.max(0, local.drift - local.contentDrift - local.topologyDrift);
+    const localSummary = [
+        ...(baselineFileDrift ? [`${baselineFileDrift} Baseline file Drift`] : []),
+        ...(local.contentDrift ? [`${local.contentDrift} Skill content Drift`] : []),
+        ...(local.topologyDrift ? [`${local.topologyDrift} topology Drift`] : []),
+        ...(local.missing ? [`${local.missing} missing`] : []),
+        `${local.unchanged} unchanged`,
+    ].join(' · ');
     blocks.push(labeled('Device', localSummary, localRole, local.missing ? '×' : local.drift ? '!' : '✓'));
-    const specific = [...(local.contentDrift ? [`${local.contentDrift} content`] : []), ...(local.topologyDrift ? [`${local.topologyDrift} topology`] : []), ...(local.missing ? [`${local.missing} missing-file`] : [])];
-    blocks.push(specific.length ? status(localRole, `${specific.join(' · ')} drift`) : status('success', 'No content, topology, or missing-file drift.'));
+    const specific = [
+        ...(baselineFileDrift ? [`${baselineFileDrift} Baseline file`] : []),
+        ...(local.contentDrift ? [`${local.contentDrift} Skill content`] : []),
+        ...(local.topologyDrift ? [`${local.topologyDrift} topology`] : []),
+        ...(local.missing ? [`${local.missing} missing-file`] : []),
+    ];
+    blocks.push(specific.length
+        ? status(localRole, `Drift layers: ${specific.join(' · ')}`)
+        : status('success', 'No Baseline file, Skill content, topology, or missing-file Drift.'));
     for (const entry of local.contentDrifts)
         blocks.push(status('attention', `Content Drift: Canonical Skill package ${entry.packageName}`));
     for (const entry of local.topologyDrifts) {

@@ -463,7 +463,7 @@ describe('mcv deploy', () => {
     vi.mocked(console.log).mockClear();
     await run('status');
     expect(vi.mocked(console.log).mock.calls.flat().join('\n'))
-      .toContain('Device  ! 1 drifted · 0 unchanged');
+      .toContain('Device  ! 1 Baseline file Drift · 0 unchanged');
   });
 
   it('deletes only prior managed inventory when prune is explicitly confirmed', async () => {

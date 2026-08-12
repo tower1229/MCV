@@ -137,6 +137,8 @@ describe('mcv capture', () => {
       issues: [],
       nextActions: [
         'Classify 1 new Unassigned Asset(s) with an Agent or `mcv profile edit <id> --add ...`, or create a Profile.',
+        'Run `mcv profile list` to review Profiles.',
+        'Run `mcv deploy [profiles...]` or `mcv deploy --global` to deploy captured configuration.',
       ],
     });
   });

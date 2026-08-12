@@ -715,7 +715,8 @@ describe('packaged mcv CLI', { timeout: 120_000 }, () => {
       });
       expect(overviewResult.status).toBe(0);
       expect(plainStatusResult.status).toBe(0);
-      expect(overviewResult.stdout).toBe(plainStatusResult.stdout);
+      expect(overviewResult.stdout).toContain('Repository Report');
+      expect(overviewResult.stdout).toContain('not bound');
       expect(plainStatusResult.stdout).toContain(
         'Skills  ✓ 1 linked package healthy',
       );

@@ -7,8 +7,10 @@ import { presentBlocks, presentDocument, presentDiagnostic, presentOutcome, pres
 import { fact, paragraph, status } from '../presentation/builders.js';
 import { buildCaptureReviewModel, captureReviewSelection, createCaptureReviewDraft, setCaptureDecision, setCaptureWarningConfirmed, summarizeCaptureReview, toggleCaptureChange, } from '../review/capture.js';
 import { runCaptureReviewTui, } from '../tui/capture/app.js';
+import { createTerminalProgressReporter } from './progress.js';
 export async function captureConfigurations(context, dependencies = {}, options = {}) {
-    const capturePlan = await createCapturePlan(context);
+    const onProgress = createTerminalProgressReporter(options.json);
+    const capturePlan = await createCapturePlan(context, { onProgress });
     if (options.dryRun) {
         if (options.json)
             presentJson(capturePlan);
@@ -148,7 +150,7 @@ export async function captureConfigurations(context, dependencies = {}, options 
             confirmedIssueIds: [],
         }
         : captureReviewSelection(draft);
-    const result = await withInterruptsIgnored(() => applyCapturePlan(context, capturePlan, selection, { nonInteractive: options.yes }));
+    const result = await withInterruptsIgnored(() => applyCapturePlan(context, capturePlan, selection, { nonInteractive: options.yes, onProgress }));
     if (result.status === 'succeeded') {
         recordCaptureSuccess(context);
     }

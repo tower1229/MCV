@@ -1,108 +1,58 @@
-**实现状态（2026-08-10）：已实现。** 当前产品界面由 plain-text Overview、一次性 Command/Report、分级 Capture Review、专用 Profile Ink TUI 和本地 stdio MCP 组成。旧的全局 Ink Shell、业务命令 deep-link、默认 alternate-screen 首页和 Init 后自动进入 Capture 的流程已经移除；本文只描述当前契约。
+**实现状态（2026-08-12）：已实现。** 当前界面由裸命令一次性任务启动器、一次性 Command/Report、分级 Capture Review、专用 Profile TUI 和本地 stdio MCP 组成。历史全局 Shell 仍已删除；任务启动器不是业务 Shell。
 
-## Problem Statement
+## 路由契约
 
-MCV 的 Capture、Deploy、Restore 和 Repository 生命周期包含高风险文件写入，必须让人类、脚本和 Agent 复用同一套可审阅、可验证的 Operation Modules，同时避免把大量 Diff、路径和可能含明文配置的技术细节长期留在终端滚动历史中。
+- stdin/stdout 均为 TTY、`TERM` 非 `dumb`、locale 支持 Unicode、尺寸至少 `60×18` 时，裸 `mcv` 打开任务启动器。
+- 非 TTY、重定向、低能力/过小终端回退一次性安全报告：有效绑定输出 Overview；未绑定或无效绑定输出 Repository Report。
+- `mcv status`、`--help`、`--version`、JSON、MCP 和全部显式子命令永不进入启动器。
+- 菜单渲染失败先恢复终端，再报告原因并回退安全报告。
 
-Profile 维护和复杂 Capture Plan 都需要集中浏览、选择和对比，分别使用独立全屏界面；其他操作保持可组合、可退出、能直接用于自动化的一次性命令。
+## 主菜单状态模型
 
-## Solution
+`MenuSnapshot` 只包含 Repository、Pending Deployment Change、IDE、Last Operation、Profile 和用于分类的只读摘要。`MenuState` 只承担 loading、home、inspect、more、Deploy/Restore 选择和 Bind 路径输入。`MenuAction` 只表达 Capture、Profiles、Inspect、Deploy、Init、Bind、Restore、Migrate、Unbind、Help 或 Quit 意图，不能携带 Plan、Change、Issue、授权或 Result。
 
-- 裸 `mcv` 与 `mcv status` 打印同一份只读 Overview 后退出，TTY 与非 TTY 行为一致。
-- Capture 简单 Plan 使用行式审阅；可解决决策组、warning 与删除候选合计至少两项时在 TTY 自动进入专用 Review TUI。Deploy、Restore、Init、Bind、Unbind 和 Migration 继续通过一次性 Plan/Apply 命令执行。
-- Discover、Status、Repository 和 Profile 查询直接输出 Report。
-- `mcv profile`、没有 mutation flag 的 `mcv profile edit <id>` 和复杂 `mcv capture` 在 TTY 中打开各自独立的 Ink TUI。
-- `mcv mcp` 是隐藏于日常顶层帮助的本地 stdio 集成入口，复用相同 Profile、Asset 和 Deploy 服务。
-- 人类可读的复杂详情通过短期本地 Review Artifact 提供；JSON 与 MCP 保持完整结构化输出且不创建 Artifact。
+分类优先级与默认焦点：
 
-## User Stories
+1. `unbound` → Create Repository。
+2. `blocked` → Inspect System。
+3. `pending` → Deploy Environment。
+4. `stable` → Inspect System。
+5. 其他有效绑定为 `bound` → Capture Local Configuration。
 
-1. As an MCV user, I want bare `mcv` to print a concise Overview and exit, so that it works identically in terminals, pipes, and probes.
-2. As an MCV user, I want every mutating operation to show a Plan before Apply, so that the approved selection matches the eventual write.
-3. As an automation user, I want JSON stdout to contain exactly one versioned document, so that scripts never parse prompts or human prose.
-4. As an automation user, I want `--yes` to reject warnings, decisions, deletions, and topology migrations, so that unattended execution stays conservative.
-5. As an MCV user, I want complete review details available without flooding terminal history, so that paths, hashes, Diffs, and plaintext configuration remain reviewable.
-6. As an MCV user, I want `--verbose` to print those details inline as well, so that I can deliberately keep a terminal transcript.
-7. As an MCV user, I want Review Artifact failure to fall back to terminal output, so that Apply never proceeds without reviewable details.
-8. As an MCV user, I want Profile maintenance in a dedicated searchable TUI, so that large Asset sets remain practical without turning every command into a full-screen application.
-9. As an MCV user, I want all success, failure, interruption, and exception paths from Profile TUI to restore my terminal.
-10. As an MCV user, I want Git to remain optional and never mutated by MCV.
-11. As an MCV user, I want simple Capture decisions to stay line-oriented and complex Capture reviews to provide focused selection and Diff navigation without reopening the global Shell.
+已绑定首页依次显示标题、Repository/Pending/IDEs/Last 四项摘要，以及 Deploy、Capture、Profiles、Inspect、More、Quit。未绑定首页只显示 Repository/IDE 摘要和 Create、Bind、Inspect Detected IDEs、Help、Quit，不生成 Deploy Status。Inspect 包含 Overview、Environment、Repository；More 包含 Restore、Migrate、Unbind、Discover、Help。
 
-## Interface Contract
+## 任务交接与写边界
 
-### Routing
+选择任务后必须先卸载 alternate screen，再交给现有 Command adapter。任务结束后进程退出，不返回菜单。菜单打开、导航、返回、取消不能修改 Repository、本机 state、目标、backup、Receipt 或 Review Artifact。
 
-- `mcv`: plain Overview; never help or alternate screen solely because of TTY state.
-- `mcv status`: compatibility alias for the same Overview Report; supports `--plain`, `--json`, and `--verbose`.
-- `mcv discover`: Environment Report; supports `--plain`, `--json`, and `--verbose`.
-- `mcv capture`: automatic line/TUI review in an interactive terminal; `--tui` and `--no-tui` override routing. `--verbose`, `--dry-run`, `--yes`, and `--json` remain one-shot.
-- `mcv deploy`, `mcv restore`: one-shot Plan/confirm/Apply; support `--dry-run`, `--yes`, `--json`, and `--verbose`.
-- `mcv init`, `mcv bind`, `mcv unbind`: one-shot Repository Plan/Apply; they never chain into Discover or Capture.
-- `mcv migrate`: one-shot Migration Plan/Apply; supports `--verbose` for oversized human output.
-- `mcv profile`: Profile TUI in a TTY; otherwise prints subcommand help.
-- `mcv profile list/show`: one-shot Report with optional `--json` and `--verbose`.
-- `mcv profile create/edit/delete`: one-shot mutation; flagless `profile edit <id>` opens the Profile TUI only in a TTY.
+- Capture → 现有分级 Capture 审阅；Profiles → 现有 Profile TUI。
+- Deploy 只收集 Scope/Profile/Project target；Project 默认当前目录且不预选 Profile，Global 预选 `global`。
+- Restore 只收集 Project/Global Scope。
+- Repository 生命周期由 Command 展示 Plan、确认并对同一进程内 Plan Apply；菜单不伪造 `--yes`。
+- Help 在卸载菜单后输出 Commander help。
 
-### Plan and Apply
+所有写入仍只发生在现有 Apply seam。显式 `--dry-run`、`--yes`、`--json` 契约保持不变。
 
-- Operation Modules return structured Report, Plan, Result, Issue, and error objects without terminal I/O.
-- Plan generation is read-only. Apply is the only Repository, target, backup, Managed Receipt, Baseline Snapshot, or device-state write boundary.
-- Plans are immutable in-process snapshots, not persisted or replayable authorization.
-- Apply revalidates operation ID, selected IDs, Repository source hashes, target precondition hashes, and topology identity.
-- Deletions are unselected by default. `--yes` rejects warnings, unresolved decisions, deletions, topology changes, and project/global prune candidates before the first write.
-- Modified paths are backed up and verified before first write; failure rolls back only the attempted transaction scope and reports incomplete recovery material explicitly.
+## 键盘与呈现
 
-### Human output and Review Artifacts
+- `↑/↓` 移动，Enter 选择，Esc 返回；首页 Esc/q 正常退出。
+- Ctrl+C 返回 130；Space 只用于 Profile 多选。字母快捷键只能增强。
+- `NO_COLOR` 不移除文字、符号、焦点或选择语义。
+- 主菜单不创建 Review Artifact。其他复杂人类输出仍遵循短期私有 Artifact 契约；失败时先打印原因、回退行数和权限修复/重试提示，再完整输出详情。
 
-- Plain Capture, Deploy, and Restore Plans always keep decision-critical summaries, destructive markers, Issues, and next actions in the terminal. When review details exist, the complete Diff, paths, hashes, and technical details go to a Review Artifact.
-- Overview/Status, Discover, Profile list/show, Migration, and failed Results stay inline unless details exceed 40 lines or 8 KiB; overflowing details use the same Artifact path.
-- `--verbose` preserves the Artifact and additionally prints complete details inline. If Artifact creation fails, complete details are printed inline regardless of `--verbose`.
-- The presenter prints both a standard `file://` URL and the absolute path.
-- macOS stores Artifacts under `~/Library/Application Support/mcv/reviews/`; Windows uses `%LOCALAPPDATA%\mcv\reviews\`; Linux uses `${XDG_STATE_HOME:-~/.local/state}/mcv/reviews/`.
-- Writes are atomic. POSIX directory/file permissions are `0700`/`0600`; Windows inherits the per-user `%LOCALAPPDATA%` ACL.
-- Each Artifact creation best-effort removes `.txt` files older than 24 hours and prunes older files toward 10 files and 50 MiB while always retaining the newly created Artifact. A single oversized current file or failed deletion may temporarily exceed those targets. There is no background cleanup after MCV exits.
-- Artifacts may contain plaintext configuration. They are Local/Runtime presentation data, cannot be replayed, and do not modify Repository, deployment target, Managed Receipt, backup, Baseline Snapshot, or device operation state.
-- JSON and MCP never create Review Artifacts and retain the complete structured contract.
+## Operation 反馈
 
-### Output protocol
+Operation 可发布 `as const` 定义的阶段事件：Inspecting repository、Scanning adapters、Building plan、Creating verified backup、Applying selected changes、Verifying result、Rolling back。只有交互式人类 TTY adapter 向 stderr 显示无百分比反馈；非 TTY、JSON 和 MCP 不显示。
 
-- `--dry-run` and `--yes` are mutually exclusive. JSON for write commands requires one of them.
-- Capture `--tui` and `--no-tui` are mutually exclusive and cannot be combined with `--dry-run`, `--yes`, or `--json`; `--tui --verbose` is also invalid. Forced TUI requires interactive stdin/stdout and non-`dumb` `TERM`.
-- `status --plain --json` and `discover --plain --json` are usage errors.
-- Bare `mcv deploy` without a Profile or `--global` is a usage error and writes nothing.
-- JSON stdout contains exactly one document; progress and diagnostics use stderr.
-- Consumers must inspect `schemaVersion` and reject unknown versions. All current JSON operations use operation schema v4.
-- Exit codes: `0` requested result produced, `1` execution/system failure, `2` usage/input error, `3` non-interactive human-decision block, `130` interruption.
-- UI, help, prompts, errors, progress, and summaries are English. README remains Chinese. Color is automatic, respects `NO_COLOR`, and is never the only state indicator.
+成功 Next Actions：Init/Bind → Discover、Capture；Capture → Profiles、Deploy；Deploy → Status。Overview 分别报告 Baseline file Drift、Skill content Drift、topology Drift 和 missing，不能用未分层的总量掩盖具体含义。
 
-### Dedicated TUI apps
+## 测试契约
 
-- Ink is used for Profile maintenance and complex Capture review; Clack and Inquirer are not added alongside it.
-- The TUI supports Profile selection, search, Asset-type and compatibility filters, add/remove selection, save/cancel, Revision conflict handling, and initial focus on `profile edit <id>`.
-- Capture TUI supports ordinary selection, destructive default-off changes, exactly-one conflict decisions, explicit warning confirmation, on-demand text/binary Diff views, final Enter-only Apply, and stale-Plan regeneration with all prior authorization discarded.
-- Both TUI apps restore alternate screen, cursor state, and terminal input mode after success, failure, Escape/`q`, Ctrl+C, and uncaught exceptions.
-- Profile, Asset, Revision, and Deploy Request types live below the TUI layer. The TUI calls `ProfileService` and never writes YAML directly.
-- Capture Plan, review selection, warning authorization, stale validation, and transaction types live below the TUI layer. Both Capture adapters call the same Operation modules and never write Repository files directly.
-
-## Testing Decisions
-
-- The primary public seam is the packaged `dist/index.js` process. Tests assert routing, stdout/stderr, exit codes, filesystem effects, and no accidental writes.
-- Process tests cover bare `mcv` in TTY and non-TTY conditions, help/version, output-mode conflicts, JSON single-document behavior, bare Deploy usage errors, and Review Artifact creation/fallback.
-- Review Artifact tests cover exact detail preservation, `--verbose`, 40-line/8-KiB overflow, POSIX permissions, atomic creation, best-effort expiry, count/byte targets, and protection of the current file.
-- Real macOS PTY and Windows ConPTY tests are required for Profile and Capture TUI keyboard behavior, routing, zero-write cancellation, and terminal restoration.
-- Operation tests cover stale Plans, source/target races, topology changes, transactional backup/rollback, Restore Conflict, partial selection, Baseline Snapshot, managed inventory, and Managed Receipt updates.
-- Tests assert user-visible contracts and resulting files rather than private helper calls or React component structure.
-- No fixed test count is part of the product contract; the full current suite, typecheck, build, packaged help, and npm pack gate must pass for release work.
+- 纯模型测试覆盖五种 Situation、顺序/默认焦点、导航/返回/取消/中断和 Deploy 默认值。
+- packaged `dist/index.js` 测试覆盖路由、真实任务结果、退出码和取消零写入；不以大面积视图快照或私有调用顺序为契约。
+- macOS real PTY 与 Windows native ConPTY 覆盖正常退出、Ctrl+C、render failure、alternate screen、光标和输入模式恢复，以及 `NO_COLOR`/Unicode。
+- 非 TTY、Status、帮助、版本、JSON 单文档、MCP 和显式命令必须保持兼容。
 
 ## Out of Scope
 
-- A global multi-route TUI Shell or business-command deep links.
-- GUI, web UI, background daemon, or background Artifact cleanup.
-- Persisted, signed, replayable, or cross-process Plans and Review Artifacts.
-- Force Restore when a Restore Conflict exists.
-- Automatic Git init/commit/pull/push or required hosting provider.
-- Credential management, masking, secret scanning, or environment-variable value entry.
-- Automatic IDE installation, full dotfiles management, Cursor, or additional IDE Adapters.
-- Profile inheritance, tags, conditional expressions, or project binding.
-- CommonJS/ESM dual builds or multiple terminal interaction frameworks.
+持久化全局 Shell、业务 Result 页面、Settings、History、Doctor、Cursor Adapter、后台进程、GUI、自动 Git 写入和可重放 Plan 均不在范围内。历史 `TUI-Update.md` 继续仅作历史记录。

@@ -56,6 +56,8 @@ describe('Presentation output', () => {
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining('forbidden control U+001B'),
     );
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('lines inline instead'));
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('permissions and retry'));
     expect(fs.existsSync(path.join(context.env.XDG_STATE_HOME!, 'mcv', 'reviews'))).toBe(false);
   });
 

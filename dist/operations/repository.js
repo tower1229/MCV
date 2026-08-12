@@ -315,7 +315,10 @@ export function applyInitPlan(context, plan) {
         repositoryPath: bindingChange.repositoryPath,
         changes: [],
         issues: [],
-        nextActions: [],
+        nextActions: [
+            'Run `mcv discover` to inspect detected IDE configuration.',
+            'Run `mcv capture` to collect local configuration into the Repository.',
+        ],
         data: {
             repositoryId: bindingChange.repositoryId,
             repositorySchemaVersion: CURRENT_SCHEMA_VERSION,
@@ -772,7 +775,10 @@ export function applyBindPlan(context, plan) {
         repositoryPath: change.repositoryPath,
         changes: [],
         issues: [],
-        nextActions: [],
+        nextActions: [
+            'Run `mcv discover` to inspect detected IDE configuration.',
+            'Run `mcv capture` to collect local configuration into the Repository.',
+        ],
         data: {
             repositoryId: change.repositoryId,
             repositorySchemaVersion: CURRENT_SCHEMA_VERSION,

@@ -23,6 +23,7 @@ import {
 } from '../renderers/repository.js';
 import { presentJson } from '../renderers/json.js';
 import { presentDocument } from '../presentation/output.js';
+import { askInTerminal } from '../cli/prompt.js';
 
 export interface RepositoryOutputOptions {
   dryRun?: boolean;
@@ -54,6 +55,25 @@ export function bind(
   return contract;
 }
 
+export async function bindInteractively(
+  context: DeviceContext,
+  repositoryPath: string,
+): Promise<BindPlan | BindResult> {
+  const plan = createBindPlan(context, repositoryPath);
+  render(context, plan, {}, renderBindDocument);
+  if (plan.status === 'failed') {
+    process.exitCode = 1;
+    return plan;
+  }
+  const confirmed = await confirmLifecycle('Bind', plan.changes.length, plan.repositoryPath);
+  if (confirmed === undefined) process.exitCode = 130;
+  if (!confirmed) return plan;
+  const result = applyBindPlan(context, plan);
+  render(context, result, {}, renderBindDocument);
+  if (result.status === 'failed') process.exitCode = 1;
+  return result;
+}
+
 export function unbind(
   context: DeviceContext,
   options: RepositoryOutputOptions = {},
@@ -65,6 +85,24 @@ export function unbind(
   render(context, contract, options, renderUnbindDocument);
   if (contract.status === 'failed') process.exitCode = 1;
   return contract;
+}
+
+export async function unbindInteractively(
+  context: DeviceContext,
+): Promise<UnbindPlan | UnbindResult> {
+  const plan = createUnbindPlan(context);
+  render(context, plan, {}, renderUnbindDocument);
+  if (plan.status === 'failed') {
+    process.exitCode = 1;
+    return plan;
+  }
+  const confirmed = await confirmLifecycle('Unbind', plan.changes.length, plan.repositoryPath);
+  if (confirmed === undefined) process.exitCode = 130;
+  if (!confirmed) return plan;
+  const result = applyUnbindPlan(context, plan);
+  render(context, result, {}, renderUnbindDocument);
+  if (result.status === 'failed') process.exitCode = 1;
+  return result;
 }
 
 export function migrate(
@@ -84,6 +122,25 @@ export function migrate(
   return contract;
 }
 
+export async function migrateInteractively(
+  context: DeviceContext,
+  repositoryPath: string,
+): Promise<MigrationPlan | MigrationResult> {
+  const plan = createMigrationPlan(context, repositoryPath);
+  presentDocument(context, renderMigrationDocument(plan));
+  if (plan.status === 'failed') {
+    process.exitCode = 1;
+    return plan;
+  }
+  const confirmed = await confirmLifecycle('Migrate', plan.changes.length, plan.repositoryPath);
+  if (confirmed === undefined) process.exitCode = 130;
+  if (!confirmed) return plan;
+  const result = applyMigrationPlan(context, plan);
+  presentDocument(context, renderMigrationDocument(result));
+  if (result.status === 'failed') process.exitCode = 1;
+  return result;
+}
+
 function render<T extends RepositoryReport | BindPlan | BindResult | UnbindPlan | UnbindResult>(
   context: DeviceContext,
   contract: T,
@@ -95,4 +152,15 @@ function render<T extends RepositoryReport | BindPlan | BindResult | UnbindPlan 
     return;
   }
   presentDocument(context, renderDocument(contract), { verbose: options.verbose });
+}
+
+async function confirmLifecycle(
+  operation: string,
+  changeCount: number,
+  repositoryPath: string | null,
+): Promise<boolean | undefined> {
+  const outcome = await askInTerminal(
+    `${operation} · ${changeCount} changes · Repository: ${repositoryPath ?? 'not bound'} · Apply? [y/N] `,
+  );
+  return outcome.interrupted ? undefined : /^(y|yes)$/i.test(outcome.answer.trim());
 }

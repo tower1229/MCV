@@ -8,7 +8,9 @@ import { askInTerminal, withInterruptsIgnored } from '../cli/prompt.js';
 import { readManifest, resolveBoundRepository } from '../utils/repository.js';
 import { presentBlocks, presentDiagnostic, presentDocument, presentOutcome, } from '../presentation/output.js';
 import { issueBlocks } from '../presentation/builders.js';
+import { createTerminalProgressReporter } from './progress.js';
 export async function deployConfigurations(context, dependencies = {}, options = {}) {
+    const onProgress = createTerminalProgressReporter(options.json);
     const profileArgs = options.profiles ?? [];
     const wantsGlobal = options.global === true;
     const hasTarget = typeof options.target === 'string' && options.target.length > 0;
@@ -89,7 +91,7 @@ export async function deployConfigurations(context, dependencies = {}, options =
     if (options.pruneManaged === true) {
         built.request.pruneManaged = true;
     }
-    const reviewPlan = await createDeployPlan(context, built.request);
+    const reviewPlan = await createDeployPlan(context, built.request, { onProgress });
     if (options.dryRun) {
         if (options.json)
             presentJson(reviewPlan);
@@ -103,7 +105,7 @@ export async function deployConfigurations(context, dependencies = {}, options =
     }
     if (reviewPlan.status !== 'failed' && reviewPlan.changes.length === 0) {
         if (options.json) {
-            const result = await withInterruptsIgnored(() => applyDeployPlan(context, reviewPlan, { changeIds: [] }, { nonInteractive: options.yes }));
+            const result = await withInterruptsIgnored(() => applyDeployPlan(context, reviewPlan, { changeIds: [] }, { nonInteractive: options.yes, onProgress }));
             presentJson(result);
             if (result.status !== 'succeeded')
                 process.exitCode = result.status === 'blocked' ? 3 : 1;
@@ -153,7 +155,7 @@ export async function deployConfigurations(context, dependencies = {}, options =
                 .filter((issue) => issue.severity === 'warning')
                 .map((issue) => issue.confirmationId),
     };
-    const applyOptions = { nonInteractive: options.yes };
+    const applyOptions = { nonInteractive: options.yes, onProgress };
     const result = await withInterruptsIgnored(() => applyDeployPlan(context, reviewPlan, selection, applyOptions));
     if (result.status !== 'succeeded')
         process.exitCode = result.status === 'blocked' ? 3 : 1;
