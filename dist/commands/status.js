@@ -4,9 +4,12 @@ import { renderStatusDocument } from '../renderers/status.js';
 import { presentDocument } from '../presentation/output.js';
 export async function showStatus(context, options = {}) {
     const report = await inspectStatus(context);
-    if (options.json)
-        presentJson(report);
-    else
+    if (options.json) {
+        const { pendingChanges, ...jsonReport } = report;
+        presentJson(jsonReport);
+    }
+    else {
         presentDocument(context, renderStatusDocument(report), { verbose: options.verbose });
+    }
     return report;
 }

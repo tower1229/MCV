@@ -123,6 +123,8 @@ describe('inspectStatus', () => {
     });
     expect(report.repository).not.toHaveProperty('git');
     expect(report).not.toHaveProperty('changes');
+    expect(report.pendingChanges.every((change) => change.group === 'standard')).toBe(true);
+    expect(report.pendingChanges.length).toBeGreaterThan(0);
     expect(snapshotFiles(testRoot)).toEqual(before);
   });
 
@@ -184,6 +186,8 @@ describe('inspectStatus', () => {
     })]);
     expect(report).not.toHaveProperty('changes');
     expect(report.pendingDeployment.total).toBe(1);
+    expect(report.pendingChanges.every((change) => change.group === 'standard')).toBe(true);
+    expect(report.pendingChanges.some((change) => change.name === 'review')).toBe(false);
     expect(report.issues).toContainEqual(expect.objectContaining({
       severity: 'notice',
       message: expect.stringContaining('Satisfied via link'),

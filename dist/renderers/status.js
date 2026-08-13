@@ -1,12 +1,27 @@
 import { displaySkillSurface } from '../core/skill-surfaces.js';
+import { renderDeployChangeDetailBlocks } from './deploy-change-blocks.js';
 import { fact, paragraph, spacer, status } from '../presentation/builders.js';
 export function renderStatusDocument(report) {
     return {
         operation: 'status', outcome: report.status, title: 'Overview Report',
         summary: [...statusLead(report), ...linkedSkillSummary(report.linkFacts), ...statusTail(report)],
-        details: [...statusLead(report), ...linkedSkillDetails(report.linkFacts), ...statusTail(report)],
+        details: [
+            ...statusLead(report),
+            ...pendingDeploymentDetails(report.pendingChanges),
+            ...linkedSkillDetails(report.linkFacts),
+            ...statusTail(report),
+        ],
         nextActions: [], detailPolicy: 'progressive',
     };
+}
+function pendingDeploymentDetails(changes) {
+    if (changes.length === 0)
+        return [];
+    return [{
+            kind: 'section',
+            title: 'Pending deployment details',
+            blocks: renderDeployChangeDetailBlocks(changes),
+        }];
 }
 function statusLead(report) {
     const git = report.repository.git;

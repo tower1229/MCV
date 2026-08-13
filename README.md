@@ -134,7 +134,7 @@ mcv restore --dry-run
 mcv restore
 ```
 
-- `mcv status` 与裸命令的安全回退使用同一份只读 Overview Report，汇总 Repository、限定在 Repository 路径内的可选 Git 状态、Pending Deployment Change、分层 Drift/missing、IDE/Surface、缺失变量和最近操作。Pending 对同一 Surface 的多文件 Skill projection 按 package 聚合，Canonical Skill materialization 不重复计数，默认未选拓扑迁移进入 `optional`，Advanced Cleanup 只进入 `advancedCleanupExcluded`。`status --json` 完全省略 `changes`，完整候选由 `deploy --dry-run --json` 提供。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
+- `mcv status` 与裸命令的安全回退使用同一份只读 Overview Report，汇总 Repository、限定在 Repository 路径内的可选 Git 状态、Pending Deployment Change、分层 Drift/missing、IDE/Surface、缺失变量和最近操作。Pending 对同一 Surface 的多文件 Skill projection 按 package 聚合，Canonical Skill materialization 不重复计数，默认未选拓扑迁移进入 `optional`，Advanced Cleanup 只进入 `advancedCleanupExcluded`。Overview Review 的 Details 区域会列出 standard 组 pending 变更的路径与 Diff；`status --json` 仍省略 `changes`/`pendingChanges`，完整候选由 `deploy --dry-run --json` 提供。生成 Overview 只读取 Deploy Plan，不运行 Capture 或执行写操作。
 - `restore --dry-run` 默认选择当前项目（`--target` 或 `process.cwd()`）最近一次完整且内容可验证的 project-scope Deploy backup；`--global` 选择最近一次全局 Deploy backup。展示备份时间、将恢复或删除的路径，并区分 ordinary file、managed-link projection、copy projection 与 physical package；内容或拓扑（链接重定向、目录/链接互换等）在部署后发生变化时，以独立的 Restore Conflict 阻止覆盖。
 - `restore` 默认在终端确认完整 Plan；自动化场景可在审阅后使用 `restore --yes`，并可组合 `--json` 取得结构化 Result。`--target` 与 `--global` 互斥。为避免无监督删除，包含删除的 Plan 必须交互确认，`--yes` 会在写入前阻断。Apply 会重验 operation ID、完整 selection、backup 来源、当前节点类型、链接目标和物理身份；事务开始时先创建并验证当前状态 backup（含目录与符号链接拓扑）。事务前按 Ctrl+C 以 130 退出；写入、删除或本机状态提交失败时仅回滚已尝试路径，backup/commit/rollback 期间忽略普通取消；不完整回滚会保留并报告 recovery backup。成功 Restore 会清除 Baseline Snapshot、managed inventory 与 managed Skill layout，需重新 Deploy 或 Capture 建立事实基线。
 

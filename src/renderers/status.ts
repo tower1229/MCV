@@ -1,15 +1,31 @@
 import { displaySkillSurface } from '../core/skill-surfaces.js';
+import type { DeployChange } from '../operations/deploy.js';
 import type { StatusReport } from '../operations/status.js';
 import type { PresentationBlock, PresentationDocument, PresentationRole } from '../presentation/contracts.js';
+import { renderDeployChangeDetailBlocks } from './deploy-change-blocks.js';
 import { fact, paragraph, spacer, status } from '../presentation/builders.js';
 
 export function renderStatusDocument(report: StatusReport): PresentationDocument {
   return {
     operation: 'status', outcome: report.status, title: 'Overview Report',
     summary: [...statusLead(report), ...linkedSkillSummary(report.linkFacts), ...statusTail(report)],
-    details: [...statusLead(report), ...linkedSkillDetails(report.linkFacts), ...statusTail(report)],
+    details: [
+      ...statusLead(report),
+      ...pendingDeploymentDetails(report.pendingChanges),
+      ...linkedSkillDetails(report.linkFacts),
+      ...statusTail(report),
+    ],
     nextActions: [], detailPolicy: 'progressive',
   };
+}
+
+function pendingDeploymentDetails(changes: DeployChange[]): PresentationBlock[] {
+  if (changes.length === 0) return [];
+  return [{
+    kind: 'section',
+    title: 'Pending deployment details',
+    blocks: renderDeployChangeDetailBlocks(changes),
+  }];
 }
 
 function statusLead(report: StatusReport): PresentationBlock[] {

@@ -3,8 +3,10 @@ import * as path from 'path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceContext } from '../adapters/types.js';
+import type { DeployChange } from '../operations/deploy.js';
 import type { PresentationDocument } from './contracts.js';
 import { presentDocument } from './output.js';
+import { renderStatusDocument } from '../renderers/status.js';
 
 describe('Presentation output', () => {
   let testRoot: string;
@@ -127,6 +129,57 @@ describe('Presentation output', () => {
     }
   });
 
+  it('writes pending deployment details into an Overview Review Artifact', () => {
+    const report = {
+      schemaVersion: 4,
+      operation: 'status' as const,
+      status: 'reported' as const,
+      ready: true,
+      repositoryPath: path.join(context.homeDir, 'repository'),
+      repository: {
+        path: path.join(context.homeDir, 'repository'),
+        id: 'repository-id',
+        schemaVersion: 5,
+      },
+      pendingDeployment: {
+        add: 0,
+        modify: 1,
+        delete: 0,
+        total: 1,
+        recommended: 1,
+        optional: 0,
+        advancedCleanupExcluded: 0,
+      },
+      pendingChanges: [overviewPendingChange(Array.from({ length: 45 }, (_, index) => `+ detail ${index}`).join('\n'))],
+      postDeployLocalState: {
+        unchanged: 0,
+        drift: 0,
+        contentDrift: 0,
+        topologyDrift: 0,
+        missing: 0,
+        total: 0,
+        files: [],
+        contentDrifts: [],
+        topologyDrifts: [],
+      },
+      environment: { missingVariables: [], ideSupport: [] },
+      linkOutcomes: [],
+      linkFacts: [],
+      lastOperation: null,
+      issues: [],
+      nextActions: [],
+    };
+
+    const result = presentDocument(context, renderStatusDocument(report));
+
+    expect(result.reviewPath).toBeDefined();
+    const artifact = fs.readFileSync(result.reviewPath!, 'utf8');
+    expect(artifact).toContain('Pending deployment details');
+    expect(artifact).toContain('! modify: grilling');
+    expect(artifact).toContain('+ detail 0');
+    expect(loggedText()).not.toContain('Pending deployment details');
+  });
+
   it('identifies the known operation outcome when primary presentation rendering fails', () => {
     const document = reviewDocument();
     Object.defineProperty(document, 'details', { get: () => { throw new Error('renderer exploded'); } });
@@ -171,4 +224,28 @@ function reviewDocument(): PresentationDocument {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+function overviewPendingChange(diff = '+ updated skill'): DeployChange {
+  return {
+    id: 'skill:grilling',
+    owner: 'ide',
+    ide: 'codex',
+    surface: 'codex',
+    capability: 'skills',
+    name: 'grilling',
+    targetPath: '/home/.codex/skills/grilling/SKILL.md',
+    change: 'modify',
+    defaultSelected: true,
+    group: 'standard',
+    strategy: 'replace-entire-file',
+    deploymentKind: 'copy-projection',
+    preview: {
+      targetPath: '/home/.codex/skills/grilling/SKILL.md',
+      kind: 'text',
+      bytes: 14,
+      sha256: 'b'.repeat(64),
+      diff,
+    },
+  };
 }

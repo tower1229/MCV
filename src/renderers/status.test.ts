@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { DeployChange } from '../operations/deploy.js';
 import type { StatusReport } from '../operations/status.js';
 import { renderStatusDocument } from './status.js';
 import { renderPresentationDocument } from '../presentation/render.js';
@@ -152,6 +153,23 @@ describe('Status renderer', () => {
     expect(details).toContain('Coverage  1 expected file placement affected');
   });
 
+  it('includes pending deployment details in the Details region', () => {
+    const report = statusReport([]);
+    report.pendingDeployment.modify = 1;
+    report.pendingDeployment.total = 1;
+    report.pendingDeployment.recommended = 1;
+    report.pendingChanges = [pendingSkillChange()];
+
+    const details = renderPresentationDocument(renderStatusDocument(report), 'details', { color: false });
+    const summary = renderPresentationDocument(renderStatusDocument(report), 'summary', { color: false });
+
+    expect(details).toContain('Pending deployment details');
+    expect(details).toContain('! modify: grilling');
+    expect(details).toContain('/home/.codex/skills/grilling/SKILL.md');
+    expect(details).toContain('+ updated skill');
+    expect(summary).not.toContain('Pending deployment details');
+  });
+
   it('reports Canonical Store and all supported Skill Surfaces without treating the Store as shared', () => {
     const facts = [
       linkFact({
@@ -216,6 +234,7 @@ function statusReport(linkFacts: LinkFact[]): StatusReport {
       optional: 0,
       advancedCleanupExcluded: 0,
     },
+    pendingChanges: [],
     postDeployLocalState: {
       unchanged: 0,
       drift: 0,
@@ -242,4 +261,28 @@ function statusReport(linkFacts: LinkFact[]): StatusReport {
 function restoreEnvironmentVariable(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
+}
+
+function pendingSkillChange(): DeployChange {
+  return {
+    id: 'skill:grilling',
+    owner: 'ide',
+    ide: 'codex',
+    surface: 'codex',
+    capability: 'skills',
+    name: 'grilling',
+    targetPath: '/home/.codex/skills/grilling/SKILL.md',
+    change: 'modify',
+    defaultSelected: true,
+    group: 'standard',
+    strategy: 'replace-entire-file',
+    deploymentKind: 'copy-projection',
+    preview: {
+      targetPath: '/home/.codex/skills/grilling/SKILL.md',
+      kind: 'text',
+      bytes: 14,
+      sha256: 'b'.repeat(64),
+      diff: '+ updated skill',
+    },
+  };
 }

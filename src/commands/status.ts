@@ -18,7 +18,11 @@ export async function showStatus(
   options: StatusOptions = {},
 ): Promise<StatusReport> {
   const report = await inspectStatus(context);
-  if (options.json) presentJson(report);
-  else presentDocument(context, renderStatusDocument(report), { verbose: options.verbose });
+  if (options.json) {
+    const { pendingChanges, ...jsonReport } = report;
+    presentJson(jsonReport);
+  } else {
+    presentDocument(context, renderStatusDocument(report), { verbose: options.verbose });
+  }
   return report;
 }

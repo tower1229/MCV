@@ -154,6 +154,7 @@ describe('mcv status', () => {
         expect.objectContaining({ code: 'deploy.noEnabledTargets' }),
       ]),
     });
+    expect(report).not.toHaveProperty('pendingChanges');
     expect(String(vi.mocked(console.log).mock.calls[0]?.[0])).not.toMatch(/\u001b\[/);
   });
 
@@ -176,6 +177,7 @@ describe('mcv status', () => {
     const output = String(vi.mocked(console.log).mock.calls.at(-1)?.[0]);
     const report = JSON.parse(output);
     expect(report).not.toHaveProperty('changes');
+    expect(report).not.toHaveProperty('pendingChanges');
     expect(report.pendingDeployment.total).toBeGreaterThan(0);
     expect(output).not.toContain('detail');
     expect(output.length).toBeLessThan(20_000);

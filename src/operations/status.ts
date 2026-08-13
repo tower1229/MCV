@@ -95,6 +95,7 @@ export type StatusReport = Omit<Report<DeployChange>, 'changes'> & {
   operation: 'status';
   repository: RepositoryStatusSummary;
   pendingDeployment: PendingDeploymentSummary;
+  pendingChanges: DeployChange[];
   postDeployLocalState: PostDeployLocalStateSummary;
   environment: StatusEnvironmentSummary;
   linkOutcomes: DeployLinkOutcome[];
@@ -132,6 +133,7 @@ export async function inspectStatus(context: DeviceContext): Promise<StatusRepor
     linkOutcomes: deployPlan.linkOutcomes,
     linkFacts: deployPlan.linkFacts,
     pendingDeployment: summarizePendingDeployment(changes),
+    pendingChanges: changes.filter((change) => change.group === 'standard'),
     postDeployLocalState: summarizePostDeployLocalState(state),
     environment: {
       missingVariables: environmentReport.missingVariables,

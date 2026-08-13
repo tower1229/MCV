@@ -35,6 +35,7 @@ export async function inspectStatus(context) {
         linkOutcomes: deployPlan.linkOutcomes,
         linkFacts: deployPlan.linkFacts,
         pendingDeployment: summarizePendingDeployment(changes),
+        pendingChanges: changes.filter((change) => change.group === 'standard'),
         postDeployLocalState: summarizePostDeployLocalState(state),
         environment: {
             missingVariables: environmentReport.missingVariables,
