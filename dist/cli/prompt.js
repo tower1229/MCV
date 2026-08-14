@@ -1,6 +1,8 @@
 import { createInterface } from 'readline/promises';
 import { presentPrompt } from '../presentation/output.js';
 export async function askInTerminal(question) {
+    if (typeof process.stdin.ref === 'function')
+        process.stdin.ref();
     const prompt = createInterface({ input: process.stdin, output: process.stdout });
     const cancellation = new AbortController();
     const handleInterrupt = () => cancellation.abort();

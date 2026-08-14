@@ -6,6 +6,7 @@ export type TerminalPromptOutcome =
   | { interrupted: true };
 
 export async function askInTerminal(question: string): Promise<TerminalPromptOutcome> {
+  if (typeof process.stdin.ref === 'function') process.stdin.ref();
   const prompt = createInterface({ input: process.stdin, output: process.stdout });
   const cancellation = new AbortController();
   const handleInterrupt = (): void => cancellation.abort();

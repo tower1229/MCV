@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { writeProfilesDocument } from '../../profiles/store.js';
 
 const expectPath = '/usr/bin/expect';
 const cliPath = path.join(process.cwd(), 'dist', 'index.js');
@@ -89,13 +90,52 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged MCV task launcher in a rea
     expect(directoryFiles(testRoot)).toEqual(before);
   }, 20_000);
 
+  it('keeps the Capture warning prompt open after selecting Capture from the menu', async () => {
+    writeBoundCaptureWarningFixture(testRoot);
+    const outcome = await runExpect([
+      'set timeout 12',
+      'log_user 1',
+      'spawn /bin/zsh -f -c {trap : INT; stty rows 24 columns 80; cd "$MCV_TEST_ROOT"; TERM=xterm-256color LC_ALL=en_US.UTF-8 "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
+      expectExact('Capture Local Configuration', 'Capture action'),
+      'send "\\r"',
+      'expect {',
+      '  -exact {? Acknowledge this warning and continue? [y/N]} {}',
+      '  timeout { puts stderr {Missing warning prompt}; exit 97 }',
+      '}',
+      'set timeout 2',
+      'expect {',
+      '  -exact {EXIT_CODE} { puts stderr {Capture prompt returned without input}; exit 98 }',
+      '  -exact {Capture cancelled} { puts stderr {Capture cancelled without input}; exit 98 }',
+      '  timeout {}',
+      '}',
+      'set timeout 8',
+      'send "n\\r"',
+      'expect {',
+      '  -exact {Capture cancelled; repository was not changed.} {}',
+      '  timeout { puts stderr {Missing cancel summary}; exit 97 }',
+      '}',
+      expectExact('EXIT_CODE:0', 'exit marker'),
+      expectEof(),
+      'exit 0',
+    ]);
+
+    expect(outcome.code, outcome.output).toBe(0);
+    expect(outcome.output).toContain('Acknowledge this warning and continue? [y/N]');
+    expect(outcome.output).toContain('Capture cancelled; repository was not changed.');
+  }, 25_000);
+
   it('hands Inspect Detected IDEs to a one-shot report and exits', async () => {
     const outcome = await runExpect([
       'set timeout 8',
       'log_user 1',
       'spawn /bin/zsh -f -c {trap : INT; stty rows 24 columns 80; cd "$MCV_TEST_ROOT"; TERM=xterm-256color LC_ALL=en_US.UTF-8 "$MCV_TEST_NODE" "$MCV_TEST_CLI"; code=$?; print -r -- EXIT_CODE:$code; exit $code}',
       expectExact('Inspect Detected IDEs', 'Inspect action'),
-      'send "\\033\\133B\\033\\133B\\r"',
+      'after 200',
+      'send "\\033\\[B"',
+      'after 50',
+      'send "\\033\\[B"',
+      'after 50',
+      'send "\\r"',
       expectExact('Codex:', 'Environment report'),
       expectExact('EXIT_CODE:0', 'exit marker'),
       expectEof(),
@@ -140,7 +180,12 @@ describe.skipIf(!fs.existsSync(expectPath))('packaged MCV task launcher in a rea
 });
 
 function expectExact(pattern: string, label: string): string {
-  return `expect {${escapeExpect(pattern)}} {} timeout {puts stderr "Missing ${label}"; exit 97}`;
+  return [
+    'expect {',
+    `  -exact {${escapeExpect(pattern)}} {}`,
+    `  timeout { puts stderr {Missing ${label}}; exit 97 }`,
+    '}',
+  ].join('\n');
 }
 
 function expectEof(): string {
@@ -160,4 +205,43 @@ function expectRestoredTerminal(output: string): void {
 
 function directoryFiles(root: string): string[] {
   return fs.readdirSync(root, { recursive: true, encoding: 'utf8' }).sort();
+}
+
+function writeBoundCaptureWarningFixture(root: string): void {
+  const repositoryPath = path.join(root, 'repository');
+  fs.mkdirSync(path.join(repositoryPath), { recursive: true });
+  fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.claude', 'settings.json'), '{ malformed }\n');
+  fs.writeFileSync(path.join(repositoryPath, 'mcv.yaml'), [
+    'schemaVersion: 5',
+    'repositoryId: menu-capture-warning',
+    'initializedAt: 2026-08-10T00:00:00.000Z',
+    'targets:',
+    '  claudeCode:',
+    '    enabled: true',
+    '  codex:',
+    '    enabled: false',
+    '  gemini:',
+    '    enabled: false',
+    'variables: {}',
+    'capture:',
+    '  preserveUnknownNativeFields: true',
+    'deploy:',
+    '  backupBeforeWrite: true',
+    '  useSymlinks: false',
+    '',
+  ].join('\n'));
+  writeProfilesDocument(repositoryPath, {
+    schemaVersion: 1,
+    profiles: { global: { assets: [] } },
+  });
+  const statePath = process.platform === 'darwin'
+    ? path.join(root, 'Library', 'Application Support', 'mcv', 'config.json')
+    : path.join(root, '.config', 'mcv', 'config.json');
+  fs.mkdirSync(path.dirname(statePath), { recursive: true });
+  fs.writeFileSync(statePath, `${JSON.stringify({
+    schemaVersion: 3,
+    repositoryPath,
+    defaultRepositoryId: 'menu-capture-warning',
+  }, null, 2)}\n`);
 }

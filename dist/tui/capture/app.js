@@ -8,7 +8,7 @@ import { renderCapturePlanDocument } from '../../renderers/capture.js';
 import { escapeTerminalControls, renderPresentationDocument } from '../../presentation/render.js';
 import { resolveOutputCapability } from '../../presentation/theme.js';
 import { recordCaptureSuccess } from '../../utils/state.js';
-import { preserveTerminalInputMode } from '../terminal-input-mode.js';
+import { preserveTerminalInputMode, restoreStdinKeepAlive } from '../terminal-input-mode.js';
 import { captureTuiReducer, createCaptureTuiState, } from './reducer.js';
 import { CaptureTuiView } from './view.js';
 export async function runCaptureReviewTui(context, initialPlan, dependencies = {}, runtime = {}) {
@@ -186,4 +186,5 @@ function restoreAfterRenderFailure(wasRaw) {
         process.stdin.setRawMode(wasRaw);
     }
     process.stdout.write('\u001b[?25h\u001b[?1049l');
+    restoreStdinKeepAlive();
 }

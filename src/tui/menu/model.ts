@@ -1,4 +1,4 @@
-export type MenuSituation = 'unbound' | 'bound' | 'blocked' | 'pending' | 'stable';
+export type MenuSituation = 'unbound' | 'bound' | 'blocked';
 
 export type MenuRepositorySummary =
   | { status: 'unbound' }
@@ -13,12 +13,6 @@ export interface MenuProfileSummary {
 
 export interface MenuSnapshot {
   repository: MenuRepositorySummary;
-  pendingDeployment: { total: number; add: number; modify: number; delete: number };
-  drift: { file: number; content: number; topology: number; missing: number };
-  missingVariableCount: number;
-  actionableIssueCount: number;
-  ides: { enabled: number; detected: number };
-  lastOperation: { kind: 'capture' | 'deploy' | 'restore'; time: string; success: boolean } | null;
   profiles: MenuProfileSummary[];
 }
 
@@ -56,7 +50,6 @@ export interface MenuItem {
 export interface MenuState {
   situation: MenuSituation;
   screen:
-    | 'loading'
     | 'home'
     | 'inspect'
     | 'more'
@@ -206,23 +199,7 @@ export function menuReducer(state: MenuState, event: MenuEvent): MenuState {
 export function deriveMenuSituation(snapshot: MenuSnapshot): MenuSituation {
   if (snapshot.repository.status === 'unbound') return 'unbound';
   if (snapshot.repository.status === 'blocked') return 'blocked';
-  if (snapshot.pendingDeployment.total > 0) return 'pending';
-  if (
-    snapshot.lastOperation
-    && totalDrift(snapshot) === 0
-    && snapshot.missingVariableCount === 0
-    && snapshot.actionableIssueCount === 0
-  ) {
-    return 'stable';
-  }
   return 'bound';
-}
-
-function totalDrift(snapshot: MenuSnapshot): number {
-  return snapshot.drift.file
-    + snapshot.drift.content
-    + snapshot.drift.topology
-    + snapshot.drift.missing;
 }
 
 function homeItems(situation: MenuSituation): MenuItem[] {
@@ -242,17 +219,14 @@ function homeItems(situation: MenuSituation): MenuItem[] {
       item('quit', 'Quit', 'Leave MCV without changes'),
     ];
   }
-  const common = [
-    item('deploy', 'Deploy Environment', 'Apply selected Profiles to a project or this device'),
+  return [
     item('capture', 'Capture Local Configuration', 'Review local changes before adding them to the Repository'),
+    item('deploy', 'Deploy Environment', 'Apply selected Profiles to a project or this device'),
     item('profiles', 'Manage Profiles', 'Choose which Assets travel together'),
     item('inspect', 'Inspect System', 'Review deployment, environment, and Repository status'),
     item('more', 'More', 'Restore and Repository maintenance commands'),
     item('quit', 'Quit', 'Leave MCV without changes'),
   ];
-  if (situation === 'pending') return common;
-  if (situation === 'bound') return moveFirst(common, 'capture');
-  return moveFirst(common, 'inspect');
 }
 
 function deployScopeItems(): MenuItem[] {
@@ -382,11 +356,6 @@ function restoreScopeItems(): MenuItem[] {
     item('project-restore', 'Project', 'Use the current project Deploy backup'),
     item('global-restore', 'Global', 'Use the latest device-global Deploy backup'),
   ];
-}
-
-function moveFirst(items: MenuItem[], id: MenuItemId): MenuItem[] {
-  const first = items.find((candidate) => candidate.id === id);
-  return first ? [first, ...items.filter((candidate) => candidate.id !== id)] : items;
 }
 
 function item(id: MenuItemId, label: string, description: string): MenuItem {

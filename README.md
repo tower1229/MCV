@@ -141,7 +141,7 @@ mcv restore
 ## 命令
 
 ```text
-mcv            能力足够的 TTY 打开一次性任务启动器；否则输出安全报告
+mcv            能力足够的 TTY 直接打开一次性任务启动器；否则输出安全报告
 mcv capture    简单 Plan 行式审阅、复杂 Plan 自动 TUI；--tui/--no-tui/--dry-run/--yes/--json/--verbose
 mcv deploy     一次性 Deploy Plan/确认/Apply；默认项目 scope；需 Profile 或 --global；支持 --verbose；裸调用 exit 2
 mcv profile    Profile 维护 TUI（TTY）或 list/show/create/edit/delete 子命令

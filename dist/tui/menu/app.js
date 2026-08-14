@@ -11,7 +11,8 @@ export async function runMainMenu(context, projectRoot, dependencies = {}, runti
     const wasRaw = Boolean(process.stdin.isRaw);
     const restoreInputMode = (runtime.preserveTerminalInputMode ?? preserveTerminalInputMode)(context.platform);
     try {
-        instance = (runtime.render ?? render)(_jsx(MainMenuApp, { context: context, projectRoot: projectRoot, dependencies: dependencies }), {
+        const snapshot = (dependencies.createSnapshot ?? createMenuSnapshot)(context);
+        instance = (runtime.render ?? render)(_jsx(MainMenuApp, { initialState: createMenuState(snapshot, projectRoot) }), {
             alternateScreen: true,
             interactive: true,
             exitOnCtrlC: false,
@@ -33,39 +34,18 @@ export async function runMainMenu(context, projectRoot, dependencies = {}, runti
         }
     }
 }
-function MainMenuApp({ context, projectRoot, dependencies, }) {
-    const [state, setState] = useState();
+function MainMenuApp({ initialState, }) {
+    const [state, setState] = useState(initialState);
     const stateRef = useRef(state);
     stateRef.current = state;
     const { exit } = useApp();
     const windowSize = useWindowSize();
     useEffect(() => {
-        let active = true;
-        void (dependencies.createSnapshot ?? createMenuSnapshot)(context).then((snapshot) => {
-            if (active)
-                setState(createMenuState(snapshot, projectRoot));
-        }, (error) => {
-            if (!active)
-                return;
-            exit({
-                status: 'failed',
-                error: error instanceof Error ? error : new Error(String(error)),
-            });
-        });
-        return () => { active = false; };
-    }, [context, dependencies, exit, projectRoot]);
-    useEffect(() => {
-        if (state?.outcome)
+        if (state.outcome)
             exit({ status: 'selected', action: state.outcome });
-    }, [exit, state?.outcome]);
+    }, [exit, state.outcome]);
     useInput((input, key) => {
         const current = stateRef.current;
-        if (!current) {
-            if (key.ctrl && input === 'c') {
-                exit({ status: 'selected', action: { type: 'quit', reason: 'interrupted' } });
-            }
-            return;
-        }
         if (key.ctrl && input === 'c')
             return setState(menuReducer(current, { type: 'interrupt' }));
         if (key.escape)
@@ -98,15 +78,10 @@ function MainMenuApp({ context, projectRoot, dependencies, }) {
         if (key.return)
             setState(menuReducer(current, { type: 'select' }));
     });
-    return state
-        ? _jsx(MainMenuView, { state: state, columns: windowSize.columns, rows: windowSize.rows })
-        : _jsx(LoadingView, { columns: windowSize.columns, rows: windowSize.rows });
-}
-function LoadingView({ columns, rows }) {
-    return (_jsxs(Box, { flexDirection: "column", width: columns, height: rows, children: [_jsx(Text, { ...inkEmphasisProps(), children: truncateDisplay('MCV · Mobile Configuration Vehicle', columns) }), _jsx(Text, { children: "Inspecting Repository and device state\u2026" }), _jsx(Box, { flexGrow: 1 }), _jsx(Text, { ...inkRoleProps('muted'), children: "Ctrl+C Interrupt" })] }));
+    return _jsx(MainMenuView, { state: state, columns: windowSize.columns, rows: windowSize.rows });
 }
 function MainMenuView({ state, columns, rows }) {
-    return (_jsxs(Box, { flexDirection: "column", width: columns, height: rows, children: [_jsx(Text, { ...inkEmphasisProps(), children: truncateDisplay('MCV · Mobile Configuration Vehicle', columns) }), _jsx(Text, { ...inkRoleProps('muted'), children: truncateDisplay(screenSubtitle(state), columns) }), state.screen === 'home' ? _jsx(HomeSummary, { state: state, columns: columns }) : null, state.screen === 'bind-path' ? (_jsxs(Box, { flexDirection: "column", marginTop: 1, children: [_jsx(Text, { ...inkEmphasisProps(), children: "Repository path" }), _jsx(Text, { children: truncateDisplay(`${state.bindPath}█`, columns) })] })) : null, _jsx(Box, { flexDirection: "column", marginTop: 1, flexGrow: 1, children: state.items.map((item, index) => {
+    return (_jsxs(Box, { flexDirection: "column", width: columns, height: rows, children: [_jsx(Text, { ...inkEmphasisProps(), children: truncateDisplay('MCV · Mobile Configuration Vehicle', columns) }), _jsx(Text, { ...inkRoleProps('muted'), children: truncateDisplay(screenSubtitle(state), columns) }), state.screen === 'bind-path' ? (_jsxs(Box, { flexDirection: "column", marginTop: 1, children: [_jsx(Text, { ...inkEmphasisProps(), children: "Repository path" }), _jsx(Text, { children: truncateDisplay(`${state.bindPath}█`, columns) })] })) : null, _jsx(Box, { flexDirection: "column", marginTop: 1, flexGrow: 1, children: state.items.map((item, index) => {
                     const focused = index === state.cursor;
                     const profileId = item.id.startsWith('profile:') ? item.id.slice('profile:'.length) : undefined;
                     const selection = profileId
@@ -115,27 +90,8 @@ function MainMenuView({ state, columns, rows }) {
                     return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { ...inkRoleProps(focused ? 'information' : 'muted', { emphasis: focused }), children: truncateDisplay(`${focused ? '›' : ' '} ${selection}${item.label}`, columns) }), focused ? (_jsx(Text, { ...inkRoleProps('muted'), children: truncateDisplay(`  ${item.description}`, columns) })) : null] }, item.id));
                 }) }), state.notice ? _jsxs(Text, { ...inkRoleProps('attention'), children: ["! ", truncateDisplay(state.notice, columns - 2)] }) : null, _jsx(Text, { children: truncateDisplay(helpLine(state), columns) })] }));
 }
-function HomeSummary({ state, columns }) {
-    const snapshot = state.snapshot;
-    const repository = snapshot.repository.status === 'valid'
-        ? `${snapshot.repository.path} · schema ${snapshot.repository.schemaVersion}`
-        : snapshot.repository.status === 'blocked'
-            ? snapshot.repository.message
-            : 'Not bound';
-    const pending = snapshot.pendingDeployment.total === 0
-        ? 'None'
-        : `${snapshot.pendingDeployment.total} · ${snapshot.pendingDeployment.add} add · ${snapshot.pendingDeployment.modify} modify · ${snapshot.pendingDeployment.delete} delete`;
-    const last = snapshot.lastOperation
-        ? `${snapshot.lastOperation.kind} ${snapshot.lastOperation.success ? 'succeeded' : 'failed'} · ${snapshot.lastOperation.time}`
-        : 'No operation recorded';
-    if (state.situation === 'unbound') {
-        return (_jsxs(Box, { flexDirection: "column", marginTop: 1, children: [_jsx(Text, { children: truncateDisplay('Repository  Not bound', columns) }), _jsx(Text, { children: truncateDisplay(`IDEs        ${snapshot.ides.detected} detected`, columns) })] }));
-    }
-    return (_jsxs(Box, { flexDirection: "column", marginTop: 1, children: [_jsx(Text, { children: truncateDisplay(`Repository  ${repository}`, columns) }), _jsx(Text, { children: truncateDisplay(`Pending     ${pending}`, columns) }), _jsx(Text, { children: truncateDisplay(`IDEs        ${snapshot.ides.enabled} enabled · ${snapshot.ides.detected} detected`, columns) }), _jsx(Text, { children: truncateDisplay(`Last        ${last}`, columns) })] }));
-}
 function screenSubtitle(state) {
     switch (state.screen) {
-        case 'loading': return 'Loading';
         case 'home': return `Task launcher · ${state.situation}`;
         case 'inspect': return 'Inspect system';
         case 'more': return 'More tools';
@@ -146,8 +102,6 @@ function screenSubtitle(state) {
     }
 }
 function helpLine(state) {
-    if (state.screen === 'loading')
-        return 'Ctrl+C Interrupt';
     if (state.screen === 'bind-path')
         return 'Type path · Enter Continue · Esc Back · Ctrl+C Interrupt';
     if (state.screen === 'deploy-profiles')

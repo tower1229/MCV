@@ -33,11 +33,13 @@ describe('terminal prompt interruption', () => {
           });
         }),
     );
+    const ref = vi.spyOn(process.stdin, 'ref').mockReturnValue(process.stdin);
 
     const outcome = askInTerminal('Continue? ');
     process.emit('SIGINT');
 
     await expect(outcome).resolves.toEqual({ interrupted: true });
+    expect(ref).toHaveBeenCalled();
     expect(terminalPrompt.close).toHaveBeenCalledOnce();
     expect(process.listenerCount('SIGINT')).toBe(0);
   });

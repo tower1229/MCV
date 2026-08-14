@@ -844,7 +844,7 @@ mcv unbind
 mcv
 ```
 
-能力足够的交互式 TTY 打开一次性任务启动器；非 TTY、重定向、低能力或过小终端输出安全报告。有效绑定回退 Overview，未绑定或无效绑定回退 Repository Report。`mcv status` 始终是一次性 Overview。
+能力足够的交互式 TTY 打开一次性任务启动器，不扫描设备配置、不展示 Overview。非 TTY、重定向、低能力或过小终端输出安全报告。有效绑定回退 Overview，未绑定或无效绑定回退 Repository Report。`mcv status` 始终是一次性 Overview。
 
 ```text
 Repository: ...

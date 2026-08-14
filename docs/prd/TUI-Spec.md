@@ -9,17 +9,15 @@
 
 ## 主菜单状态模型
 
-`MenuSnapshot` 只包含 Repository、Pending Deployment Change、IDE、Last Operation、Profile 和用于分类的只读摘要。`MenuState` 只承担 loading、home、inspect、more、Deploy/Restore 选择和 Bind 路径输入。`MenuAction` 只表达 Capture、Profiles、Inspect、Deploy、Init、Bind、Restore、Migrate、Unbind、Help 或 Quit 意图，不能携带 Plan、Change、Issue、授权或 Result。
+`MenuSnapshot` 只包含 Repository 绑定身份和 Deploy 选择所需的 Profile 名单。启动器打开前不扫描设备配置、不编 Deploy Plan、不计算 Pending Deployment Change 或 Drift、不展示 Overview。`MenuState` 只承担 home、inspect、more、Deploy/Restore 选择和 Bind 路径输入。`MenuAction` 只表达 Capture、Profiles、Inspect、Deploy、Init、Bind、Restore、Migrate、Unbind、Help 或 Quit 意图，不能携带 Plan、Change、Issue、授权或 Result。
 
 分类优先级与默认焦点：
 
 1. `unbound` → Create Repository。
 2. `blocked` → Inspect System。
-3. `pending` → Deploy Environment。
-4. `stable` → Inspect System。
-5. 其他有效绑定为 `bound` → Capture Local Configuration。
+3. `bound` → Capture Local Configuration。
 
-已绑定首页依次显示标题、Repository/Pending/IDEs/Last 四项摘要，以及 Deploy、Capture、Profiles、Inspect、More、Quit。未绑定首页只显示 Repository/IDE 摘要和 Create、Bind、Inspect Detected IDEs、Help、Quit，不生成 Deploy Status。Inspect 包含 Overview、Environment、Repository；More 包含 Restore、Migrate、Unbind、Discover、Help。
+已绑定首页依次显示标题以及 Capture、Deploy、Profiles、Inspect、More、Quit。未绑定首页显示 Create、Bind、Inspect Detected IDEs、Help、Quit。Inspect 包含 Overview、Environment、Repository；More 包含 Restore、Migrate、Unbind、Discover、Help。Overview 只在用户选择 Inspect Overview 或运行 `mcv status` 后作为一次性报告出现。
 
 ## 任务交接与写边界
 
@@ -48,7 +46,7 @@ Operation 可发布 `as const` 定义的阶段事件：Inspecting repository、S
 
 ## 测试契约
 
-- 纯模型测试覆盖五种 Situation、顺序/默认焦点、导航/返回/取消/中断和 Deploy 默认值。
+- 纯模型测试覆盖三种 Situation、顺序/默认焦点、导航/返回/取消/中断和 Deploy 默认值。
 - packaged `dist/index.js` 测试覆盖路由、真实任务结果、退出码和取消零写入；不以大面积视图快照或私有调用顺序为契约。
 - macOS real PTY 与 Windows native ConPTY 覆盖正常退出、Ctrl+C、render failure、alternate screen、光标和输入模式恢复，以及 `NO_COLOR`/Unicode。
 - 非 TTY、Status、帮助、版本、JSON 单文档、MCP 和显式命令必须保持兼容。

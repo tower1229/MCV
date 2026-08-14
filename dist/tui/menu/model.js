@@ -109,21 +109,7 @@ export function deriveMenuSituation(snapshot) {
         return 'unbound';
     if (snapshot.repository.status === 'blocked')
         return 'blocked';
-    if (snapshot.pendingDeployment.total > 0)
-        return 'pending';
-    if (snapshot.lastOperation
-        && totalDrift(snapshot) === 0
-        && snapshot.missingVariableCount === 0
-        && snapshot.actionableIssueCount === 0) {
-        return 'stable';
-    }
     return 'bound';
-}
-function totalDrift(snapshot) {
-    return snapshot.drift.file
-        + snapshot.drift.content
-        + snapshot.drift.topology
-        + snapshot.drift.missing;
 }
 function homeItems(situation) {
     if (situation === 'unbound') {
@@ -142,19 +128,14 @@ function homeItems(situation) {
             item('quit', 'Quit', 'Leave MCV without changes'),
         ];
     }
-    const common = [
-        item('deploy', 'Deploy Environment', 'Apply selected Profiles to a project or this device'),
+    return [
         item('capture', 'Capture Local Configuration', 'Review local changes before adding them to the Repository'),
+        item('deploy', 'Deploy Environment', 'Apply selected Profiles to a project or this device'),
         item('profiles', 'Manage Profiles', 'Choose which Assets travel together'),
         item('inspect', 'Inspect System', 'Review deployment, environment, and Repository status'),
         item('more', 'More', 'Restore and Repository maintenance commands'),
         item('quit', 'Quit', 'Leave MCV without changes'),
     ];
-    if (situation === 'pending')
-        return common;
-    if (situation === 'bound')
-        return moveFirst(common, 'capture');
-    return moveFirst(common, 'inspect');
 }
 function deployScopeItems() {
     return [
@@ -269,10 +250,6 @@ function restoreScopeItems() {
         item('project-restore', 'Project', 'Use the current project Deploy backup'),
         item('global-restore', 'Global', 'Use the latest device-global Deploy backup'),
     ];
-}
-function moveFirst(items, id) {
-    const first = items.find((candidate) => candidate.id === id);
-    return first ? [first, ...items.filter((candidate) => candidate.id !== id)] : items;
 }
 function item(id, label, description) {
     return { id, label, description };

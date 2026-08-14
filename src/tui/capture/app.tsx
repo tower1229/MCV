@@ -19,7 +19,7 @@ import { renderCapturePlanDocument } from '../../renderers/capture.js';
 import { escapeTerminalControls, renderPresentationDocument } from '../../presentation/render.js';
 import { resolveOutputCapability } from '../../presentation/theme.js';
 import { recordCaptureSuccess } from '../../utils/state.js';
-import { preserveTerminalInputMode } from '../terminal-input-mode.js';
+import { preserveTerminalInputMode, restoreStdinKeepAlive } from '../terminal-input-mode.js';
 import {
   captureTuiReducer,
   createCaptureTuiState,
@@ -251,4 +251,5 @@ function restoreAfterRenderFailure(wasRaw: boolean): void {
     process.stdin.setRawMode(wasRaw);
   }
   process.stdout.write('\u001b[?25h\u001b[?1049l');
+  restoreStdinKeepAlive();
 }

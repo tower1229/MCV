@@ -4,7 +4,7 @@ import { useEffect, useReducer, useRef } from 'react';
 import { deriveAssetCatalog } from '../../assets/catalog.js';
 import { createProfileService, } from '../../profiles/service.js';
 import { resolveBoundRepository } from '../../utils/repository.js';
-import { preserveTerminalInputMode } from '../terminal-input-mode.js';
+import { preserveTerminalInputMode, restoreStdinKeepAlive } from '../terminal-input-mode.js';
 import { createInitialProfileEditorState, FILTER_OPTIONS, filteredCatalogAssets, profileEditorReducer, selectedAssetIds, } from './reducer.js';
 import { ProfileEditorView } from './view.js';
 export async function runProfileEditor(context, options = {}, dependencies = {}, runtime = {}) {
@@ -283,4 +283,5 @@ function restoreAfterRenderFailure(wasRaw) {
         process.stdin.setRawMode(wasRaw);
     }
     process.stdout.write('\u001b[?25h\u001b[?1049l');
+    restoreStdinKeepAlive();
 }

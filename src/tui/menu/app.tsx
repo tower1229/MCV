@@ -46,8 +46,9 @@ export async function runMainMenu(
     runtime.preserveTerminalInputMode ?? preserveTerminalInputMode
   )(context.platform);
   try {
+    const snapshot = (dependencies.createSnapshot ?? createMenuSnapshot)(context);
     instance = (runtime.render ?? render)(
-      <MainMenuApp context={context} projectRoot={projectRoot} dependencies={dependencies} />,
+      <MainMenuApp initialState={createMenuState(snapshot, projectRoot)} />,
       {
         alternateScreen: true,
         interactive: true,
@@ -69,49 +70,22 @@ export async function runMainMenu(
 }
 
 function MainMenuApp({
-  context,
-  projectRoot,
-  dependencies,
+  initialState,
 }: {
-  context: DeviceContext;
-  projectRoot: string;
-  dependencies: MainMenuDependencies;
+  initialState: MenuState;
 }) {
-  const [state, setState] = useState<MenuState>();
+  const [state, setState] = useState(initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
   const { exit } = useApp();
   const windowSize = useWindowSize();
 
   useEffect(() => {
-    let active = true;
-    void (dependencies.createSnapshot ?? createMenuSnapshot)(context).then(
-      (snapshot) => {
-        if (active) setState(createMenuState(snapshot, projectRoot));
-      },
-      (error: unknown) => {
-        if (!active) return;
-        exit({
-          status: 'failed',
-          error: error instanceof Error ? error : new Error(String(error)),
-        } satisfies MainMenuOutcome);
-      },
-    );
-    return () => { active = false; };
-  }, [context, dependencies, exit, projectRoot]);
-
-  useEffect(() => {
-    if (state?.outcome) exit({ status: 'selected', action: state.outcome } satisfies MainMenuOutcome);
-  }, [exit, state?.outcome]);
+    if (state.outcome) exit({ status: 'selected', action: state.outcome } satisfies MainMenuOutcome);
+  }, [exit, state.outcome]);
 
   useInput((input, key) => {
     const current = stateRef.current;
-    if (!current) {
-      if (key.ctrl && input === 'c') {
-        exit({ status: 'selected', action: { type: 'quit', reason: 'interrupted' } } satisfies MainMenuOutcome);
-      }
-      return;
-    }
     if (key.ctrl && input === 'c') return setState(menuReducer(current, { type: 'interrupt' }));
     if (key.escape) return setState(menuReducer(current, { type: 'back' }));
     if (current.screen === 'bind-path') {
@@ -137,20 +111,7 @@ function MainMenuApp({
     if (key.return) setState(menuReducer(current, { type: 'select' }));
   });
 
-  return state
-    ? <MainMenuView state={state} columns={windowSize.columns} rows={windowSize.rows} />
-    : <LoadingView columns={windowSize.columns} rows={windowSize.rows} />;
-}
-
-function LoadingView({ columns, rows }: { columns: number; rows: number }) {
-  return (
-    <Box flexDirection="column" width={columns} height={rows}>
-      <Text {...inkEmphasisProps()}>{truncateDisplay('MCV · Mobile Configuration Vehicle', columns)}</Text>
-      <Text>Inspecting Repository and device state…</Text>
-      <Box flexGrow={1} />
-      <Text {...inkRoleProps('muted')}>Ctrl+C Interrupt</Text>
-    </Box>
-  );
+  return <MainMenuView state={state} columns={windowSize.columns} rows={windowSize.rows} />;
 }
 
 function MainMenuView({ state, columns, rows }: { state: MenuState; columns: number; rows: number }) {
@@ -158,7 +119,6 @@ function MainMenuView({ state, columns, rows }: { state: MenuState; columns: num
     <Box flexDirection="column" width={columns} height={rows}>
       <Text {...inkEmphasisProps()}>{truncateDisplay('MCV · Mobile Configuration Vehicle', columns)}</Text>
       <Text {...inkRoleProps('muted')}>{truncateDisplay(screenSubtitle(state), columns)}</Text>
-      {state.screen === 'home' ? <HomeSummary state={state} columns={columns} /> : null}
       {state.screen === 'bind-path' ? (
         <Box flexDirection="column" marginTop={1}>
           <Text {...inkEmphasisProps()}>Repository path</Text>
@@ -192,40 +152,8 @@ function MainMenuView({ state, columns, rows }: { state: MenuState; columns: num
   );
 }
 
-function HomeSummary({ state, columns }: { state: MenuState; columns: number }) {
-  const snapshot = state.snapshot;
-  const repository = snapshot.repository.status === 'valid'
-    ? `${snapshot.repository.path} · schema ${snapshot.repository.schemaVersion}`
-    : snapshot.repository.status === 'blocked'
-      ? snapshot.repository.message
-      : 'Not bound';
-  const pending = snapshot.pendingDeployment.total === 0
-    ? 'None'
-    : `${snapshot.pendingDeployment.total} · ${snapshot.pendingDeployment.add} add · ${snapshot.pendingDeployment.modify} modify · ${snapshot.pendingDeployment.delete} delete`;
-  const last = snapshot.lastOperation
-    ? `${snapshot.lastOperation.kind} ${snapshot.lastOperation.success ? 'succeeded' : 'failed'} · ${snapshot.lastOperation.time}`
-    : 'No operation recorded';
-  if (state.situation === 'unbound') {
-    return (
-      <Box flexDirection="column" marginTop={1}>
-        <Text>{truncateDisplay('Repository  Not bound', columns)}</Text>
-        <Text>{truncateDisplay(`IDEs        ${snapshot.ides.detected} detected`, columns)}</Text>
-      </Box>
-    );
-  }
-  return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text>{truncateDisplay(`Repository  ${repository}`, columns)}</Text>
-      <Text>{truncateDisplay(`Pending     ${pending}`, columns)}</Text>
-      <Text>{truncateDisplay(`IDEs        ${snapshot.ides.enabled} enabled · ${snapshot.ides.detected} detected`, columns)}</Text>
-      <Text>{truncateDisplay(`Last        ${last}`, columns)}</Text>
-    </Box>
-  );
-}
-
 function screenSubtitle(state: MenuState): string {
   switch (state.screen) {
-    case 'loading': return 'Loading';
     case 'home': return `Task launcher · ${state.situation}`;
     case 'inspect': return 'Inspect system';
     case 'more': return 'More tools';
@@ -237,7 +165,6 @@ function screenSubtitle(state: MenuState): string {
 }
 
 function helpLine(state: MenuState): string {
-  if (state.screen === 'loading') return 'Ctrl+C Interrupt';
   if (state.screen === 'bind-path') return 'Type path · Enter Continue · Esc Back · Ctrl+C Interrupt';
   if (state.screen === 'deploy-profiles') return '↑↓ Move · Space Select · Enter Continue · Esc Back · Ctrl+C Interrupt';
   if (state.screen === 'home') return '↑↓ Navigate · Enter Select · Esc/q Quit · Ctrl+C Interrupt';

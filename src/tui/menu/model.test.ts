@@ -10,9 +10,7 @@ describe('MCV main menu model', () => {
   it.each([
     ['unbound', snapshot({ repository: { status: 'unbound' } }), 'create-repository'],
     ['blocked', snapshot({ repository: { status: 'blocked', message: 'Migration required.' } }), 'inspect'],
-    ['pending', snapshot({ pendingDeployment: { total: 2, add: 1, modify: 1, delete: 0 } }), 'deploy'],
-    ['bound', snapshot({ lastOperation: null }), 'capture'],
-    ['stable', snapshot(), 'inspect'],
+    ['bound', snapshot(), 'capture'],
   ] as const)('derives the %s situation and its primary task', (situation, input, primaryTask) => {
     const state = createMenuState(input, '/project');
 
@@ -22,10 +20,9 @@ describe('MCV main menu model', () => {
   });
 
   it('navigates into Deploy intent without creating a business Plan', () => {
-    let state = createMenuState(snapshot({
-      pendingDeployment: { total: 1, add: 0, modify: 1, delete: 0 },
-    }), '/project');
+    let state = createMenuState(snapshot(), '/project');
 
+    state = menuReducer(state, { type: 'move', delta: 1 });
     state = menuReducer(state, { type: 'select' });
     expect(state.screen).toBe('deploy-scope');
     expect(state.deployScope).toBe('project');
@@ -41,9 +38,8 @@ describe('MCV main menu model', () => {
   });
 
   it('emits only a reviewed Project Deploy intent after an explicit Profile selection', () => {
-    let state = createMenuState(snapshot({
-      pendingDeployment: { total: 1, add: 1, modify: 0, delete: 0 },
-    }), '/project');
+    let state = createMenuState(snapshot(), '/project');
+    state = menuReducer(state, { type: 'move', delta: 1 });
     state = menuReducer(state, { type: 'select' });
     state = menuReducer(state, { type: 'select' });
     state = menuReducer(state, { type: 'move', delta: 1 });
@@ -104,12 +100,6 @@ function snapshot(overrides: Partial<MenuSnapshot> = {}): MenuSnapshot {
       id: 'repository-id',
       schemaVersion: 5,
     },
-    pendingDeployment: { total: 0, add: 0, modify: 0, delete: 0 },
-    drift: { file: 0, content: 0, topology: 0, missing: 0 },
-    missingVariableCount: 0,
-    actionableIssueCount: 0,
-    ides: { enabled: 3, detected: 3 },
-    lastOperation: { kind: 'deploy', time: '2026-08-12T00:00:00.000Z', success: true },
     profiles: [
       { id: 'global', title: 'Global', assetCount: 4 },
       { id: 'dev', title: 'Development', assetCount: 2 },

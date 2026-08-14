@@ -14,7 +14,7 @@ import {
   type ProfileService,
 } from '../../profiles/service.js';
 import { resolveBoundRepository } from '../../utils/repository.js';
-import { preserveTerminalInputMode } from '../terminal-input-mode.js';
+import { preserveTerminalInputMode, restoreStdinKeepAlive } from '../terminal-input-mode.js';
 import {
   createInitialProfileEditorState,
   FILTER_OPTIONS,
@@ -374,4 +374,5 @@ function restoreAfterRenderFailure(wasRaw: boolean): void {
     process.stdin.setRawMode(wasRaw);
   }
   process.stdout.write('\u001b[?25h\u001b[?1049l');
+  restoreStdinKeepAlive();
 }
