@@ -133,16 +133,9 @@ function MainMenuView({ state, columns, rows }: { state: MenuState; columns: num
             ? `[${state.selectedProfileIds.includes(profileId) ? 'x' : ' '}] `
             : '';
           return (
-            <Box key={item.id} flexDirection="column">
-              <Text {...inkRoleProps(focused ? 'information' : 'muted', { emphasis: focused })}>
-                {truncateDisplay(`${focused ? '›' : ' '} ${selection}${item.label}`, columns)}
-              </Text>
-              {focused ? (
-                <Text {...inkRoleProps('muted')}>
-                  {truncateDisplay(`  ${item.description}`, columns)}
-                </Text>
-              ) : null}
-            </Box>
+            <Text key={item.id} {...inkRoleProps(focused ? 'information' : 'muted', { emphasis: focused })}>
+              {truncateDisplay(`${focused ? '›' : ' '} ${selection}${item.label}`, columns)}
+            </Text>
           );
         })}
       </Box>

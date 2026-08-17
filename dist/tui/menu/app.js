@@ -87,7 +87,7 @@ function MainMenuView({ state, columns, rows }) {
                     const selection = profileId
                         ? `[${state.selectedProfileIds.includes(profileId) ? 'x' : ' '}] `
                         : '';
-                    return (_jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { ...inkRoleProps(focused ? 'information' : 'muted', { emphasis: focused }), children: truncateDisplay(`${focused ? '›' : ' '} ${selection}${item.label}`, columns) }), focused ? (_jsx(Text, { ...inkRoleProps('muted'), children: truncateDisplay(`  ${item.description}`, columns) })) : null] }, item.id));
+                    return (_jsx(Text, { ...inkRoleProps(focused ? 'information' : 'muted', { emphasis: focused }), children: truncateDisplay(`${focused ? '›' : ' '} ${selection}${item.label}`, columns) }, item.id));
                 }) }), state.notice ? _jsxs(Text, { ...inkRoleProps('attention'), children: ["! ", truncateDisplay(state.notice, columns - 2)] }) : null, _jsx(Text, { children: truncateDisplay(helpLine(state), columns) })] }));
 }
 function screenSubtitle(state) {

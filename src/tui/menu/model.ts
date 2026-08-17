@@ -44,7 +44,6 @@ export type MenuItemId =
 export interface MenuItem {
   id: MenuItemId;
   label: string;
-  description: string;
 }
 
 export interface MenuState {
@@ -205,34 +204,34 @@ export function deriveMenuSituation(snapshot: MenuSnapshot): MenuSituation {
 function homeItems(situation: MenuSituation): MenuItem[] {
   if (situation === 'unbound') {
     return [
-      item('create-repository', 'Create Repository', 'Initialize MCV in the current directory'),
-      item('bind-repository', 'Bind Existing Repository', 'Use an existing MCV Repository on this device'),
-      item('inspect-environment', 'Inspect Detected IDEs', 'See supported IDEs and configuration paths'),
-      item('help', 'Help', 'Show every command and option'),
-      item('quit', 'Quit', 'Leave MCV without changes'),
+      item('create-repository', 'Create Repository'),
+      item('bind-repository', 'Bind Existing Repository'),
+      item('inspect-environment', 'Inspect Detected IDEs'),
+      item('help', 'Help'),
+      item('quit', 'Quit'),
     ];
   }
   if (situation === 'blocked') {
     return [
-      item('inspect', 'Inspect System', 'Review the Repository and blocking state'),
-      item('more', 'More', 'Repository recovery and maintenance commands'),
-      item('quit', 'Quit', 'Leave MCV without changes'),
+      item('inspect', 'Inspect System'),
+      item('more', 'More'),
+      item('quit', 'Quit'),
     ];
   }
   return [
-    item('capture', 'Capture Local Configuration', 'Review local changes before adding them to the Repository'),
-    item('deploy', 'Deploy Environment', 'Apply selected Profiles to a project or this device'),
-    item('profiles', 'Manage Profiles', 'Choose which Assets travel together'),
-    item('inspect', 'Inspect System', 'Review deployment, environment, and Repository status'),
-    item('more', 'More', 'Restore and Repository maintenance commands'),
-    item('quit', 'Quit', 'Leave MCV without changes'),
+    item('capture', 'Capture Local Configuration'),
+    item('deploy', 'Deploy Environment'),
+    item('profiles', 'Manage Profiles'),
+    item('inspect', 'Inspect System'),
+    item('more', 'More'),
+    item('quit', 'Quit'),
   ];
 }
 
 function deployScopeItems(): MenuItem[] {
   return [
-    item('project-scope', 'Project', 'Deploy into the current project directory'),
-    item('global-scope', 'Global', 'Deploy to device-global IDE locations'),
+    item('project-scope', 'Project'),
+    item('global-scope', 'Global'),
   ];
 }
 
@@ -241,9 +240,8 @@ function deployProfileItems(profiles: MenuProfileSummary[]): MenuItem[] {
     ...profiles.map((profile) => item(
       `profile:${profile.id}`,
       profile.title ? `${profile.title} (${profile.id})` : profile.id,
-      `${profile.assetCount} Asset${profile.assetCount === 1 ? '' : 's'}`,
     )),
-    item('continue-deploy', 'Continue', 'Review the Deploy Plan in the command workflow'),
+    item('continue-deploy', 'Continue'),
   ];
 }
 
@@ -252,7 +250,7 @@ function selectHomeItem(state: MenuState, selected: MenuItemId): MenuState {
     case 'create-repository':
       return { ...state, outcome: { type: 'init', repositoryPath: state.projectRoot } };
     case 'bind-repository':
-      return openScreen(state, 'bind-path', [item('submit-bind', 'Continue', 'Review the Bind Plan')]);
+      return openScreen(state, 'bind-path', [item('submit-bind', 'Continue')]);
     case 'deploy':
       return {
         ...openScreen(state, 'deploy-scope', deployScopeItems()),
@@ -332,19 +330,19 @@ function openScreen(
 
 function inspectItems(): MenuItem[] {
   return [
-    item('inspect-overview', 'Overview', 'Pending Deployment Change and Drift'),
-    item('inspect-environment', 'Environment', 'Detected IDEs and configuration paths'),
-    item('inspect-repository', 'Repository', 'Binding, identity, schema, and Git status'),
+    item('inspect-overview', 'Overview'),
+    item('inspect-environment', 'Environment'),
+    item('inspect-repository', 'Repository'),
   ];
 }
 
 function moreItems(state: MenuState): MenuItem[] {
   const items = [
-    item('restore', 'Restore', 'Restore the latest verified Deploy backup'),
-    item('migrate', 'Migrate Repository', 'Review a required schema migration'),
-    item('unbind', 'Unbind Repository', 'Remove this device binding'),
-    item('discover', 'Discover IDEs', 'Inspect supported IDE configuration paths'),
-    item('help', 'Help', 'Show every command and option'),
+    item('restore', 'Restore'),
+    item('migrate', 'Migrate Repository'),
+    item('unbind', 'Unbind Repository'),
+    item('discover', 'Discover IDEs'),
+    item('help', 'Help'),
   ];
   return state.snapshot.repository.status === 'unbound'
     ? items.filter((candidate) => candidate.id === 'discover' || candidate.id === 'help')
@@ -353,13 +351,13 @@ function moreItems(state: MenuState): MenuItem[] {
 
 function restoreScopeItems(): MenuItem[] {
   return [
-    item('project-restore', 'Project', 'Use the current project Deploy backup'),
-    item('global-restore', 'Global', 'Use the latest device-global Deploy backup'),
+    item('project-restore', 'Project'),
+    item('global-restore', 'Global'),
   ];
 }
 
-function item(id: MenuItemId, label: string, description: string): MenuItem {
-  return { id, label, description };
+function item(id: MenuItemId, label: string): MenuItem {
+  return { id, label };
 }
 
 function clamp(value: number, length: number): number {
